@@ -1,82 +1,75 @@
 from DMF import *
 from DMF_single_column import *
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 
 # Run DMF single column; DMF double columns
 double = False
 
 
-# Visualization
-def heatmap(mtx):
-    sns.heatmap(mtx, linewidth=0.5)
-    plt.show()
+# Functions to generate stimulus data
+def ramp_input(start, end, T=1000):
+    return np.linspace(start, end, T)
 
-def plot_firing_rates(R):
-    fig, axes = plt.subplots(2, 2, figsize=(9, 8))
+def sine_input(amplitude, frequency, T=1000, dt=1e-3):
+    t = np.arange(0, T * dt, dt)
+    return amplitude * np.sin(2 * np.pi * frequency * t)
 
-    axes[0, 0].plot(R[0], label='excitatory')
-    axes[0, 0].plot(R[1], label='inhibitory')
-    axes[0, 0].set_title("Layer 2/3")
-    axes[0, 0].legend()
+def square_wave_input(amplitude, frequency, T=1000, dt=1e-3):
+    t = np.arange(0, T * dt, dt)
+    return amplitude * (np.sign(np.sin(2 * np.pi * frequency * t)) + 1) / 2
 
-    axes[0, 1].plot(R[2])
-    axes[0, 1].plot(R[3])
-    axes[0, 1].set_title("Layer 4")
+def gaussian_pulse(amplitude, center, width, T=1000):
+    t = np.linspace(0, T, T)
+    return amplitude * np.exp(-((t - center) ** 2) / (2 * width ** 2))
 
-    axes[1, 0].plot(R[4])
-    axes[1, 0].plot(R[5])
-    axes[1, 0].set_title("Layer 5")
+def random_noise_input(amplitude, T=1000):
+    return amplitude * np.random.randn(T)
 
-    axes[1, 1].plot(R[6])
-    axes[1, 1].plot(R[7])
-    axes[1, 1].set_title("Layer 6")
-
-    plt.show()
+def step_input(amplitude, step_time, T=1000):
+    signal = np.zeros(T)
+    signal[step_time:] = amplitude
+    return signal
 
 
-def heatmap_firing_rates(R):
-    # Plot the firing rate trajectories in a heatmap
-    plt.figure(figsize=(12, 6))  # Set the figure size
-    plt.imshow(R, aspect='auto', cmap='viridis', interpolation='nearest')
+def make_stim(stim, T):
+    # stim[2] *= np.array(ramp_input(0, 1, T))
+    # stim[3] *= np.array(ramp_input(0, 1, T))
 
-    # Add a colorbar
-    plt.colorbar(label="Value")
+    # stim[2] *= np.array(sine_input(1, 1, T))
+    # stim[3] *= np.array(sine_input(1, 1, T))
 
-    # Add labels
-    plt.title("Firing rates over time")
-    plt.xlabel("Time")
-    plt.ylabel("Layers")
+    # stim[2] *= square_wave_input(1, 1, T)
+    # stim[3] *= square_wave_input(1, 1, T)
 
-    # Show the plot
-    plt.show()
+    # stim[2] *= gaussian_pulse(1, 500, 100, T)
+    # stim[3] *= gaussian_pulse(1, 500, 100, T)
+
+    # stim[2] *= random_noise_input(1, T)
+    # stim[3] *= random_noise_input(1, T)
+
+    stim[2] *= step_input(1, 50, T)
+    stim[3] *= step_input(1, 50, T)
+
+    return stim
 
 
 if __name__ == '__main__':
 
+    # Initialize the column model
     column = SingleColumnDMF(area='MT')
+
+    # Make a stimulus input
     T = 1000
     stim = np.zeros((column.params['M'], T))
-
-    # Make a stimulus input using existing functions
     stim = column.set_stim_ext(stim=stim, nu=20.0, params=column.params)
-    stim = column.set_stim_bg(stim=stim, layer='L23', nu=20.0, params=column.params)
-    stim = column.set_stim_bg(stim=stim, layer='L4', nu=20.0, params=column.params)
-    stim = column.set_stim_bg(stim=stim, layer='L5', nu=20.0, params=column.params)
-    stim = column.set_stim_bg(stim=stim, layer='L6', nu=20.0, params=column.params)
+    stim = make_stim(stim, T)
 
-    heatmap_firing_rates(stim)
+    # Target other layers
+    # stim[4] = np.array(ramp_input(0, 1, T)) * 500
+    # stim[5] = np.array(ramp_input(0, 1, T)) * 500
 
-    # Make own stimulus input
-    #stim = np.array([500, 500, 500, 500, 500, 500, 500, 500])
-    #stim = np.array([100, 500, 200, 800, 50, 500, 400, 600])
-
-    # sim defaults are dt=0.0001, T=1000, state_var='R'
+    # Simulate the stimulation
     firing_rates = column.simulate(stim=stim, T=T, state_var='R')
-
-    plot_firing_rates(firing_rates)
-    heatmap_firing_rates((firing_rates))
 
     '''
     State variables cheat sheet
@@ -103,20 +96,20 @@ if __name__ == '__main__':
 
         # Initialize the stimulation
         stim = np.zeros(M)
-        stim = set_vis(stim, column='H', nu=20.0, params=params)  # for horizontal column
-        # stim = set_vis(stim, column='V', nu=20.0, params=params)  # for vertical column
+        stim = set_vis(stim, column='H', nu=20.0, params=params)  # horizontal column
+        stim = set_vis(stim, column='V', nu=20.0, params=params)  # vertical column
 
-        # stim = set_stimulation(stim, column='H', layer='L23', nu=20, params=params)
-        # stim = set_stimulation(stim, column='V', layer='L23', nu=20, params=params)
-        #
-        # stim = set_stimulation(stim, column='H', layer='L4', nu=20, params=params)
-        # stim = set_stimulation(stim, column='V', layer='L4', nu=20, params=params)
-        #
-        # stim = set_stimulation(stim, column='H', layer='L5', nu=20, params=params)
-        # stim = set_stimulation(stim, column='V', layer='L5', nu=20, params=params)
-        #
-        # stim = set_stimulation(stim, column='H', layer='L6', nu=20, params=params)
-        # stim = set_stimulation(stim, column='V', layer='L6', nu=20, params=params)
+        stim = set_stimulation(stim, column='H', layer='L23', nu=20, params=params)
+        stim = set_stimulation(stim, column='V', layer='L23', nu=20, params=params)
+
+        stim = set_stimulation(stim, column='H', layer='L4', nu=20, params=params)
+        stim = set_stimulation(stim, column='V', layer='L4', nu=20, params=params)
+
+        stim = set_stimulation(stim, column='H', layer='L5', nu=20, params=params)
+        stim = set_stimulation(stim, column='V', layer='L5', nu=20, params=params)
+
+        stim = set_stimulation(stim, column='H', layer='L6', nu=20, params=params)
+        stim = set_stimulation(stim, column='V', layer='L6', nu=20, params=params)
 
         # Total time steps
         T = 1000
@@ -131,7 +124,7 @@ if __name__ == '__main__':
             R[:, t] = state['R']
 
         # Plot the firing rate for each layer
-        # plot_firing_rates(R[:8])
-        # plot_firing_rates(R[8:])
+        # column.plot_firing_rates(R[:8])
+        # column.plot_firing_rates(R[8:])
 
-        heatmap_firing_rates(R)
+        column.heatmap_over_time(R)

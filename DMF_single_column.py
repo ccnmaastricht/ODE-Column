@@ -1,5 +1,7 @@
 import numpy as np
 import warnings
+import matplotlib.pyplot as plt
+
 
 warnings.filterwarnings("ignore")
 
@@ -13,7 +15,7 @@ class SingleColumnDMF:
         # Get parameters
         self.params = self.get_params(self.J_local, self.area)
 
-        # Intialize the starting state (all zeros?)
+        # Initialize the starting state (all zeros?)
         self.state = {}
         M = self.params['M']  # number of populations (=8)
         self.state['I'] = np.zeros(M)  # input current
@@ -22,7 +24,7 @@ class SingleColumnDMF:
         self.state['R'] = np.zeros(M)  # rate
         self.state['N'] = np.zeros(M)  # noise
 
-        self.T = 1000  # number of timesteps; can be changed from default (=1000) when simulating
+        self.T = 1000  # number of time steps; can be changed from default (=1000) when simulating
 
     def get_params(self, J_local, area):
         """
@@ -158,6 +160,8 @@ class SingleColumnDMF:
 
     def simulate(self, stim, dt=1e-4, T=1000, state_var='R'):
         '''
+        Runs a simulation of the defined column model with the given external input (stim).
+
         Args:
         stim (2D array):        external input; shape=(T,M)
         dt (float):             time step
@@ -166,19 +170,37 @@ class SingleColumnDMF:
         Returns:
         sim_output (2D array):  simulation output; shape=(M,T)
         '''
+
+        self.T = T
+
         # Array for saving requested simulation output (i.e. I. A. H. R. N.)
         sim_output = np.zeros((self.params['M'], T))
+
+        # Set background external input for stim
+        stim = self.set_stim_bg(stim=stim, layer='L23', nu=20.0, params=self.params)
+        stim = self.set_stim_bg(stim=stim, layer='L4', nu=20.0, params=self.params)
+        stim = self.set_stim_bg(stim=stim, layer='L5', nu=20.0, params=self.params)
+        stim = self.set_stim_bg(stim=stim, layer='L6', nu=20.0, params=self.params)
+
+        # Visualize the stimulus
+        self.heatmap_over_time(stim)
 
         # Run simulation
         for t in range(T):
             self.state = self.update_state(stim[:,t], dt)
             sim_output[:, t] = self.state[state_var]
 
+        # Visualize the firing rates
+        self.plot_firing_rates(sim_output)
+        self.heatmap_over_time(sim_output)
+
         return sim_output
 
-# specify which layer receives input
     def set_stim_bg(self, stim, layer, nu, params):
         """
+        Sets the background(?) stimulation for the specified layer, for both the excitatory
+        and the inhibitory population.
+
         Args:
         stim (array):   external input
         column (str):   column name
@@ -206,14 +228,15 @@ class SingleColumnDMF:
             W_ext = K_ext[i] * params['J_E']
             stim_col[idx + i] += W_ext * nu
 
-        # TODO: change this 1000 to self.T
-        stim += np.tile(stim_col, 1000)
+        stim += np.tile(stim_col, self.T)
 
         return stim
 
-    # layer = L4, i.e. only L4 receives external stimulus input
     def set_stim_ext(self, stim, nu, params):
         """
+        Sets the stimulation from the external input for layer 4, both the excitatory and
+        inhibitory population.
+
         Args:
         stim (array):   external input
         column (str):   column name
@@ -234,7 +257,54 @@ class SingleColumnDMF:
         stim_col[2] = W_ext[0] * nu  # excitatory in layer 4
         stim_col[3] = W_ext[1] * nu  # inhibitory in layer 4
 
-        # TODO: change this 1000 to self.T
-        stim += np.tile(stim_col, 1000)
+        stim += np.tile(stim_col, self.T)
 
         return stim
+
+    def plot_firing_rates(self, R):
+        '''
+        Plots the firing rates of all 8 populations over time.
+
+        Args:
+        R (2D array): firing rates over time, per population
+        '''
+        fig, axes = plt.subplots(2, 2, figsize=(9, 8))
+
+        axes[0, 0].plot(R[0], label='excitatory')
+        axes[0, 0].plot(R[1], label='inhibitory')
+        axes[0, 0].set_title("Layer 2/3")
+        axes[0, 0].legend()
+
+        axes[0, 1].plot(R[2])
+        axes[0, 1].plot(R[3])
+        axes[0, 1].set_title("Layer 4")
+
+        axes[1, 0].plot(R[4])
+        axes[1, 0].plot(R[5])
+        axes[1, 0].set_title("Layer 5")
+
+        axes[1, 1].plot(R[6])
+        axes[1, 1].plot(R[7])
+        axes[1, 1].set_title("Layer 6")
+
+        plt.show()
+
+    def heatmap_over_time(self, R):
+        '''
+        Plots any given data over time (firing rates, stimulation) for all 8 populations.
+
+        R (2D array): data over time, per population
+        '''
+        # Plot the trajectories over time in a heatmap
+        plt.figure(figsize=(12, 6))  # Set the figure size
+        plt.imshow(R, aspect='auto', cmap='viridis', interpolation='nearest')
+
+        # Add a colorbar
+        plt.colorbar(label="Value")
+
+        # Add labels
+        plt.xlabel("Time")
+        plt.ylabel("Layers")
+
+        # Show the plot
+        plt.show()
