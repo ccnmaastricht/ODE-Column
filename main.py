@@ -5,7 +5,6 @@ import seaborn as sns
 
 
 # Run DMF single column; DMF double columns
-single = False
 double = False
 
 
@@ -15,7 +14,7 @@ def heatmap(mtx):
     plt.show()
 
 def plot_firing_rates(R):
-    fig, axes = plt.subplots(2, 2, figsize=(10, 8))
+    fig, axes = plt.subplots(2, 2, figsize=(9, 8))
 
     axes[0, 0].plot(R[0], label='excitatory')
     axes[0, 0].plot(R[1], label='inhibitory')
@@ -37,65 +36,56 @@ def plot_firing_rates(R):
     plt.show()
 
 
+def heatmap_firing_rates(R):
+    # Plot the firing rate trajectories in a heatmap
+    plt.figure(figsize=(12, 6))  # Set the figure size
+    plt.imshow(R, aspect='auto', cmap='viridis', interpolation='nearest')
+
+    # Add a colorbar
+    plt.colorbar(label="Value")
+
+    # Add labels
+    plt.title("Firing rates over time")
+    plt.xlabel("Time")
+    plt.ylabel("Layers")
+
+    # Show the plot
+    plt.show()
+
 
 if __name__ == '__main__':
 
-    column_model = SingleColumnDMF(area='MT')
-    stim = ...
-    firing_rates = column_model.simulate(stim)
+    column = SingleColumnDMF(area='MT')
+    T = 1000
+    stim = np.zeros((column.params['M'], T))
 
+    # Make a stimulus input using existing functions
+    stim = column.set_stim_ext(stim=stim, nu=20.0, params=column.params)
+    stim = column.set_stim_bg(stim=stim, layer='L23', nu=20.0, params=column.params)
+    stim = column.set_stim_bg(stim=stim, layer='L4', nu=20.0, params=column.params)
+    stim = column.set_stim_bg(stim=stim, layer='L5', nu=20.0, params=column.params)
+    stim = column.set_stim_bg(stim=stim, layer='L6', nu=20.0, params=column.params)
 
+    heatmap_firing_rates(stim)
 
-    # Run the original single and/or double DMF
-    if single:
+    # Make own stimulus input
+    #stim = np.array([500, 500, 500, 500, 500, 500, 500, 500])
+    #stim = np.array([100, 500, 200, 800, 50, 500, 400, 600])
 
-        # Initialize the parameters
-        params = get_params_single(J_local=0.13, area='MT')
+    # sim defaults are dt=0.0001, T=1000, state_var='R'
+    firing_rates = column.simulate(stim=stim, T=T, state_var='R')
 
-        # Intialize the starting state (all zeros?)
-        state = {}
-        M = params['M']   # number of populations (=8)
-        state['I'] = np.zeros(M)    # input current
-        state['A'] = np.zeros(M)    # adaptation
-        state['H'] = np.zeros(M)    # membrane potential
-        state['R'] = np.zeros(M)    # rate
-        state['N'] = np.zeros(M)    # noise
+    plot_firing_rates(firing_rates)
+    heatmap_firing_rates((firing_rates))
 
-        # Initialize the stimulation
-        stim = np.zeros(M)
-        stim = set_vis_single(stim, column='H', nu=20.0, params=params)  # let's go with the horizontal column
-
-
-        # Total time steps
-        T = 1000
-
-        # Array for saving firing rate
-        R = np.zeros((M, T))
-
-        # Run simulation
-        # note: stim does not change for the entirety of the simulation
-        for t in range(T):
-            state = update_single(state, params, stim)
-            R[:, t] = state['H']
-
-        # Plot the firing rate for each layer
-        #plot_firing_rates(R)
-
-        # Plot the firing rate trajectories in a heatmap
-        plt.figure(figsize=(12, 6))  # Set the figure size
-        plt.imshow(R, aspect='auto', cmap='viridis', interpolation='nearest')
-
-        # Add a colorbar
-        plt.colorbar(label="Value")
-
-        # Add labels
-        plt.title("Firing rates over time")
-        plt.xlabel("Time")
-        plt.ylabel("Layers")
-
-        # Show the plot
-        plt.show()
-
+    '''
+    State variables cheat sheet
+    'I': input current
+    'A': adaptation
+    'H': membrane potential
+    'R': rate
+    'N': noise
+    '''
 
     if double:
 
@@ -116,6 +106,18 @@ if __name__ == '__main__':
         stim = set_vis(stim, column='H', nu=20.0, params=params)  # for horizontal column
         # stim = set_vis(stim, column='V', nu=20.0, params=params)  # for vertical column
 
+        # stim = set_stimulation(stim, column='H', layer='L23', nu=20, params=params)
+        # stim = set_stimulation(stim, column='V', layer='L23', nu=20, params=params)
+        #
+        # stim = set_stimulation(stim, column='H', layer='L4', nu=20, params=params)
+        # stim = set_stimulation(stim, column='V', layer='L4', nu=20, params=params)
+        #
+        # stim = set_stimulation(stim, column='H', layer='L5', nu=20, params=params)
+        # stim = set_stimulation(stim, column='V', layer='L5', nu=20, params=params)
+        #
+        # stim = set_stimulation(stim, column='H', layer='L6', nu=20, params=params)
+        # stim = set_stimulation(stim, column='V', layer='L6', nu=20, params=params)
+
         # Total time steps
         T = 1000
 
@@ -132,17 +134,4 @@ if __name__ == '__main__':
         # plot_firing_rates(R[:8])
         # plot_firing_rates(R[8:])
 
-        # Plot the firing rate trajectories in a heatmap
-        plt.figure(figsize=(12, 6))  # Set the figure size
-        plt.imshow(R, aspect='auto', cmap='viridis', interpolation='nearest')
-
-        # Add a colorbar
-        plt.colorbar(label="Value")
-
-        # Add labels
-        plt.title("Firing rates over time")
-        plt.xlabel("Time")
-        plt.ylabel("Layers")
-
-        # Show the plot
-        plt.show()
+        heatmap_firing_rates(R)
