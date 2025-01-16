@@ -26,6 +26,9 @@ class SingleColumnDMF:
 
         self.T = 1000  # number of time steps; can be changed from default (=1000) when simulating
 
+    def __repr__(self):
+        return f"SingleColumnDMF(J_local={self.J_local}, area={self.area})"
+
     def get_params(self, J_local, area):
         """
         Args:
@@ -51,7 +54,7 @@ class SingleColumnDMF:
         params['R'] = params['tau_m'] / params['C_m']
 
         # POPULATION SIZES (N)
-        # N holds the population sizes for 8 populations (two dmf columns
+        # N holds the population sizes for 8 populations
         if area == 'V1':
             N = np.array([47386, 13366, 70387, 17597, 20740, 4554, 19839, 4063])  # V1
         if area == 'V2':
@@ -212,6 +215,7 @@ class SingleColumnDMF:
         stim (array):   external input
         """
 
+        self.T = np.shape(stim)[1]
         stim_col = np.zeros((self.params['M'],1))
 
         if layer == 'L23':
@@ -247,6 +251,7 @@ class SingleColumnDMF:
         stim (array):   external input
         """
 
+        self.T = np.shape(stim)[1]
         stim_col = np.zeros((self.params['M'], 1))
 
         P_ext = [0.0983, 0.0619]

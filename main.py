@@ -41,14 +41,14 @@ def make_stim(stim, T):
     # stim[2] *= square_wave_input(1, 1, T)
     # stim[3] *= square_wave_input(1, 1, T)
 
-    # stim[2] *= gaussian_pulse(1, 500, 100, T)
-    # stim[3] *= gaussian_pulse(1, 500, 100, T)
+    stim[2] *= gaussian_pulse(1, 500, 100, T)
+    stim[3] *= gaussian_pulse(1, 500, 100, T)
 
     # stim[2] *= random_noise_input(1, T)
     # stim[3] *= random_noise_input(1, T)
 
-    stim[2] *= step_input(1, 50, T)
-    stim[3] *= step_input(1, 50, T)
+    # stim[2] *= step_input(1, 50, T)
+    # stim[3] *= step_input(1, 50, T)
 
     return stim
 
