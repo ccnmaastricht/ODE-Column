@@ -7,6 +7,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+# from torchdiffeq import odeint_adjoint as odeint
+from torchdiffeq import odeint
+
 import matplotlib.pyplot as plt
 
 
@@ -29,10 +32,6 @@ parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', action='store_true')
 args = parser.parse_args()
 
-if args.adjoint:
-    from torchdiffeq import odeint_adjoint as odeint
-else:
-    from torchdiffeq import odeint
 
 # Run on GPU if available
 device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
@@ -43,7 +42,7 @@ def makedirs(dirname):
     if not os.path.exists(dirname):
         os.makedirs(dirname)
 
-if vis_training:
+if vis_training or niters < 10:
     makedirs('png')
     fig = plt.figure(figsize=(12, 4), facecolor='white')
     ax_traj = fig.add_subplot(131, frameon=False)
@@ -120,9 +119,9 @@ def get_batch(true_y, t):
     # default batch_size=20
     s = torch.from_numpy(  # selects 20 random evaluation points along the trajectories
         np.random.choice(np.arange(args.data_size - args.batch_time, dtype=np.int64), args.batch_size, replace=False))
-    batch_y0 = true_y[s]  # (M, D)
+    batch_y0 = true_y[s]  # (M, 1, D)
     batch_t = t[:args.batch_time]  # (T)
-    batch_y = torch.stack([true_y[s + i] for i in range(args.batch_time)], dim=0)  # (T, M, D)
+    batch_y = torch.stack([true_y[s + i] for i in range(args.batch_time)], dim=0)  # (T, M, 1, D)
 
     batch_y0_vis = batch_y0.squeeze(1)
     batch_y0_vis = torch.cat((s.unsqueeze(1), batch_y0_vis), dim=1)
@@ -138,7 +137,7 @@ class ODEFunc(nn.Module):
         super(ODEFunc, self).__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(2, 50),
+            nn.Linear(4, 50),
             nn.Tanh(),
             nn.Linear(50, 2),
         )
@@ -149,7 +148,9 @@ class ODEFunc(nn.Module):
                 nn.init.constant_(m.bias, val=0)
 
     def forward(self, t, y):
-        return self.net(y ** 3)
+        x = torch.ones(y.shape) * 2  # for now, specify the input here
+        return self.net(torch.cat((y, x), dim=-1))
+        # return self.net(y)
 
 
 # Test ODE
@@ -163,38 +164,21 @@ def test_ODE(func, true_y0, t, true_y):
 # Initialize the true data (spiral)
 true_y0 = torch.tensor([[2., 0.]]).to(device)                           # this is the initial condition - starting point to compute true_y
 t = torch.linspace(0., 25., args.data_size).to(device)
-true_A = torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]).to(device)
+true_A = torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]).to(device)           # these are te dynamics that change y (and form spiral)
+# x = torch.ones((args.data_size, 2)).to(device)                          # added to represent the input
+X = torch.ones((1, 2)).to(device) * 2
 
 class Lambda(nn.Module):
+    def __init__(self, x):
+        super(Lambda, self).__init__()
+        self.x = x
     def forward(self, t, y):
-        return torch.mm(y ** 3, true_A)
+        return torch.mm(y * self.x, true_A)
 
-with torch.no_grad():                                                   # no gradients are computed, because we don't need to train anything
-    true_y = odeint(Lambda(), true_y0, t, method='dopri5')              # use ODE to generate true_y using Lambda() as a function instead of a NN
+with torch.no_grad():  # no gradients are computed, because we don't need to train anything
+    true_y = odeint(Lambda(X), true_y0, t, method='dopri5')              # use ODE to generate true_y using Lambda() as a function instead of a NN
 
-# Visualize the input
-# fig = plt.figure(figsize=(12, 4), facecolor='white')
-#
-# ax_traj = fig.add_subplot(131, frameon=False)
-# ax_traj.cla()
-# ax_traj.set_title('Trajectories')
-# ax_traj.set_xlabel('t')
-# ax_traj.set_ylabel('x,y')
-# ax_traj.plot(t.cpu().numpy(), true_y.cpu().numpy()[:, 0, 0], t.cpu().numpy(), true_y.cpu().numpy()[:, 0, 1],
-#              'g-')
-# ax_traj.set_xlim(t.cpu().min(), t.cpu().max())
-# ax_traj.set_ylim(-2, 2)
-#
-# ax_phase = fig.add_subplot(132, frameon=False)
-# ax_phase.cla()
-# ax_phase.set_title('Phase Portrait')
-# ax_phase.set_xlabel('x')
-# ax_phase.set_ylabel('y')
-# ax_phase.plot(true_y.cpu().numpy()[:, 0, 0], true_y.cpu().numpy()[:, 0, 1], 'g-')
-# ax_phase.set_xlim(-2, 2)
-# ax_phase.set_ylim(-2, 2)
-#
-# plt.show()
+
 
 ### Run ###
 
@@ -221,9 +205,20 @@ for itr in range(1, niters+1):
 
     if vis_input:
         time_ax = t * args.data_size / t[-1]
+
+        fig = plt.figure(figsize=(8, 4), facecolor='white')
+        plt.subplot(1, 2, 1)
         plt.plot(time_ax, true_y[:, 0, 0], time_ax, true_y[:, 0, 1])
         plt.scatter(batch_y0_vis[:, 0], batch_y0_vis[:, 1])
         plt.scatter(batch_y0_vis[:, 0], batch_y0_vis[:, 2])
+
+        plt.subplot(1, 2, 2)
+        pred_y, loss = test_ODE(func, true_y0, t, true_y)
+        plt.plot(t, true_y[:, 0, 0], t, true_y[:, 0, 1], 'g-')
+        plt.plot(t, pred_y[:, 0, 0], '--', t, pred_y[:, 0, 1], 'b--')
+
+        visualize(true_y, pred_y, func, ii)
+
         plt.show()
 
     if vis_training:
