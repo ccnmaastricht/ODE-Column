@@ -1,3 +1,4 @@
+import numpy as np
 from DMF import *
 from DMF_single_column import *
 
