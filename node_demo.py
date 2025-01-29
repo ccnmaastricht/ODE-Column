@@ -55,11 +55,11 @@ def visualize(true_y, pred_y, odefunc, ii):
     ax_traj.set_title('Trajectories')
     ax_traj.set_xlabel('t')
     ax_traj.set_ylabel('x,y')
-    ax_traj.plot(t.cpu().numpy(), true_y.cpu().numpy()[:, 0, 0], t.cpu().numpy(), true_y.cpu().numpy()[:, 0, 1],
+    ax_traj.plot(t_.cpu().numpy(), true_y.cpu().numpy()[:, 0, 0], t_.cpu().numpy(), true_y.cpu().numpy()[:, 0, 1],
                  'g-')
-    ax_traj.plot(t.cpu().numpy(), pred_y.cpu().numpy()[:, 0, 0], '--', t.cpu().numpy(),
+    ax_traj.plot(t_.cpu().numpy(), pred_y.cpu().numpy()[:, 0, 0], '--', t_.cpu().numpy(),
                  pred_y.cpu().numpy()[:, 0, 1], 'b--')
-    ax_traj.set_xlim(t.cpu().min(), t.cpu().max())
+    ax_traj.set_xlim(t_.cpu().min(), t_.cpu().max())
     ax_traj.set_ylim(-2, 2)
 
     ax_phase.cla()
@@ -71,45 +71,25 @@ def visualize(true_y, pred_y, odefunc, ii):
     ax_phase.set_xlim(-2, 2)
     ax_phase.set_ylim(-2, 2)
 
-    ax_vecfield.cla()
-    ax_vecfield.set_title('Learned Vector Field')
-    ax_vecfield.set_xlabel('x')
-    ax_vecfield.set_ylabel('y')
-
-    y, x = np.mgrid[-2:2:21j, -2:2:21j]
-    dydt = odefunc(0, torch.Tensor(np.stack([x, y], -1).reshape(21 * 21, 2)).to(device)).cpu().detach().numpy()
-    mag = np.sqrt(dydt[:, 0] ** 2 + dydt[:, 1] ** 2).reshape(-1, 1)
-    dydt = (dydt / mag)
-    dydt = dydt.reshape(21, 21, 2)
-
-    ax_vecfield.streamplot(x, y, dydt[:, :, 0], dydt[:, :, 1], color="black")
-    ax_vecfield.set_xlim(-2, 2)
-    ax_vecfield.set_ylim(-2, 2)
+    # ax_vecfield.cla()
+    # ax_vecfield.set_title('Learned Vector Field')
+    # ax_vecfield.set_xlabel('x')
+    # ax_vecfield.set_ylabel('y')
+    #
+    # y, x = np.mgrid[-2:2:21j, -2:2:21j]
+    # dydt = odefunc(0, torch.Tensor(np.stack([x, y], -1).reshape(21 * 21, 2)).to(device)).cpu().detach().numpy()
+    # mag = np.sqrt(dydt[:, 0] ** 2 + dydt[:, 1] ** 2).reshape(-1, 1)
+    # dydt = (dydt / mag)
+    # dydt = dydt.reshape(21, 21, 2)
+    #
+    # ax_vecfield.streamplot(x, y, dydt[:, :, 0], dydt[:, :, 1], color="black")
+    # ax_vecfield.set_xlim(-2, 2)
+    # ax_vecfield.set_ylim(-2, 2)
 
     fig.tight_layout()
     plt.savefig('png/{:03d}'.format(ii))
     plt.draw()
     plt.pause(0.001)
-
-
-# Track time and loss while training
-class RunningAverageMeter(object):
-    """Computes and stores the average and current value"""
-
-    def __init__(self, momentum=0.99):
-        self.momentum = momentum
-        self.reset()
-
-    def reset(self):
-        self.val = None
-        self.avg = 0
-
-    def update(self, val):
-        if self.val is None:
-            self.avg = val
-        else:
-            self.avg = self.avg * self.momentum + val * (1 - self.momentum)
-        self.val = val
 
 
 # Get training batch
@@ -137,7 +117,7 @@ class ODEFunc(nn.Module):
         super(ODEFunc, self).__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(4, 50),
+            nn.Linear(3, 50),
             nn.Tanh(),
             nn.Linear(50, 2),
         )
@@ -147,73 +127,92 @@ class ODEFunc(nn.Module):
                 nn.init.normal_(m.weight, mean=0, std=0.1)
                 nn.init.constant_(m.bias, val=0)
 
-    def forward(self, t, y):
-        x = torch.zeros(y.shape) + 1  # for now, specify the input here
-        y_x = torch.cat((y, x), dim=-1)
-        return self.net(y_x)
+    def forward(self, t, y, u):
+        u_reshape = torch.zeros(y.shape) + u
+        y_u = torch.cat((y, u_reshape), dim=-1)
+        try:
+            y_u = y_u[:,:,:-1]
+        except:
+            y_u = y_u[:,:-1]
+        return self.net(y_u)
         # return self.net(y)
 
 
 # Test ODE
-def test_ODE(func, true_y0, t, true_y):
+def test_ODE(func, true_y0, t_, true_y):
     with torch.no_grad():
-        pred_y = odeint(func, true_y0, t)
+        # pred_y = odeint(func, true_y0, t_)
+        pred_y = odeint(lambda t, y: func(t, y, time_varying_input(t)), true_y0, t_)
         loss = torch.mean(torch.abs(pred_y - true_y))
     return pred_y, loss
 
 
 # Initialize the true data (spiral)
 true_y0 = torch.tensor([[2., 0.]]).to(device)                           # this is the initial condition - starting point to compute true_y
-t = torch.linspace(0., 25., args.data_size).to(device)
+t_ = torch.linspace(0., 25., args.data_size).to(device)
 # true_A = torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]).to(device)           # these are the dynamics that change y (and form spiral)
 # true_A = torch.tensor([[0.0, 2.0], [-2.0, 0.0]]).to(device)             # spiraling trajectory that does not get smaller (so circle :)
 # x = torch.ones((args.data_size, 1)).to(device)
-X = torch.zeros((1, 1)).to(device) + 1                                  # represents the input
+# X = torch.zeros((1, 1)).to(device) + 1                                  # represents the input
+
+def time_varying_input(t):
+    '''
+    Define the time-varying input (sine wave)
+    '''
+    # return torch.sin(t)
+    # return torch.zeros((t.shape))
+    return 2 * torch.sigmoid((t - 3) / 3) - 1
 
 def A_matrix(x, y, u):
+    '''
+    Defines A, matrix that represents the underlying dynamics
+    that have to be learned by the ODE
+    '''
     A = torch.tensor([
-        [(u - x**2 - y**2),     1.0],
-        [-1.0,                  (u - x**2 - y**2)]
+        [(u - x**2 - y**2),     2.0],
+        [-2.0,                  (u - x**2 - y**2)]
     ])
     return A
 
 class Lambda(nn.Module):
-    def forward(self, t, y):
-        y_1 = y[:,0].item()  # 1st item of y
-        y_2 = y[:,1].item()  # 2nd item of y
-        u   = X[:,0].item()  # input
+    def forward(self, t, y, u):
+        y_1 = y[:,0].item()     # 1st item of y
+        y_2 = y[:,1].item()     # 2nd item of y
+        u   = u.item()          # input
         return torch.mm(y, A_matrix(y_1, y_2, u))
 
 with torch.no_grad():  # no gradients are computed, because we don't need to train anything
-    true_y = odeint(Lambda(), true_y0, t, method='dopri5')              # use ODE to generate true_y using Lambda() as a function instead of a NN
-
-
+    ode_func = Lambda()
+    true_y = odeint(lambda t, y: ode_func(t, y, time_varying_input(t)),
+                    true_y0, t_, method='dopri5')                        # use ODE to generate true_y using Lambda() as a function instead of a NN
 
 ### Run ###
 
 func = ODEFunc().to(device)                                             # this is the NN that specifies the differential equations function
 optimizer = optim.RMSprop(func.parameters(), lr=1e-3)                   # optimizer base class, should optimize NN parameters
 
-time_meter = RunningAverageMeter(0.97)
-loss_meter = RunningAverageMeter(0.97)
 end = time.time()
 ii = 0
 
 for itr in range(1, niters+1):
     optimizer.zero_grad()                                               # set gradients to zero (already used to update weights with loss.backward()
-    batch_y0, batch_t, batch_y, batch_y0_vis = get_batch(true_y, t)     # we get 20 random data samples, each lasting 10 time steps (with set defaults)
+    # Run with batches
+    batch_y0, batch_t, batch_y, batch_y0_vis = get_batch(true_y, t_)     # we get 20 random data samples, each lasting 10 time steps (with set defaults)
+    pred_y = odeint(lambda t, y: func(t, y, time_varying_input(t)),
+                    batch_y0, batch_t).to(device)                       # use the ODE with the NN as func to predict the next 10 time steps from the 20 samples
+    # pred_y = odeint(func, batch_y0, batch_t).to(device)
+    loss = torch.mean(torch.abs(pred_y - batch_y))  # compute the loss
 
-    pred_y = odeint(func, batch_y0, batch_t).to(device)                 # use the ODE with the NN as func to predict the next 10 time steps from the 20 samples
-    loss = torch.mean(torch.abs(pred_y - batch_y))                      # compute the loss
+    # Run without batches
+    # pred_y = odeint(lambda t, y: func(t, y, time_varying_input(t)), true_y0, t_).to(device)
+    # loss = torch.mean(torch.abs(pred_y - true_y))
+
     loss.backward()                                                     # compute gradients
     optimizer.step()                                                    # update parameters
 
-    # Tracking and visualizing
-    time_meter.update(time.time() - end)
-    loss_meter.update(loss.item())
-
+    # Visualizing
     if vis_input:
-        time_ax = t * args.data_size / t[-1]
+        time_ax = t_ * args.data_size / t_[-1]
 
         fig = plt.figure(figsize=(8, 4), facecolor='white')
         plt.subplot(1, 2, 1)
@@ -222,17 +221,16 @@ for itr in range(1, niters+1):
         plt.scatter(batch_y0_vis[:, 0], batch_y0_vis[:, 2])
 
         plt.subplot(1, 2, 2)
-        pred_y, loss = test_ODE(func, true_y0, t, true_y)
-        plt.plot(t, true_y[:, 0, 0], t, true_y[:, 0, 1], 'g-')
-        plt.plot(t, pred_y[:, 0, 0], '--', t, pred_y[:, 0, 1], 'b--')
+        plt.plot(t_.detach().numpy(), time_varying_input(t_))
 
+        pred_y, loss = test_ODE(func, true_y0, t_, true_y)
         visualize(true_y, pred_y, func, ii)
 
         plt.show()
 
     if vis_training:
         if itr % args.test_freq == 0:
-            pred_y, loss = test_ODE(func, true_y0, t, true_y)
+            pred_y, loss = test_ODE(func, true_y0, t_, true_y)
             print('Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))
             visualize(true_y, pred_y, func, ii)
             ii += 1
