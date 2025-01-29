@@ -14,9 +14,9 @@ import matplotlib.pyplot as plt
 
 
 # Set params
-niters = 1
-vis_input = True
-vis_training = False
+niters = 2000
+vis_input = False
+vis_training = True
 
 
 # Running from terminal
@@ -148,8 +148,9 @@ class ODEFunc(nn.Module):
                 nn.init.constant_(m.bias, val=0)
 
     def forward(self, t, y):
-        x = torch.ones(y.shape) * 2  # for now, specify the input here
-        return self.net(torch.cat((y, x), dim=-1))
+        x = torch.zeros(y.shape) + 1  # for now, specify the input here
+        y_x = torch.cat((y, x), dim=-1)
+        return self.net(y_x)
         # return self.net(y)
 
 
@@ -164,19 +165,27 @@ def test_ODE(func, true_y0, t, true_y):
 # Initialize the true data (spiral)
 true_y0 = torch.tensor([[2., 0.]]).to(device)                           # this is the initial condition - starting point to compute true_y
 t = torch.linspace(0., 25., args.data_size).to(device)
-true_A = torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]).to(device)           # these are te dynamics that change y (and form spiral)
-# x = torch.ones((args.data_size, 2)).to(device)                          # added to represent the input
-X = torch.ones((1, 2)).to(device) * 2
+# true_A = torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]).to(device)           # these are the dynamics that change y (and form spiral)
+# true_A = torch.tensor([[0.0, 2.0], [-2.0, 0.0]]).to(device)             # spiraling trajectory that does not get smaller (so circle :)
+# x = torch.ones((args.data_size, 1)).to(device)
+X = torch.zeros((1, 1)).to(device) + 1                                  # represents the input
+
+def A_matrix(x, y, u):
+    A = torch.tensor([
+        [(u - x**2 - y**2),     1.0],
+        [-1.0,                  (u - x**2 - y**2)]
+    ])
+    return A
 
 class Lambda(nn.Module):
-    def __init__(self, x):
-        super(Lambda, self).__init__()
-        self.x = x
     def forward(self, t, y):
-        return torch.mm(y * self.x, true_A)
+        y_1 = y[:,0].item()  # 1st item of y
+        y_2 = y[:,1].item()  # 2nd item of y
+        u   = X[:,0].item()  # input
+        return torch.mm(y, A_matrix(y_1, y_2, u))
 
 with torch.no_grad():  # no gradients are computed, because we don't need to train anything
-    true_y = odeint(Lambda(X), true_y0, t, method='dopri5')              # use ODE to generate true_y using Lambda() as a function instead of a NN
+    true_y = odeint(Lambda(), true_y0, t, method='dopri5')              # use ODE to generate true_y using Lambda() as a function instead of a NN
 
 
 
