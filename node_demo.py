@@ -12,7 +12,6 @@ from torchdiffeq import odeint
 
 import matplotlib.pyplot as plt
 
-
 # Set params
 niters = 2000
 vis_input = False
@@ -116,10 +115,18 @@ class ODEFunc(nn.Module):
     def __init__(self):
         super(ODEFunc, self).__init__()
 
+        # self.net = nn.Sequential(
+        #     nn.Linear(3, 50),
+        #     nn.Tanh(),
+        #     nn.Linear(50, 3),
+        # )
+
         self.net = nn.Sequential(
-            nn.Linear(3, 50),
-            nn.Tanh(),
-            nn.Linear(50, 2),
+            nn.Linear(3, 100),
+            nn.ReLU(),  # ReLU to add nonlinearity
+            nn.Linear(100, 100),
+            nn.ReLU(),
+            nn.Linear(100, 3)
         )
 
         for m in self.net.modules():
@@ -127,47 +134,41 @@ class ODEFunc(nn.Module):
                 nn.init.normal_(m.weight, mean=0, std=0.1)
                 nn.init.constant_(m.bias, val=0)
 
-    def forward(self, t, y, u):
-        u_reshape = torch.zeros(y.shape) + u
-        y_u = torch.cat((y, u_reshape), dim=-1)
-        try:
-            y_u = y_u[:,:,:-1]
-        except:
-            y_u = y_u[:,:-1]
-        return self.net(y_u)
-        # return self.net(y)
+    def forward(self, t, xyu):
+        # u_reshape = torch.zeros(y.shape) + u
+        # y_u = torch.cat((y, u_reshape), dim=-1)
+        # try:
+        #     y_u = y_u[:,:,:-1]
+        # except:
+        #     y_u = y_u[:,:-1]
+        # return self.net(y_u)
+        return self.net(xyu)
 
 
 # Test ODE
 def test_ODE(func, true_y0, t_, true_y):
     with torch.no_grad():
-        # pred_y = odeint(func, true_y0, t_)
-        pred_y = odeint(lambda t, y: func(t, y, time_varying_input(t)), true_y0, t_)
+        pred_y = odeint(func, true_y0, t_)
+        # pred_y = odeint(lambda t, y: func(t, y, time_varying_input(t)), true_y0, t_)
         loss = torch.mean(torch.abs(pred_y - true_y))
     return pred_y, loss
 
 
 # Initialize the true data (spiral)
-true_y0 = torch.tensor([[2., 0.]]).to(device)                           # this is the initial condition - starting point to compute true_y
-t_ = torch.linspace(0., 25., args.data_size).to(device)
-# true_A = torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]).to(device)           # these are the dynamics that change y (and form spiral)
-# true_A = torch.tensor([[0.0, 2.0], [-2.0, 0.0]]).to(device)             # spiraling trajectory that does not get smaller (so circle :)
-# x = torch.ones((args.data_size, 1)).to(device)
-# X = torch.zeros((1, 1)).to(device) + 1                                  # represents the input
-
 def time_varying_input(t):
     '''
     Define the time-varying input (sine wave)
     '''
     # return torch.sin(t)
-    # return torch.zeros((t.shape))
+    # return torch.zeros((t.shape)) + 1
     return 2 * torch.sigmoid((t - 3) / 3) - 1
 
-def A_matrix(x, y, u):
+def A_matrix(xy, u):
     '''
     Defines A, matrix that represents the underlying dynamics
     that have to be learned by the ODE
     '''
+    x, y, u = xy[:,0].item(), xy[:,1].item(), u.item()
     A = torch.tensor([
         [(u - x**2 - y**2),     2.0],
         [-2.0,                  (u - x**2 - y**2)]
@@ -175,16 +176,31 @@ def A_matrix(x, y, u):
     return A
 
 class Lambda(nn.Module):
-    def forward(self, t, y, u):
-        y_1 = y[:,0].item()     # 1st item of y
-        y_2 = y[:,1].item()     # 2nd item of y
-        u   = u.item()          # input
-        return torch.mm(y, A_matrix(y_1, y_2, u))
+    def forward(self, t, xyu, u):
+        xy = xyu[:,:-1]
+        u = torch.tensor([[u]])
+        forward_xy = torch.mm(xy, A_matrix(xy, u))  # apply matrix A
+        forward_xyu = torch.concat((forward_xy, u), dim=1)
+        return forward_xyu
+
+t_ = torch.linspace(0., 25., args.data_size).to(device)
+true_y0 = torch.tensor([[2., 0., time_varying_input(t_[0])]]).to(device)                           # starting point to compute true_y (x, y, u)
+u_ = time_varying_input(t_)
+# true_A = torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]).to(device)           # these are the dynamics that change y (and form spiral)
+# true_A = torch.tensor([[0.0, 2.0], [-2.0, 0.0]]).to(device)             # spiraling trajectory that does not get smaller (so circle :)
+# x = torch.ones((args.data_size, 1)).to(device)
+# X = torch.zeros((1, 1)).to(device) + 1                                  # represents the input
 
 with torch.no_grad():  # no gradients are computed, because we don't need to train anything
-    ode_func = Lambda()
-    true_y = odeint(lambda t, y: ode_func(t, y, time_varying_input(t)),
+    lambda_func = Lambda()
+    # true_y = odeint(lambda_func, true_y0, t_, method='dopri5')
+    true_y = odeint(lambda t, y: lambda_func(t, y, time_varying_input(t)),
                     true_y0, t_, method='dopri5')                        # use ODE to generate true_y using Lambda() as a function instead of a NN
+# Substitute input u with the real input, not given by odeint
+blep = time_varying_input(t_).unsqueeze(1)
+true_y[:,:,2] = blep
+
+
 
 ### Run ###
 
@@ -198,14 +214,11 @@ for itr in range(1, niters+1):
     optimizer.zero_grad()                                               # set gradients to zero (already used to update weights with loss.backward()
     # Run with batches
     batch_y0, batch_t, batch_y, batch_y0_vis = get_batch(true_y, t_)     # we get 20 random data samples, each lasting 10 time steps (with set defaults)
-    pred_y = odeint(lambda t, y: func(t, y, time_varying_input(t)),
-                    batch_y0, batch_t).to(device)                       # use the ODE with the NN as func to predict the next 10 time steps from the 20 samples
-    # pred_y = odeint(func, batch_y0, batch_t).to(device)
+    # pred_y = odeint(lambda t, y: func(t, y, time_varying_input(t)),
+    #                 batch_y0, batch_t).to(device)                       # use the ODE with the NN as func to predict the next 10 time steps from the 20 samples
+    pred_y = odeint(func, batch_y0, batch_t).to(device)
     loss = torch.mean(torch.abs(pred_y - batch_y))  # compute the loss
 
-    # Run without batches
-    # pred_y = odeint(lambda t, y: func(t, y, time_varying_input(t)), true_y0, t_).to(device)
-    # loss = torch.mean(torch.abs(pred_y - true_y))
 
     loss.backward()                                                     # compute gradients
     optimizer.step()                                                    # update parameters
@@ -222,6 +235,7 @@ for itr in range(1, niters+1):
 
         plt.subplot(1, 2, 2)
         plt.plot(t_.detach().numpy(), time_varying_input(t_))
+        plt.plot(t_.detach().numpy(), true_y[:, 0, 2])
 
         pred_y, loss = test_ODE(func, true_y0, t_, true_y)
         visualize(true_y, pred_y, func, ii)
