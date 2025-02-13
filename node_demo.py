@@ -11,12 +11,13 @@ from torchdiffeq import odeint, odeint_adjoint
 import matplotlib.pyplot as plt
 
 # Set params
+nr_samples = 2000
 vis_training = True
-data_size = 1000
+total_time = 1000
+batch_size = 16
 batch_time = 10
-batch_size = 20
-niters = 1000
-test_freq = 20
+nr_eval_points = 20
+test_freq = batch_size
 
 
 # Run on GPU 0 if available
@@ -28,7 +29,7 @@ def makedirs(dirname):
     if not os.path.exists(dirname):
         os.makedirs(dirname)
 
-def visualize(true_y, pred_y, odefunc, ii, loss):
+def visualize(true_y, pred_y, odefunc, ii, val_loss, train_loss):
     makedirs('png')
     fig = plt.figure(figsize=(12, 4), facecolor='white')
     ax_input = fig.add_subplot(131, frameon=False)
@@ -36,7 +37,8 @@ def visualize(true_y, pred_y, odefunc, ii, loss):
     ax_phase = fig.add_subplot(133, frameon=False)
     #ax_vecfield = fig.add_subplot(133, frameon=False)
 
-    fig.text(0.5, 0.03, f"Loss: {loss:.4f}", ha='center', fontsize=12, fontweight='bold')
+    fig.text(0.4, 0.03, f"Validation loss: {val_loss:.4f}", ha='center', fontsize=12, fontweight='bold')
+    fig.text(0.6, 0.03, f"Training loss: {train_loss:.4f}", ha='center', fontsize=12, fontweight='bold')
 
     ax_input.cla()
     ax_input.set_title('Input')
@@ -116,8 +118,6 @@ def time_varying_input(t, a, b, c, d):
     Define the time-varying input (sine wave)
     '''
     return a * torch.sin(t * b + c) + d
-    # return torch.zeros((t.shape)) + 1
-    # return 2 * torch.sigmoid((t - 3) / 3) - 1
 
 def A_matrix(xy, u):
     '''
@@ -146,22 +146,22 @@ class Lambda(nn.Module):
 
 def get_batch(true_y, t):
     '''
-    Returns training batch of 20 samples
+    Returns training batch of 20 time samples
     '''
     s = torch.from_numpy(  # selects 20 random evaluation points along the trajectories
-        np.random.choice(np.arange(data_size - batch_time, dtype=np.int64), batch_size, replace=False))
-    batch_y0 = true_y[s]  # (M, 1, D)
+        np.random.choice(np.arange(total_time - batch_time, dtype=np.int64), nr_eval_points, replace=False))
+    batch_y0 = true_y[s, :, :]  # (eval_points, training samples, dims)
     batch_t = t[:batch_time]  # (T)
-    batch_y = torch.stack([true_y[s + i] for i in range(batch_time)], dim=0)  # (T, M, 1, D)
+    batch_y = torch.stack([true_y[s + i, :, :] for i in range(batch_time)], dim=0)  # (T, eval_points, training samples, dims)
 
     return batch_y0.to(device), batch_t.to(device), batch_y.to(device)
 
 
 def make_ds():
-    nr_samples = int(niters + (niters/test_freq))
-    ds = torch.empty((nr_samples, data_size, 1, 3))
+    total_samples = int(nr_samples + (nr_samples / test_freq)) + 1  # +1 for good measure
+    ds = torch.empty((total_time, total_samples, 3))
 
-    for itr in range(nr_samples):
+    for itr in range(total_samples):
         # Initialize true_y0
         y_0_x = np.random.uniform(-2, 2)
         y_0_y = np.random.uniform(-2, 2)
@@ -170,12 +170,12 @@ def make_ds():
 
         # Sine wave params
         # a = np.random.uniform(0.1, 2.0)     # amplitude, between 0.1 and 2.0
-        b = np.random.uniform(0.1, 0.5)     # frequency, between 0.1 and 0.5
-        # c = (torch.rand(1) - 0.5) * 2 * torch.pi      # horizontal shift
+        # b = np.random.uniform(0.1, 0.5)     # frequency, between 0.1 and 0.5
+        c = (torch.rand(1) - 0.5) * 2 * torch.pi      # horizontal shift
         # d = np.random.uniform(-0.5, 0.5)         # vertical shift, between -0.5 and 5
         a = 1
-        # b = 0.25
-        c = 0
+        b = 0.25
+        # c = 0
         d = 0
 
         # Make the sine wave with ODE
@@ -189,15 +189,15 @@ def make_ds():
         true_y[:, :, 2] = u_
 
         # Add to ds
-        assert ds[itr].shape == true_y.shape
-        ds[itr] = true_y
+        assert ds[:, itr, :].shape == true_y[:, 0, :].shape
+        ds[:, itr, :] = true_y[:, 0, :]
 
-    return ds[:niters], ds[niters:]
+    return ds[:, :nr_samples, :], ds[:, nr_samples:, :]
 
 
 ### Run ###
 
-t_ = torch.linspace(0., 25., data_size).to(device)
+t_ = torch.linspace(0., 25., total_time).to(device)
 train_ds, val_ds = make_ds()
 
 func = ODEFunc().to(device)                                             # this is the NN that odeint uses as a function
@@ -206,11 +206,14 @@ optimizer = optim.RMSprop(func.parameters(), lr=1e-3)                   # optimi
 end = time.time()
 ii = 0
 
-for itr in range(1, niters+1):
+for itr in range(0, nr_samples, batch_size):
     optimizer.zero_grad()                                               # set gradients to zero (already used to update weights with loss.backward()
 
     # Train with batches
-    true_y = train_ds[itr-1]
+    if itr+batch_size < len(train_ds):
+        true_y = train_ds[:, itr:itr+batch_size, :]
+    else:
+        true_y = train_ds[:, itr:, :]
     batch_y0, batch_t, batch_y = get_batch(true_y, t_)                  # we get 20 random data samples, each lasting 10 time steps (with set defaults)
     pred_y = odeint(func, batch_y0, batch_t).to(device)                 # use the ODE with the NN as func to predict the next 10 time steps from the 20 samples
     loss = torch.mean(torch.abs(pred_y - batch_y))                      # compute the loss
@@ -220,11 +223,13 @@ for itr in range(1, niters+1):
 
     # Visualizing
     if vis_training:
-        if itr % test_freq == 0:
-            true_y = val_ds[ii]
-            pred_y, loss = val_ODE(func, t_, true_y)
-            print('Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))
-            visualize(true_y, pred_y, func, ii, loss.item())
-            ii += 1
+        if itr + batch_size < len(val_ds):
+            val_true_y = val_ds[:, ii, :].unsqueeze(1)
+        else:
+            val_true_y = val_ds[:, -1, :].unsqueeze(1)
+        val_pred_y, val_loss = val_ODE(func, t_, val_true_y)
+        print('Iter {:04d} | Total Loss {:.6f}'.format(ii+1, val_loss.item()))
+        visualize(val_true_y, val_pred_y, func, ii, val_loss.item(), loss.item())
+        ii += 1
     end = time.time()
 
