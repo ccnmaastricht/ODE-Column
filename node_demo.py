@@ -8,6 +8,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
+import torch.fft
+from fastdtw import fastdtw
 
 from torchdiffeq import odeint
 
@@ -17,7 +19,7 @@ ds_file          = 'ds_uc_5000_omg.pkl'
 nr_samples       = 5000
 batch_size       = 32
 total_time       = 1000
-batch_time       = 100
+batch_time       = 200
 nr_eval_points   = 5
 test_freq        = 3 # test after every n batches
 vis_training     = True
@@ -89,6 +91,29 @@ def visualize(true_y, pred_y, odefunc, ii, val_loss, train_loss):
     plt.close(fig)
 
 
+# Loss functions
+def huber_loss(y_pred, y_true):
+    hub_loss = torch.nn.SmoothL1Loss(beta=1.0)
+    return hub_loss(y_pred, y_true)
+
+def dtw_loss(y_pred, y_true):
+  y_pred, y_true = y_pred.unsqueeze(0), y_true.unsqueeze(0)
+  batch_size = y_pred.shape[0]
+  loss = 0.0
+  for i in range(batch_size):
+      pred_seq = y_pred[i].detach().cpu().numpy().squeeze()
+      true_seq = y_true[i].detach().cpu().numpy().squeeze()
+      distance, _ = fastdtw(pred_seq, true_seq, dist=2)  # Using Minkowski distance with p=2
+      loss += distance
+  return torch.tensor(loss / batch_size, requires_grad=True)
+
+def fourier_loss(y_pred, y_true):
+    fft_pred = torch.fft.fft(y_pred, dim=-1)
+    fft_true = torch.fft.fft(y_true, dim=-1)
+    loss = torch.mean(torch.abs(torch.abs(fft_pred) - torch.abs(fft_true)))  # Magnitude difference
+    return loss
+
+
 # ODE stuff
 class ODEFunc(nn.Module):
     def __init__(self):
@@ -96,10 +121,10 @@ class ODEFunc(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(3, 100),
             nn.ReLU(),
-            nn.Linear(100, 100),
-            nn.ReLU(),
-            nn.Linear(100, 100),
-            nn.ReLU(),
+            # nn.Linear(100, 100),
+            # nn.ReLU(),
+            # nn.Linear(100, 100),
+            # nn.ReLU(),
             nn.Linear(100, 3)
         )
         # Set weights and bias for the third output unit to zero permanently
@@ -112,8 +137,11 @@ class ODEFunc(nn.Module):
                 nn.init.normal_(m.weight, mean=0, std=0.1)
                 nn.init.constant_(m.bias, val=0)
 
-    def forward(self, t, xyu):
-        return self.net(xyu)
+    def forward(self, t, xy, time_vec, mu_vec):
+        okay = 0
+        mu_t = np.interp(t, time_vec, mu_vec)
+        return self.net(torch.concat((xy, mu_t), dim=-1))
+        # return self.net(xyu)
         # out = self.net(xyu)
         # out[:, 2] = 0  # Ensure the third output unit is always zero
         # return out
@@ -121,7 +149,7 @@ class ODEFunc(nn.Module):
 def val_ODE(func, t, true_y):
     with torch.no_grad():
         pred_y = odeint(func, true_y[0], t)
-        loss = torch.mean(torch.abs(pred_y - true_y))
+        loss = huber_loss(pred_y, true_y)
     return pred_y, loss
 
 def freeze_third_unit(grad):
@@ -212,17 +240,21 @@ for epoch in range(epochs):
 
         true_y = true_y.clone().detach().transpose(0, 1)
         batch_y0, batch_t, batch_y = get_batch(true_y, t_)
+        #
+        # start_odeint = time.time()
+        # pred_y = odeint(nn, batch_y0, batch_t).to(device)                 # use the ODE with the NN as func
+        # odeint_time = time.time() - start_odeint
+        # #print(f"ODEint time: {odeint_time:.2f} seconds")
+        #
+        # loss = huber_loss(pred_y, batch_y)                      # compute the loss
 
-        start_odeint = time.time()
-        pred_y = odeint(nn, batch_y0, batch_t).to(device)                 # use the ODE with the NN as func
-        odeint_time = time.time() - start_odeint
-        #print(f"ODEint time: {odeint_time:.2f} seconds")
+        true_y0 = true_y[0, :, :]  # run with entire trajectory, no time batches
+        start_y = true_y0[:, :2]
+        true_y, true_mu = true_y[:, :, :2], true_y[:, :, 2]
 
-        loss = torch.mean(torch.abs(pred_y - batch_y))                      # compute the loss
-
-        # true_y0 = true_y[0, :, :]  # run with entire trajectory, no time batches
+        pred_y = odeint(lambda t, y: nn(t, y, t_, true_mu), start_y, t_)
         # pred_y = odeint(nn, true_y0, t_).to(device)
-        # loss = torch.mean(torch.abs(pred_y - true_y))
+        loss = huber_loss(pred_y, true_y)
 
         loss.backward()                                                     # compute gradients
         optimizer.step()                                                    # update parameters

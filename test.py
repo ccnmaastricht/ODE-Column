@@ -1,33 +1,81 @@
 import numpy as np
 import torch
+import pickle
 from scipy.integrate import solve_ivp
 from torchdiffeq import odeint
 import matplotlib.pyplot as plt
+import torch
+import torch.fft
+from fastdtw import fastdtw
+from scipy.spatial.distance import euclidean
+import time
 
-def dynamics(state, t, time_vec, mu_vec, omega):
-  x, y = state
-  # interpolate mu depending on the current time
-  mu_t = np.interp(t, time_vec, mu_vec)
-  dx = (mu_t - x**2 - y**2) * x - omega * y
-  dy = (mu_t - x**2 - y**2) * y + omega * x
-  return (dx, dy)
 
-omega = 1.0
 
-total_time = 25.
-time_steps = 1000
-t = torch.linspace(0, total_time, time_steps)
-mu = torch.sin(t * 0.25)
+ds_file = 'ds_uc_5000_omg.pkl'
 
-y0 = [0, 1]
+with open(ds_file, 'rb') as f:
+  ds = pickle.load(f)
 
-parameters = (t, mu, omega)
-state = solve_ivp(dynamics, (0, total_time), y0, args=parameters)
+def dtw_loss(y_pred, y_true):
+  y_pred, y_true = y_pred.unsqueeze(0), y_true.unsqueeze(0)
+  batch_size = y_pred.shape[0]
+  loss = 0.0
 
-plt.plot(mu)
+  blep = y_pred[0].shape
+
+  for i in range(batch_size):
+      pred_seq = y_pred[i].detach().cpu().numpy().squeeze()
+      true_seq = y_true[i].detach().cpu().numpy().squeeze()
+
+      distance, _ = fastdtw(pred_seq, true_seq, dist=2)  # Using Minkowski distance with p=2
+      loss += distance
+  return torch.tensor(loss / batch_size, requires_grad=True)
+
+def fourier_loss(y_pred, y_true):
+    fft_pred = torch.fft.fft(y_pred, dim=-1)
+    fft_true = torch.fft.fft(y_true, dim=-1)
+
+    loss = torch.mean(torch.abs(torch.abs(fft_pred) - torch.abs(fft_true)))  # Magnitude difference
+    return loss
+
+a, b, c, d = 21, 22, 23, 0
+
+# Plot samples
+plt.plot(ds[:, a, 0])
+plt.plot(ds[:, b, 0])
+plt.plot(ds[:, c, 0])
 plt.show()
-plt.plot(state)
-plt.show()
+
+# MAE loss
+start = time.time()
+print(torch.mean(torch.abs(ds[:, a, 0] - ds[:, b, 0])).item())
+print(torch.mean(torch.abs(ds[:, a, 0] - ds[:, c, 0])).item())
+print(torch.mean(torch.abs(ds[:, a, 0] - ds[:, a, 0])).item())
+mae = time.time()
+print(mae - start)
+
+# Huber loss
+huber_loss_fn = torch.nn.SmoothL1Loss(beta=1.0)
+print(huber_loss_fn(ds[:, a, 0], ds[:, b, 0]).item())
+print(huber_loss_fn(ds[:, a, 0], ds[:, c, 0]).item())
+print(huber_loss_fn(ds[:, a, 0], ds[:, a, 0]).item())
+huber = time.time()
+print(huber - mae)
+
+# Fourier loss
+print(fourier_loss(ds[:, a, 0], ds[:, b, 0]).item())
+print(fourier_loss(ds[:, a, 0], ds[:, c, 0]).item())
+print(fourier_loss(ds[:, a, 0], ds[:, a, 0]).item())
+fourier = time.time()
+print(fourier - huber)
+
+# DTW loss
+print(dtw_loss(ds[:, a, 0], ds[:, b, 0]).item())
+print(dtw_loss(ds[:, a, 0], ds[:, c, 0]).item())
+print(dtw_loss(ds[:, a, 0], ds[:, a, 0]).item())
+dtw = time.time()
+print(dtw - fourier)
 
 
 # Some extra code no longer using
