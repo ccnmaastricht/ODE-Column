@@ -125,7 +125,7 @@ class ODEFunc(nn.Module):
             # nn.ReLU(),
             # nn.Linear(100, 100),
             # nn.ReLU(),
-            nn.Linear(100, 3)
+            nn.Linear(100, 2)
         )
         # Set weights and bias for the third output unit to zero permanently
         # with torch.no_grad():
@@ -138,17 +138,21 @@ class ODEFunc(nn.Module):
                 nn.init.constant_(m.bias, val=0)
 
     def forward(self, t, xy, time_vec, mu_vec):
-        okay = 0
-        mu_t = np.interp(t, time_vec, mu_vec)
-        return self.net(torch.concat((xy, mu_t), dim=-1))
-        # return self.net(xyu)
+        mu_t = torch.tensor([np.interp(t.detach().numpy(), time_vec.detach().numpy(), mu_vec[:, i].detach().numpy()) for i in range(len(mu_vec[0]))]).unsqueeze(-1)
+        xyu = torch.concat((xy, mu_t), dim=-1).float()
+        return self.net(xyu)
         # out = self.net(xyu)
         # out[:, 2] = 0  # Ensure the third output unit is always zero
         # return out
 
-def val_ODE(func, t, true_y):
+def val_ODE(nn, t_, true_y):
     with torch.no_grad():
-        pred_y = odeint(func, true_y[0], t)
+        # pred_y = odeint(nn, true_y[0], t)
+
+        start_y = true_y[0, :, :2]
+        true_y, true_mu = true_y[:, :, :2], true_y[:, :, 2]
+        pred_y = odeint(lambda t, y: nn(t, y, t_, true_mu), start_y, t_)
+
         loss = huber_loss(pred_y, true_y)
     return pred_y, loss
 
@@ -227,8 +231,8 @@ train_dataset = TensorDataset(train_ds)
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
 nn = ODEFunc().to(device)                                             # this is the NN that odeint uses as a function
-nn.net[2].weight.register_hook(freeze_third_unit)                     # freeze weights of u output in NN
-nn.net[2].bias.register_hook(freeze_third_unit)
+# nn.net[2].weight.register_hook(freeze_third_unit)                     # freeze weights of u output in NN
+# nn.net[2].bias.register_hook(freeze_third_unit)
 
 optimizer = optim.RMSprop(nn.parameters(), lr=1e-3)                   # optimizer base class, should optimize NN parameters
 ii = 0
@@ -239,8 +243,8 @@ for epoch in range(epochs):
         optimizer.zero_grad()                                               # set gradients to zero (already used to update weights with loss.backward()
 
         true_y = true_y.clone().detach().transpose(0, 1)
-        batch_y0, batch_t, batch_y = get_batch(true_y, t_)
-        #
+
+        # batch_y0, batch_t, batch_y = get_batch(true_y, t_)
         # start_odeint = time.time()
         # pred_y = odeint(nn, batch_y0, batch_t).to(device)                 # use the ODE with the NN as func
         # odeint_time = time.time() - start_odeint
@@ -248,11 +252,10 @@ for epoch in range(epochs):
         #
         # loss = huber_loss(pred_y, batch_y)                      # compute the loss
 
-        true_y0 = true_y[0, :, :]  # run with entire trajectory, no time batches
-        start_y = true_y0[:, :2]
+        start_y = true_y[0, :, :2]  # run with entire trajectory, no time batches
         true_y, true_mu = true_y[:, :, :2], true_y[:, :, 2]
 
-        pred_y = odeint(lambda t, y: nn(t, y, t_, true_mu), start_y, t_)
+        pred_y = odeint(lambda t, y: nn(t, y, t_, true_mu), start_y, t_).to(device)
         # pred_y = odeint(nn, true_y0, t_).to(device)
         loss = huber_loss(pred_y, true_y)
 
