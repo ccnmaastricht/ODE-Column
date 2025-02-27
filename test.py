@@ -2,100 +2,61 @@ import numpy as np
 import torch
 import pickle
 from scipy.integrate import solve_ivp
-from torchdiffeq import odeint
-import matplotlib.pyplot as plt
-import torch
-import torch.fft
-from fastdtw import fastdtw
-from scipy.spatial.distance import euclidean
-import time
 
+# Define Subcritical Hopf Bifurcation Dynamics
+def hopf_dynamics(t, state, t_eval, mu_vec, omega):
+    x, y = state
+    mu_t = np.interp(t, t_eval, mu_vec)  # Interpolate time-dependent mu
+    dx = (mu_t + (x**2 + y**2)) * x - omega * y  # Subcritical Hopf
+    dy = (mu_t + (x**2 + y**2)) * y + omega * x
+    return [dx, dy]
 
+# Constants
+num_instances = 20  # Number of data instances
+num_timepoints = 1000  # Number of time steps
+t_span = (0, 25)
+t_eval = np.linspace(*t_span, num_timepoints)  # 1000 time points
+omega = 1.0  # Angular frequency
 
-ds_file = 'ds_uc_5000_omg.pkl'
+# Initialize an empty list to store data instances
+dataset = []
 
-with open(ds_file, 'rb') as f:
-  ds = pickle.load(f)
+# Generate 5000 instances
+for _ in range(num_instances):
+    # Generate time-varying mu (sinusoidal)
+    a = 0.1  # Amplitude
+    b = 0.25  # Frequency
+    c = (np.random.rand(1) - 0.5) * 2 * np.pi  # Random phase shift
+    d = 0
+    mu_vec = (a / 2) * np.sin(t_eval * b + c) + (a / 2) + d  # Range [0, 1]
+    mu_vec = np.clip(mu_vec, -1, 1)  # Keep within [-1, 1]
 
-def dtw_loss(y_pred, y_true):
-  y_pred, y_true = y_pred.unsqueeze(0), y_true.unsqueeze(0)
-  batch_size = y_pred.shape[0]
-  loss = 0.0
+    # Random initial condition for x and y
+    initial_state = np.random.rand(2) * 2 - 1  # Random in range [-1, 1]
 
-  blep = y_pred[0].shape
+    # Solve ODE
+    sol = solve_ivp(hopf_dynamics, t_span, initial_state, t_eval=t_eval, args=(t_eval, mu_vec, omega))
 
-  for i in range(batch_size):
-      pred_seq = y_pred[i].detach().cpu().numpy().squeeze()
-      true_seq = y_true[i].detach().cpu().numpy().squeeze()
+    print(sol.success)
 
-      distance, _ = fastdtw(pred_seq, true_seq, dist=2)  # Using Minkowski distance with p=2
-      loss += distance
-  return torch.tensor(loss / batch_size, requires_grad=True)
+    # # Extract x and y
+    # x_vals, y_vals = sol.y
+    #
+    # # Reshape and concatenate into (1000, 1, 3)
+    # instance = np.stack([x_vals, y_vals, mu_vec], axis=1)  # Shape (1000, 3)
+    # instance = instance[:, np.newaxis, :]  # Shape (1000, 1, 3)
+    #
+    # # Append to dataset
+    # dataset.append(instance)
 
-def fourier_loss(y_pred, y_true):
-    fft_pred = torch.fft.fft(y_pred, dim=-1)
-    fft_true = torch.fft.fft(y_true, dim=-1)
+# Convert list to NumPy array and reshape to (1000, 5000, 3)
+dataset = np.concatenate(dataset, axis=1)  # Shape (1000, 5000, 3)
 
-    loss = torch.mean(torch.abs(torch.abs(fft_pred) - torch.abs(fft_true)))  # Magnitude difference
-    return loss
+# Convert to PyTorch tensor
+dataset_tensor = torch.tensor(dataset, dtype=torch.float32)
 
-a, b, c, d = 21, 22, 23, 0
+# Save as pickle
+with open("pickled_ds/ds_sub.pkl", "wb") as f:
+    pickle.dump(dataset_tensor, f)
 
-# Plot samples
-plt.plot(ds[:, a, 0])
-plt.plot(ds[:, b, 0])
-plt.plot(ds[:, c, 0])
-plt.show()
-
-# MAE loss
-start = time.time()
-print(torch.mean(torch.abs(ds[:, a, 0] - ds[:, b, 0])).item())
-print(torch.mean(torch.abs(ds[:, a, 0] - ds[:, c, 0])).item())
-print(torch.mean(torch.abs(ds[:, a, 0] - ds[:, a, 0])).item())
-mae = time.time()
-print(mae - start)
-
-# Huber loss
-huber_loss_fn = torch.nn.SmoothL1Loss(beta=1.0)
-print(huber_loss_fn(ds[:, a, 0], ds[:, b, 0]).item())
-print(huber_loss_fn(ds[:, a, 0], ds[:, c, 0]).item())
-print(huber_loss_fn(ds[:, a, 0], ds[:, a, 0]).item())
-huber = time.time()
-print(huber - mae)
-
-# Fourier loss
-print(fourier_loss(ds[:, a, 0], ds[:, b, 0]).item())
-print(fourier_loss(ds[:, a, 0], ds[:, c, 0]).item())
-print(fourier_loss(ds[:, a, 0], ds[:, a, 0]).item())
-fourier = time.time()
-print(fourier - huber)
-
-# DTW loss
-print(dtw_loss(ds[:, a, 0], ds[:, b, 0]).item())
-print(dtw_loss(ds[:, a, 0], ds[:, c, 0]).item())
-print(dtw_loss(ds[:, a, 0], ds[:, a, 0]).item())
-dtw = time.time()
-print(dtw - fourier)
-
-
-# Some extra code no longer using
-
-# # Training data (true y)
-# def time_varying_input(t, a, b, c, d):
-#     return a * torch.sin(t * b + c) + d
-#
-# def A_matrix(xy, u):
-#     x, y, u = xy[:,0].item(), xy[:,1].item(), u.item()
-#     A = torch.tensor([
-#         [(u - x**2 - y**2),     2.0],
-#         [-2.0,                  (u - x**2 - y**2)]
-#     ])
-#     return A
-#
-# class Lambda(nn.Module):
-#     def forward(self, t, xyu, u):
-#         xy = xyu[:,:-1]
-#         u = torch.tensor([[u]])
-#         forward_xy = torch.mm(xy, A_matrix(xy, u))  # apply matrix A
-#         forward_xyu = torch.concat((forward_xy, u), dim=1)
-#         return forward_xyu
+print(f"Dataset saved as 'hopf_trajectories.pkl' with shape {dataset_tensor.shape}")
