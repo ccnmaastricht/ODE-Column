@@ -223,3 +223,47 @@ def update(state, params, stim, dt=1e-4):
     [500 for i in state['R'] if i > 500]  # limit firing rates (max = 500.0 Hz)
 
     return state
+
+
+if __name__ == '__main__':
+
+    # Initialize the parameters
+    params = get_params(J_local=0.13, J_lateral=0.172, area='MT')
+
+    # Intialize the starting state (all zeros?)
+    state = {}
+    M = params['M']  # number of populations (=16)
+    state['I'] = np.zeros(M)  # input current
+    state['A'] = np.zeros(M)  # adaptation
+    state['H'] = np.zeros(M)  # membrane potential
+    state['R'] = np.zeros(M)  # rate
+    state['N'] = np.zeros(M)  # noise
+
+    # Initialize the stimulation
+    stim = np.zeros(M)
+    stim = set_vis(stim, column='H', nu=20.0, params=params)  # horizontal column
+    stim = set_vis(stim, column='V', nu=20.0, params=params)  # vertical column
+
+    stim = set_stimulation(stim, column='H', layer='L23', nu=20, params=params)
+    stim = set_stimulation(stim, column='V', layer='L23', nu=20, params=params)
+
+    stim = set_stimulation(stim, column='H', layer='L4', nu=20, params=params)
+    stim = set_stimulation(stim, column='V', layer='L4', nu=20, params=params)
+
+    stim = set_stimulation(stim, column='H', layer='L5', nu=20, params=params)
+    stim = set_stimulation(stim, column='V', layer='L5', nu=20, params=params)
+
+    stim = set_stimulation(stim, column='H', layer='L6', nu=20, params=params)
+    stim = set_stimulation(stim, column='V', layer='L6', nu=20, params=params)
+
+    # Total time steps
+    T = 1000
+
+    # Array for saving firing rate
+    R = np.zeros((M, T))
+
+    # Run simulation
+    # note: stim does not change for the entirety of the simulation
+    for t in range(T):
+        state = update(state, params, stim)
+        R[:, t] = state['R']

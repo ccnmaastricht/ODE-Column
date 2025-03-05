@@ -86,10 +86,6 @@ class ODEFunc(nn.Module):
             nn.ReLU(),
             nn.Linear(100, 100),
             nn.ReLU(),
-            nn.Linear(100, 100),
-            nn.ReLU(),
-            nn.Linear(100, 100),
-            nn.ReLU(),
             nn.Linear(100, 2)
         )
 
