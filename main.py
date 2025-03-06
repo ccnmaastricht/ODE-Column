@@ -1,61 +1,1 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import os
-import pickle
-import time
-
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
-
-from torchdiffeq import odeint
-
-
-class WeightsDMF(nn.Module):
-    def __init__(self, in_features, out_features):
-        super(WeightsDMF, self).__init__()
-
-        self.weights = nn.Parameter(torch.randn(out_features, in_features) * 0.1)  # 8x8 matrix
-        self.bias = nn.Parameter(torch.zeros(out_features))
-
-    def forward(self, x):
-        return torch.matmul(x, self.weights.T) + self.bias
-
-
-# Custom Activation Function
-class ThresholdActivation(nn.Module):
-    def forward(self, x):
-
-        # gain, threshold and noise factor
-        a, b, d = 48, 981, 0.0089
-
-        x_nom = np.float64((a * x - b))
-        x_activ = x_nom / (1 - np.exp(-d * x_nom))
-
-        return x_activ
-
-
-# Example Model Using Custom Layers
-class TwoColumnODE(nn.Module):
-    def __init__(self):
-        super(TwoColumnODE, self).__init__()
-        self.custom_linear = WeightsDMF(8, 8)  # Custom 8x8 weight layer
-        self.activation = ThresholdActivation()  # Custom activation function
-
-    def forward(self, x):
-        x = self.custom_linear(x)
-        x = self.activation(x)
-        return x
-
-
-
-if __name__ == '__main__':
-    data = torch.rand((100, 8)) * 2 - 1
-    sample = data[0]
-
-    odemodel = TwoColumnODE()
-    layer = WeightsDMF(8, 8)
-    print(layer.weights)
-    print(layer(sample))
-    print(layer.weights)
+import numpy as npimport matplotlib.pyplot as pltimport osimport pickleimport timeimport torchimport torch.nn as nnimport torch.optim as optimfrom torch.utils.data import DataLoader, TensorDatasetfrom torchdiffeq import odeintfrom DMF import get_params, updateclass ThresholdFiringRate(nn.Module):    def __init__(self):        super(ThresholdFiringRate, self).__init__()        self.a = torch.tensor(params['a'], dtype=torch.float32)    # gain        self.b = torch.tensor(params['b'], dtype=torch.float32)    # threshold        self.d = torch.tensor(params['d'], dtype=torch.float32)    # noise factor    def forward(self, x):        x_nom = self.a * x - self.b        x_activ = x_nom / (1 - torch.exp(-self.d * x_nom))        return x_activclass DMFdynamics(nn.Module):    def __init__(self):        super(DMFdynamics, self).__init__()        self.W = nn.Parameter(torch.tensor(params['W'], dtype=torch.float32, requires_grad=True))        self.state = {            'I': torch.zeros(M, dtype=torch.float32),            'H': torch.zeros(M, dtype=torch.float32),            'A': torch.zeros(M, dtype=torch.float32),            'R': torch.ones(M, dtype=torch.float32)        }        self.activation = ThresholdFiringRate()        self.dt     = torch.tensor(params['dt'], dtype=torch.float32)        self.tau_s  = torch.tensor(params['tau_s'], dtype=torch.float32)        self.W_bg   = torch.tensor(params['W_bg'], dtype=torch.float32)        self.nu_bg  = torch.tensor(params['nu_bg'], dtype=torch.float32)        self.R_     = torch.tensor(params['R'], dtype=torch.float32)  # not to be confused with state['R']        self.tau_m  = torch.tensor(params['tau_m'], dtype=torch.float32)        self.kappa  = torch.tensor(params['kappa'], dtype=torch.float32)        self.tau_a  = torch.tensor(params['tau_a'], dtype=torch.float32)    def forward(self, current, stim):        # # Update the current        self.state['I'] = current + self.dt * (-current / self.tau_s)  # self inhibition        self.state['I'] = self.state['I'] + self.dt * (torch.matmul(self.W, self.state['I']))  # recurrent input        self.state['I'] = self.state['I'] + self.dt * self.W_bg * self.nu_bg  # background input        self.state['I'] = self.state['I'] + self.dt * stim  # external output        # Update the membrane potential and adaptation        self.state['H'] = self.state['H'] + self.dt * ((-self.state['H'] + self.R_ * self.state['I']) / self.tau_m)        self.state['A'] = self.state['A'] + self.dt * ((-self.state['A'] + self.state['R'] * self.kappa) / self.tau_a)        # Update firing rate        self.state['R'] = self.activation(self.state['H'] - self.state['A'])        return self.state['I']  # return the currentclass TwoColumnODE(nn.Module):    def __init__(self):        super(TwoColumnODE, self).__init__()        self.dmf_layer = DMFdynamics()    def forward(self, current, stim):        # Apply diffeqs, update the state variables, but only return the current        return self.dmf_layer(current, stim)def make_states(num=100, M=16):    states = torch.zeros((num, M, 4), dtype=torch.float32)    for i in range(num):        states[i, :, 0] = torch.rand(M, dtype=torch.float32) - 0.5        states[i, :, 1] = torch.rand(M, dtype=torch.float32) - 0.5        states[i, :, 2] = torch.rand(M, dtype=torch.float32) - 0.5        states[i, :, 3] = torch.rand(M, dtype=torch.float32)    return statesif __name__ == '__main__':    '''    Data is four-dimensional, meaning that the     state variable holds the current values for:     (1) the current (I)    (2) the membrane potential (H)    (3) the adaptation (A)    (4) and the firing rate (R)    '''    params = get_params(J_local=0.13, J_lateral=0.172, area='MT')    params['dt'] = 1e-4  # timestep    M = params['M']  # num of populations    states = make_states(100, 16)    true_states = make_states(100, 16)    stim = torch.ones(M, dtype=torch.float32)    # state = {    #     'I': torch.zeros(M, dtype=torch.float32),    #     'H': torch.zeros(M, dtype=torch.float32),    #     'A': torch.zeros(M, dtype=torch.float32),    #     'R': torch.ones(M, dtype=torch.float32)    # }    # stim = torch.ones(M, dtype=torch.float32)    # # Compare with dmf    # state_DMF = {    #     'I': np.zeros(M),    #     'H': np.zeros(M),    #     'A': np.zeros(M),    #     'R': np.ones(M)    # }    # stim_DMF = np.ones(M, dtype=torch.float32)    odemodel = TwoColumnODE()    optimizer = optim.Adam(odemodel.parameters(), lr=0.01)    # for name, param in odemodel.named_parameters():    #     if param.requires_grad:    #         print(name, param.data)    for i in range(10):        optimizer.zero_grad()        state, true_state = states[i, :, 0], true_states[i, :, 0]        pred = odemodel(state, stim)        print(odemodel.dmf_layer.state['I'])        print(odemodel.dmf_layer.state['H'])        print(odemodel.dmf_layer.state['A'])        print(odemodel.dmf_layer.state['R'])        loss = torch.mean(torch.abs(pred - true_state))        loss.backward()        # with torch.no_grad():        #     odemodel.dmf_layer.W.grad *= odemodel.dmf_layer.mask  #TODO: make mask        optimizer.step()        # plt.imshow(odemodel.dmf_layer.W.detach().numpy(), cmap="viridis", interpolation="nearest")        # plt.show()    # # rates_ode, rates_dmf = [], []    #    # for i in range(10):    #     # state = odemodel(state, stim)    #     # state_DMF = update(state_DMF, params, stim_DMF)    #     # rates_ode.append(state['R'].tolist())    #     # rates_dmf.append(state_DMF['R'].tolist())    #    # # plt.plot(np.array(rates_ode)[:,0])    # # plt.plot(np.array(rates_dmf)[:,0])    # # plt.show()

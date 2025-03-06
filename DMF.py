@@ -207,9 +207,9 @@ def update(state, params, stim, dt=1e-4):
     state['I'] += dt * np.dot(params['W'], state['R'])  # recurrent input
     state['I'] += dt * params['W_bg'] * params['nu_bg']  # background input
     state['I'] += dt * stim  # external input
-    state['N'] += (- state['N'] / params['tau_s'] + params['sigma'] * np.sqrt(2 / params['tau_s']) * np.random.randn(
-        params['M'])) * dt
-    state['I'] += state['N']  # noise
+    # state['N'] += (- state['N'] / params['tau_s'] + params['sigma'] * np.sqrt(2 / params['tau_s']) * np.random.randn(
+    #     params['M'])) * dt
+    # state['I'] += state['N']  # noise
 
     # Adaptation (A/w) and membrane potential (H/h)
     state['A'] += dt * ((-state['A'] + state['R'] * params['kappa']) / params['tau_a'])  # adaptation
