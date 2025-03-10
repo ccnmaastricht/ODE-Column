@@ -241,8 +241,8 @@ if __name__ == '__main__':
 
     # Initialize the stimulation
     stim = np.zeros(M)
-    stim = set_vis(stim, column='H', nu=20.0, params=params)  # horizontal column
-    stim = set_vis(stim, column='V', nu=20.0, params=params)  # vertical column
+    # stim = set_vis(stim, column='H', nu=20.0, params=params)  # horizontal column
+    # stim = set_vis(stim, column='V', nu=20.0, params=params)  # vertical column
 
     stim = set_stimulation(stim, column='H', layer='L23', nu=20, params=params)
     stim = set_stimulation(stim, column='V', layer='L23', nu=20, params=params)
@@ -268,6 +268,8 @@ if __name__ == '__main__':
         state = update(state, params, stim)
         R[:, t] = state['R']
 
-    for i in range(16):
-        plt.plot(R[i,:])
+    #for i in range(16):
+        #plt.plot(R[i,:])
+    plt.plot(R[2,:])
+    plt.plot(R[3,:])
     plt.show()
