@@ -1,5 +1,5 @@
 import numpy as np
-
+import matplotlib.pyplot as plt
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -267,3 +267,7 @@ if __name__ == '__main__':
     for t in range(T):
         state = update(state, params, stim)
         R[:, t] = state['R']
+
+    for i in range(16):
+        plt.plot(R[i,:])
+    plt.show()
