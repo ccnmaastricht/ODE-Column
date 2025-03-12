@@ -202,6 +202,9 @@ def update(state, params, stim, dt=1e-4):
     state (dict):   model state
     """
 
+    wbg = dt * np.dot(params['W'], state['R'])
+    nubg = np.dot(dt * params['W'], state['R'])
+
     # Current (I)
     state['I'] += dt * (-state['I'] / params['tau_s'])  # self inhibition
     state['I'] += dt * np.dot(params['W'], state['R'])  # recurrent input
@@ -241,20 +244,20 @@ if __name__ == '__main__':
 
     # Initialize the stimulation
     stim = np.zeros(M)
-    # stim = set_vis(stim, column='H', nu=20.0, params=params)  # horizontal column
-    # stim = set_vis(stim, column='V', nu=20.0, params=params)  # vertical column
+    stim = set_vis(stim, column='H', nu=16.0, params=params)  # horizontal column
+    stim = set_vis(stim, column='V', nu=16.0, params=params)  # vertical column
 
-    stim = set_stimulation(stim, column='H', layer='L23', nu=20, params=params)
-    stim = set_stimulation(stim, column='V', layer='L23', nu=20, params=params)
-
-    stim = set_stimulation(stim, column='H', layer='L4', nu=20, params=params)
-    stim = set_stimulation(stim, column='V', layer='L4', nu=20, params=params)
-
-    stim = set_stimulation(stim, column='H', layer='L5', nu=20, params=params)
-    stim = set_stimulation(stim, column='V', layer='L5', nu=20, params=params)
-
-    stim = set_stimulation(stim, column='H', layer='L6', nu=20, params=params)
-    stim = set_stimulation(stim, column='V', layer='L6', nu=20, params=params)
+    # stim = set_stimulation(stim, column='H', layer='L23', nu=20, params=params)
+    # stim = set_stimulation(stim, column='V', layer='L23', nu=20, params=params)
+    #
+    # stim = set_stimulation(stim, column='H', layer='L4', nu=20, params=params)
+    # stim = set_stimulation(stim, column='V', layer='L4', nu=20, params=params)
+    #
+    # stim = set_stimulation(stim, column='H', layer='L5', nu=20, params=params)
+    # stim = set_stimulation(stim, column='V', layer='L5', nu=20, params=params)
+    #
+    # stim = set_stimulation(stim, column='H', layer='L6', nu=20, params=params)
+    # stim = set_stimulation(stim, column='V', layer='L6', nu=20, params=params)
 
     # Total time steps
     T = 1000
@@ -268,8 +271,7 @@ if __name__ == '__main__':
         state = update(state, params, stim)
         R[:, t] = state['R']
 
-    #for i in range(16):
-        #plt.plot(R[i,:])
-    plt.plot(R[2,:])
-    plt.plot(R[3,:])
-    plt.show()
+    for i in range(8):
+        plt.plot(R[i,:])
+        plt.plot(R[i+8, :])
+        plt.show()
