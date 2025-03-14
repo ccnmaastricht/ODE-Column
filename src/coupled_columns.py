@@ -1,11 +1,14 @@
 import numpy as np
 from scipy.integrate import odeint
 from scipy.linalg import block_diag
+import math
 
 import torch
 import torch.nn as nn
 
 from src.utils import GainFunctionParams, compute_firing_rate, create_feedforward_input
+
+from torchdiffeq import odeint as torch_odeint
 
 
 class CoupledColumns:
@@ -242,8 +245,6 @@ class ColumnODEFunc(CoupledColumns):
     def __init__(self, column_parameters: dict, area: str):
         super().__init__(column_parameters, area)
 
-        self.connection_weights = nn.Parameter(torch.tensor(self.recurrent_weights, dtype=torch.float32), requires_grad=True)
-
         self.feedforward_weights    = torch.tensor(self.feedforward_weights, dtype=torch.float32)
         self.background_weights     = torch.tensor(self.background_weights, dtype=torch.float32)
         self.background_drive       = torch.tensor(self.background_drive, dtype=torch.float32)
@@ -253,6 +254,33 @@ class ColumnODEFunc(CoupledColumns):
         self.resistance             = torch.tensor(self.resistance, dtype=torch.float32)
         self.adaptation_strength    = torch.tensor(self.adaptation_strength, dtype=torch.float32)
 
+        # Weights mask
+        mask = torch.zeros(size=(self.num_populations, self.num_populations), dtype=torch.float32)
+        mask[:8, 8:] += 1.0
+        mask[8:, :8] += 1.0
+        self.mask = mask
+
+        # Strict mask with only lat connections between 2/3 layers
+        strict_mask = torch.zeros(mask.shape)
+        strict_mask[1, 8] += 1.0
+        strict_mask[9, 0] += 1.0
+        self.strict_mask = strict_mask
+
+        # Init the weights as trainable parameter
+        original_weights = torch.tensor(self.recurrent_weights, dtype=torch.float32).detach().clone()
+        mean_W = self.synapse_time_constant * original_weights.mean() / 100.
+        std_W = self.synapse_time_constant * original_weights.std() / 100.
+        lateral_weights = torch.normal(mean=mean_W, std=std_W, size=mask.shape)
+        lateral_weights *= self.mask  # set inner connectivity to zero
+        lateral_weights *= self.strict_mask  # only layer 2/3 connections
+
+        inner_weights = original_weights * self.synapse_time_constant
+        inner_weights *= 1 - self.mask
+        self.connection_weights = nn.Parameter(inner_weights + lateral_weights, requires_grad=True)
+
+        blep = 0
+        # self.connection_weights = nn.Parameter(torch.tensor(self.recurrent_weights, dtype=torch.float32), requires_grad=True)
+
     def compute_firing_rate_torch(self, x, params):
         '''
         Compute the firing rates torch-friendly.
@@ -260,17 +288,13 @@ class ColumnODEFunc(CoupledColumns):
         a, b, d = params.gain, params.threshold, params.noise_factor
         x_nom = a * x - b
         x_activ = x_nom / (1 - torch.exp(-d * x_nom))
-        [0.0001 for i in x_activ if i <= 0.]  # ensure positive values (min = 0.0   Hz)
-        [500 for i in x_activ if i > 500]  # limit firing rates (max = 500.0 Hz)
         return x_activ
 
     def dynamics_ode(self, t: float, state: torch.tensor, stim:torch.tensor) -> torch.tensor:
         """
         Compute the dynamics of the coupled columns.
         """
-
         feedforward_rate = stim
-
         membrane_potential, adaptation = state[0], state[1]
 
         firing_rate = self.compute_firing_rate_torch(membrane_potential - adaptation, self.gain_function_parameters)
@@ -279,8 +303,9 @@ class ColumnODEFunc(CoupledColumns):
         background_current = self.background_weights * self.background_drive
         recurrent_current = torch.matmul(self.connection_weights, firing_rate)
 
-        total_current = (feedforward_current + background_current +
-                         recurrent_current) * self.synapse_time_constant
+        # total_current = (feedforward_current + background_current +
+        #                  recurrent_current) * self.synapse_time_constant
+        total_current = (feedforward_current + background_current) * self.synapse_time_constant + recurrent_current
 
         delta_membrane_potential = (
             -membrane_potential +
@@ -290,3 +315,20 @@ class ColumnODEFunc(CoupledColumns):
                             firing_rate) / self.adapt_time_constant
 
         return torch.stack([delta_membrane_potential, delta_adaptation])
+
+    def run_ode_sample(self, input_state, stim, time_vec):
+        '''
+        Runs a single sample in three phases: a pre-stimulus phase,
+        a stimulus phase (with given stim) and a post-stimulus phase.
+        '''
+        # Pre stimulus
+        empty_stim = torch.zeros(self.num_populations)
+        output_pre = torch_odeint(lambda t, y: self.dynamics_ode(t, y, empty_stim), input_state, time_vec)
+
+        # Stimulus phase
+        output_stim = torch_odeint(lambda t, y: self.dynamics_ode(t, y, stim), output_pre[0], time_vec)
+
+        # Post stimulus
+        output_post = torch_odeint(lambda t, y: self.dynamics_ode(t, y, empty_stim), output_stim[0], time_vec)
+
+        return torch.cat((output_pre, output_stim, output_post), dim=0)
