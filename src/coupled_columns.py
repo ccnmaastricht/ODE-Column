@@ -278,7 +278,6 @@ class ColumnODEFunc(CoupledColumns):
         inner_weights *= 1 - self.mask
         self.connection_weights = nn.Parameter(inner_weights + lateral_weights, requires_grad=True)
 
-        blep = 0
         # self.connection_weights = nn.Parameter(torch.tensor(self.recurrent_weights, dtype=torch.float32), requires_grad=True)
 
     def compute_firing_rate_torch(self, x, params):

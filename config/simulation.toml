@@ -1,9 +1,9 @@
-time_step = 1e-4
+time_step = 1e-3
 
 [protocol]
-pre_stimulus_period = 2.0
-post_stimulus_period = 2.0
-stimulus_duration = 2.0
+pre_stimulus_period = 0.5
+post_stimulus_period = 0.5
+stimulus_duration = 0.5
 mean_stimulus_drive = 32.0
 difference_stimulus_drive = 16.0
 
@@ -11,8 +11,8 @@ difference_stimulus_drive = 16.0
 membrane_potential = [
     -19.7279296, 8.68585084, 12.0828965, 11.7200528,
     0.0739902866, 9.52313487, 1.91320049, 11.9374244,
-    6.42979557, 7.63449402, 10.4924322, 11.3261861,
-    4.28004375, 9.8121234, -4.6003687, 12.1522374
+    -19.7279296, 8.68585084, 12.0828965, 11.7200528,
+    0.0739902866, 9.52313487, 1.91320049, 11.9374244
 ]
 adaptation = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 
               0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]

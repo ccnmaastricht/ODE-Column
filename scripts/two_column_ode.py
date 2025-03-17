@@ -102,7 +102,7 @@ if __name__ == '__main__':
     batch_size = 16
 
     # Get dataset
-    states, stims = make_ds_dmf('../pickled_ds/new_dmf_states.pkl', nr_samples)
+    states, stims = make_ds_dmf('../pickled_ds/states_dmf_17.pkl', nr_samples)
 
     # Prepare train and test sets
     split = int(nr_samples * 0.5)
@@ -119,6 +119,7 @@ if __name__ == '__main__':
 
     # Initialize the optimizer and add connection weights as learnable parameter
     optimizer = torch.optim.RMSprop([odefunc.connection_weights], lr=1e-2, alpha=0.99)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
 
     # Store weights
     weights = [odefunc.connection_weights.detach().numpy().copy()]
@@ -145,6 +146,9 @@ if __name__ == '__main__':
         with torch.no_grad():
             odefunc.connection_weights.grad *= odefunc.strict_mask
         optimizer.step()
+        scheduler.step()  # Adjust learning rate after step_size batches
+
+        print(f"Batch {iter + 1}: Learning rate {scheduler.get_last_lr()[0]}")
 
         # Print loss, save current weights in array
         print('Iter {:02d} | Total Loss {:.5f}'.format(iter + 1, loss.item()))

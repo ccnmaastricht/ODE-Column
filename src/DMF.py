@@ -244,8 +244,9 @@ if __name__ == '__main__':
 
     # Initialize the stimulation
     stim = np.zeros(M)
-    stim = set_vis(stim, column='H', nu=16.0, params=params)  # horizontal column
-    stim = set_vis(stim, column='V', nu=16.0, params=params)  # vertical column
+
+    # stim = set_vis(stim, column='H', nu=16.0, params=params)  # horizontal column
+    # stim = set_vis(stim, column='V', nu=16.0, params=params)  # vertical column
 
     # stim = set_stimulation(stim, column='H', layer='L23', nu=20, params=params)
     # stim = set_stimulation(stim, column='V', layer='L23', nu=20, params=params)
@@ -260,18 +261,23 @@ if __name__ == '__main__':
     # stim = set_stimulation(stim, column='V', layer='L6', nu=20, params=params)
 
     # Total time steps
-    T = 1000
+    T = 20000
 
     # Array for saving firing rate
-    R = np.zeros((M, T))
+    R = np.zeros((M, T*2))
 
     # Run simulation
-    # note: stim does not change for the entirety of the simulation
     for t in range(T):
         state = update(state, params, stim)
-        R[:, t] = state['R']
+        R[:, t] = state['H']
 
-    for i in range(8):
-        plt.plot(R[i,:])
-        plt.plot(R[i+8, :])
-        plt.show()
+    stim[:8] = 40.
+    stim[8:] = 24.
+
+    for t in range(T):
+        state = update(state, params, stim)
+        R[:, T+t] = state['H']
+
+    plt.plot(R[0,:])
+    plt.plot(R[8, :])
+    plt.show()
