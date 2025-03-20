@@ -7,10 +7,7 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.coupled_columns import CoupledColumns, ColumnODEFunc
-from src.utils import load_config
-
-from ode_bifurcation import huber_loss
-
+from src.utils import load_config, huber_loss, mse_halfway_point
 
 
 def visualize_results(pred, true, stim, odefunc, train_loss, test_loss, weights, show=False):
@@ -20,8 +17,8 @@ def visualize_results(pred, true, stim, odefunc, train_loss, test_loss, weights,
 
     fig.text(0.2, 0.03, f"Input column 1: {stim[2]:.1f}", ha='center', fontsize=10, color='#1f77b4', fontweight='bold')
     fig.text(0.4, 0.03, f"Input column 2: {stim[10]:.1f}", ha='center', fontsize=10, color='#ff7f0e', fontweight='bold')
-    fig.text(0.8, 0.03, f"Validation loss: {test_loss:.4f}", ha='center', fontsize=10, fontweight='bold')
-    fig.text(0.6, 0.03, f"Training loss: {train_loss:.4f}", ha='center', fontsize=10, fontweight='bold')
+    fig.text(0.8, 0.03, f"Validation loss: {test_loss:.2f}", ha='center', fontsize=10, fontweight='bold')
+    fig.text(0.6, 0.03, f"Training loss: {train_loss:.2f}", ha='center', fontsize=10, fontweight='bold')
 
     # Plot membrane potential
     axes[0, 0].plot(true[:, 0, 0], label='true col 1')
@@ -44,26 +41,31 @@ def visualize_results(pred, true, stim, odefunc, train_loss, test_loss, weights,
     axes[1, 0].set_title("Firing rates in layer 2/3")
 
     # Plot current weights
-    axes[0, 1].imshow(weights[-1], cmap="viridis", interpolation="nearest")
+    heatmap1 = axes[0, 1].imshow(weights[-1], cmap="viridis", interpolation="nearest")
+    fig.colorbar(heatmap1, ax=axes[0, 1])
     axes[0, 1].set_title("Current weights")
 
-    # Plot difference weights current and first
-    axes[1, 1].imshow(weights[0] - weights[-1], cmap="viridis", interpolation="nearest")
-    axes[1, 1].set_title("Difference weights")
+    # Plot difference weights current and last timestep
+    if len(weights) > 1:
+        heatmap2 = axes[1, 1].imshow(weights[-2] - weights[-1], cmap="viridis", interpolation="nearest", vmin=-0.06, vmax=0.06)
+        fig.colorbar(heatmap2, ax=axes[1, 1])
+        axes[1, 1].set_title("Difference weights")
 
     plt.tight_layout(pad=3.0)
     fig.subplots_adjust(left=0.15)
     plt.savefig('../results/png/{:02d}'.format(len(weights)))
     if show:
         plt.show()
+    plt.close(fig)
 
 def test_ode(test_states, test_stims, iter, odefunc, time_vec, train_loss, weights, show=False):
     with torch.no_grad():
         stim = test_stims[iter]
         true_state = test_states[iter, :, :, :]
 
-        pred_state = odefunc.run_ode_sample(true_state[0], stim, time_vec)
-        test_loss = huber_loss(pred_state[:, 0, :], true_state[:, 0, :])  # 0 = membrane
+        pred_state = odefunc.run_ode_3_stim_phases(true_state[0], stim, time_vec)
+        # test_loss = huber_loss(pred_state[:, 0, :], true_state[:, 0, :])
+        test_loss = mse_halfway_point(pred_state.unsqueeze(0), true_state.unsqueeze(0))
     visualize_results(pred_state, true_state, stim, odefunc, train_loss, test_loss, weights, show)
 
 def make_ds_dmf(ds_file, nr_samples):
@@ -95,22 +97,28 @@ def make_ds_dmf(ds_file, nr_samples):
             pickle.dump(ds, f)
     return ds['states'], ds['stims']
 
-
-if __name__ == '__main__':
-
-    nr_samples = 1000
-    batch_size = 16
-
-    # Get dataset
+def get_data(nr_samples, batch_size):
+    # Get dataset (load pickle if existing, else make new one)
     states, stims = make_ds_dmf('../pickled_ds/states_dmf_17.pkl', nr_samples)
 
     # Prepare train and test sets
-    split = int(nr_samples * 0.5)
+    split = int(nr_samples * 0.9)
     train_states, test_states = states[:split, :, :2, :], states[split:, :, :2, :]  # lose the firing rate
     train_stims, test_stims = stims[:split, :], stims[split:, :]
 
     train_dataset = TensorDataset(train_states, train_stims)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+    return train_loader, test_states, test_stims
+
+
+def train_ode_timecourse(nr_samples, batch_size):
+    '''
+    Train ODE model on the entire time course (specifically, on the
+    membrane potential).
+    '''
+    # Get the train and test set
+    train_loader, test_states, test_stims = get_data(nr_samples, batch_size)
 
     # Initialize the ODE function
     col_params = load_config('../config/model.toml')
@@ -118,17 +126,17 @@ if __name__ == '__main__':
     odefunc = ColumnODEFunc(col_params, 'MT')
 
     # Initialize the optimizer and add connection weights as learnable parameter
-    optimizer = torch.optim.RMSprop([odefunc.connection_weights], lr=1e-2, alpha=0.99)
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
+    optimizer = torch.optim.RMSprop([odefunc.connection_weights], lr=1e-2, alpha=0.9)
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99)  # higher gamma = slower decay
 
     # Store weights
-    weights = [odefunc.connection_weights.detach().numpy().copy()]
+    weights = []
 
     for iter, (true_states, stim_batch) in enumerate(train_loader):
         optimizer.zero_grad()
 
-        nr_batch_samples = len(true_states)
-        time_steps = int(len(true_states[0]) / 3)  # divide by 3, we have three stimulus phases
+        nr_batch_samples = true_states.shape[0]
+        time_steps = true_states.shape[1]
         time_vec = torch.linspace(0., time_steps * sim_params['time_step'], time_steps)
 
         pred_states = torch.Tensor(true_states.shape)
@@ -137,16 +145,16 @@ if __name__ == '__main__':
             stim = stim_batch[batch_iter]
             input_state = true_states[batch_iter, 0, :, :]
 
-            ode_output = odefunc.run_ode_sample(input_state, stim, time_vec)
+            ode_output = odefunc.run_ode_3_stim_phases(input_state, stim, time_vec)
             pred_states[batch_iter, :, :, :] = ode_output
 
-        loss = huber_loss(pred_states[:, :, 0, :], true_states[:, :, 0, :])  # 0=membrane
-        # Compute gradients and update
+        # loss = huber_loss(pred_states[:, :, 0, :], true_states[:, :, 0, :])  # 0=membrane
+        loss = mse_halfway_point(pred_states, true_states)  # last timestep, membrane pot, layer 2/3e
         loss.backward()
         with torch.no_grad():
             odefunc.connection_weights.grad *= odefunc.strict_mask
         optimizer.step()
-        scheduler.step()  # Adjust learning rate after step_size batches
+        scheduler.step()  # adjust learning rate
 
         print(f"Batch {iter + 1}: Learning rate {scheduler.get_last_lr()[0]}")
 
@@ -155,3 +163,21 @@ if __name__ == '__main__':
         weights.append(odefunc.connection_weights.detach().numpy().copy())
         # Test ODE model and visualize results
         test_ode(test_states, test_stims, iter, odefunc, time_vec, loss.item(), weights)
+
+
+
+if __name__ == '__main__':
+    nr_samples = 1000
+    batch_size = 16
+
+    col_params = load_config('../config/model.toml')
+    sim_params = load_config('../config/simulation.toml')
+    odefunc = CoupledColumns(col_params, 'MT')
+
+    state, stim = odefunc.run_single_sim(sim_params, col_params, rand_input=False)
+
+    plt.plot(state[:, 2, 0])
+    plt.plot(state[:, 2, 8])
+    plt.show()
+
+    # train_ode_timecourse(nr_samples, batch_size)

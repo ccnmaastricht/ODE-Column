@@ -278,8 +278,6 @@ class ColumnODEFunc(CoupledColumns):
         inner_weights *= 1 - self.mask
         self.connection_weights = nn.Parameter(inner_weights + lateral_weights, requires_grad=True)
 
-        # self.connection_weights = nn.Parameter(torch.tensor(self.recurrent_weights, dtype=torch.float32), requires_grad=True)
-
     def compute_firing_rate_torch(self, x, params):
         '''
         Compute the firing rates torch-friendly.
@@ -289,11 +287,20 @@ class ColumnODEFunc(CoupledColumns):
         x_activ = x_nom / (1 - torch.exp(-d * x_nom))
         return x_activ
 
-    def dynamics_ode(self, t: float, state: torch.tensor, stim:torch.tensor) -> torch.tensor:
+    def dynamics_ode(self, t: torch.tensor, state: torch.tensor, stim: torch.tensor, time_vec: torch.tensor) -> torch.tensor:
         """
         Compute the dynamics of the coupled columns.
         """
-        feedforward_rate = stim
+
+        feedforward_rate = torch.tensor(
+            [np.interp(t.detach().numpy(), time_vec.detach().numpy(), stim[:, i].detach().numpy()) for i in
+             range(stim.shape[1])], dtype=torch.float32)
+
+        # if t > 0.5 and t < 1.0:
+        #     feedforward_rate = stim[0]
+        # else:
+        #     feedforward_rate = stim[1]
+
         membrane_potential, adaptation = state[0], state[1]
 
         firing_rate = self.compute_firing_rate_torch(membrane_potential - adaptation, self.gain_function_parameters)
@@ -302,12 +309,9 @@ class ColumnODEFunc(CoupledColumns):
         background_current = self.background_weights * self.background_drive
         recurrent_current = torch.matmul(self.connection_weights, firing_rate)
 
-        # total_current = (feedforward_current + background_current +
-        #                  recurrent_current) * self.synapse_time_constant
         total_current = (feedforward_current + background_current) * self.synapse_time_constant + recurrent_current
 
-        delta_membrane_potential = (
-            -membrane_potential +
+        delta_membrane_potential = (-membrane_potential +
             total_current * self.resistance) / self.membrane_time_constant
 
         delta_adaptation = (-adaptation + self.adaptation_strength *
@@ -315,19 +319,30 @@ class ColumnODEFunc(CoupledColumns):
 
         return torch.stack([delta_membrane_potential, delta_adaptation])
 
-    def run_ode_sample(self, input_state, stim, time_vec):
+    def run_ode_3_stim_phases(self, input_state, stim, time_vec):
         '''
         Runs a single sample in three phases: a pre-stimulus phase,
         a stimulus phase (with given stim) and a post-stimulus phase.
         '''
-        # Pre stimulus
-        empty_stim = torch.zeros(self.num_populations)
-        output_pre = torch_odeint(lambda t, y: self.dynamics_ode(t, y, empty_stim), input_state, time_vec)
 
-        # Stimulus phase
-        output_stim = torch_odeint(lambda t, y: self.dynamics_ode(t, y, stim), output_pre[0], time_vec)
+        # Prepare stimulus tensor in three phases
+        phase_length = int(len(time_vec)/3)
 
-        # Post stimulus
-        output_post = torch_odeint(lambda t, y: self.dynamics_ode(t, y, empty_stim), output_stim[0], time_vec)
+        empty_stim = torch.zeros(1, self.num_populations)
+        empty_stim_phase = empty_stim.expand(phase_length, -1)
 
-        return torch.cat((output_pre, output_stim, output_post), dim=0)
+        stim_phase = stim.expand(phase_length, -1)
+        whole_stim_phase = torch.cat((empty_stim_phase, stim_phase, empty_stim_phase), dim=0)
+
+        # whole_stim_phase = torch.Tensor(2, 16)
+        # whole_stim_phase[1] = empty_stim
+        # whole_stim_phase[0] = stim
+
+        output = torch_odeint(lambda t, y: self.dynamics_ode(t, y, whole_stim_phase, time_vec), input_state, time_vec)
+
+        # output_pre = torch_odeint(lambda t, y: self.dynamics_ode(t, y, empty_stim), input_state, time_vec)
+        # output_stim = torch_odeint(lambda t, y: self.dynamics_ode(t, y, stim), output_pre[0], time_vec)
+        # output_post = torch_odeint(lambda t, y: self.dynamics_ode(t, y, empty_stim), output_stim[0], time_vec)
+        # return torch.cat((output_pre, output_stim, output_post), dim=0)
+
+        return output
