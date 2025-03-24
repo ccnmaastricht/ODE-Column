@@ -63,9 +63,9 @@ def test_ode(test_states, test_stims, iter, odefunc, time_vec, train_loss, weigh
         stim = test_stims[iter]
         true_state = test_states[iter, :, :, :]
 
-        pred_state = odefunc.run_ode_3_stim_phases(true_state[0], stim, time_vec)
-        # test_loss = huber_loss(pred_state[:, 0, :], true_state[:, 0, :])
-        test_loss = mse_halfway_point(pred_state.unsqueeze(0), true_state.unsqueeze(0))
+        pred_state = odefunc.run_ode_stim_phases(true_state[0], stim, time_vec, num_stim_phases=3)
+        # test_loss = huber_loss(pred_state.unsqueeze(0), true_state.unsqueeze(0))
+        test_loss = mse_halfway_point(pred_state.unsqueeze(0), true_state.unsqueeze(0), odefunc)
     visualize_results(pred_state, true_state, stim, odefunc, train_loss, test_loss, weights, show)
 
 def make_ds_dmf(ds_file, nr_samples):
@@ -80,7 +80,7 @@ def make_ds_dmf(ds_file, nr_samples):
 
         # Make ds dict with two tensors states and stims
         protocol, dt = sim_params['protocol'], sim_params['time_step']
-        time_steps = (protocol['pre_stimulus_period'] + protocol['post_stimulus_period'] + protocol['stimulus_duration']) / dt
+        time_steps = (protocol['pre_stimulus_period'] + protocol['post_stimulus_period'], protocol['stimulus_duration']) / dt
         ds = {
             'states': torch.Tensor(nr_samples, int(time_steps), 3, columns.num_populations),
             'stims': torch.Tensor(nr_samples, columns.num_populations)
@@ -88,7 +88,7 @@ def make_ds_dmf(ds_file, nr_samples):
 
         # Generate training data and store in ds dict
         for i in range(nr_samples):
-            state, stim = columns.run_single_sim(sim_params, col_params, rand_input=True)
+            state, stim = columns.run_single_sim(sim_params, col_params, ff_input='random', rand_membrane_init=False, num_stim_phases=3)
             ds['states'][i, :, :, :] = torch.tensor(state)   # membrane, adaptation and firing rate
             ds['stims'][i, :] = torch.tensor(stim)  # stimulus input used
 
@@ -97,9 +97,9 @@ def make_ds_dmf(ds_file, nr_samples):
             pickle.dump(ds, f)
     return ds['states'], ds['stims']
 
-def get_data(nr_samples, batch_size):
+def get_data(nr_samples, batch_size, fn):
     # Get dataset (load pickle if existing, else make new one)
-    states, stims = make_ds_dmf('../pickled_ds/states_dmf_17.pkl', nr_samples)
+    states, stims = make_ds_dmf('../pickled_ds/' + fn + '.pkl', nr_samples)
 
     # Prepare train and test sets
     split = int(nr_samples * 0.9)
@@ -112,13 +112,13 @@ def get_data(nr_samples, batch_size):
     return train_loader, test_states, test_stims
 
 
-def train_ode_timecourse(nr_samples, batch_size):
+def train_ode_two_columns(nr_samples, batch_size, fn):
     '''
-    Train ODE model on the entire time course (specifically, on the
-    membrane potential).
+    Train the coupled columns ODE to learn the lateral connections
+    between the columns.
     '''
     # Get the train and test set
-    train_loader, test_states, test_stims = get_data(nr_samples, batch_size)
+    train_loader, test_states, test_stims = get_data(nr_samples, batch_size, fn)
 
     # Initialize the ODE function
     col_params = load_config('../config/model.toml')
@@ -145,18 +145,18 @@ def train_ode_timecourse(nr_samples, batch_size):
             stim = stim_batch[batch_iter]
             input_state = true_states[batch_iter, 0, :, :]
 
-            ode_output = odefunc.run_ode_3_stim_phases(input_state, stim, time_vec)
+            ode_output = odefunc.run_ode_stim_phases(input_state, stim, time_vec, 3)
             pred_states[batch_iter, :, :, :] = ode_output
 
-        # loss = huber_loss(pred_states[:, :, 0, :], true_states[:, :, 0, :])  # 0=membrane
-        loss = mse_halfway_point(pred_states, true_states)  # last timestep, membrane pot, layer 2/3e
+        # loss = huber_loss(pred_states, true_states)  # 0=membrane
+        loss = mse_halfway_point(pred_states, true_states, odefunc)  # last timestep, membrane pot, layer 2/3e
         loss.backward()
         with torch.no_grad():
             odefunc.connection_weights.grad *= odefunc.strict_mask
         optimizer.step()
         scheduler.step()  # adjust learning rate
 
-        print(f"Batch {iter + 1}: Learning rate {scheduler.get_last_lr()[0]}")
+        # print(f"Batch {iter + 1}: Learning rate {scheduler.get_last_lr()[0]}")
 
         # Print loss, save current weights in array
         print('Iter {:02d} | Total Loss {:.5f}'.format(iter + 1, loss.item()))
@@ -165,19 +165,8 @@ def train_ode_timecourse(nr_samples, batch_size):
         test_ode(test_states, test_stims, iter, odefunc, time_vec, loss.item(), weights)
 
 
-
 if __name__ == '__main__':
     nr_samples = 1000
     batch_size = 16
 
-    col_params = load_config('../config/model.toml')
-    sim_params = load_config('../config/simulation.toml')
-    odefunc = CoupledColumns(col_params, 'MT')
-
-    state, stim = odefunc.run_single_sim(sim_params, col_params, rand_input=False)
-
-    plt.plot(state[:, 2, 0])
-    plt.plot(state[:, 2, 8])
-    plt.show()
-
-    # train_ode_timecourse(nr_samples, batch_size)
+    train_ode_two_columns(nr_samples, batch_size, 'states_dmf_17')

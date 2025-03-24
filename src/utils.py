@@ -49,12 +49,12 @@ def gain_function(x: np.array, a: float, b: float, d: float) -> np.array:
 
 
 def create_feedforward_input(num_populations: int, layer_4_indices: tuple,
-                             base_line_drive: float,
-                             delta_drive: float) -> np.array:
+                             input_colA: float,
+                             input_colB: float) -> np.array:
     """Create feedforward input array for the simulation."""
     feedforward_rate = np.zeros(num_populations)
-    feedforward_rate[layer_4_indices[0]] = (base_line_drive + delta_drive / 2)
-    feedforward_rate[layer_4_indices[1]] = (base_line_drive - delta_drive / 2)
+    feedforward_rate[layer_4_indices[0]] = input_colA
+    feedforward_rate[layer_4_indices[1]] = input_colB
     return feedforward_rate
 
 
@@ -71,13 +71,18 @@ def huber_loss(y_pred, y_true):
     Computes Huber loss, a loss function suited for trajectories.
     '''
     hub_loss = torch.nn.SmoothL1Loss(beta=1.0)
-    return hub_loss(y_pred, y_true)
+    return hub_loss(y_pred[:, :, 0, :], y_true[:, :, 0, :])
 
-def mse_halfway_point(pred, true):
+def mse_halfway_point(pred, true, odefunc):
     '''
     Computes the mean squared error between membrane potenials
     of column A and B at the halfway time point, i.e. in the
     middle of the stimulus phase.
     '''
-    halfpoint = int(pred.shape[1] / 2)
-    return torch.mean(abs(pred[:, halfpoint, 0, [0, 8]] - true[:, halfpoint, 0, [0, 8]]))
+    halfpoint = int(pred.shape[1] / 2)  # int(pred.shape[1] - 1)
+    mem_pred, adap_pred = pred[:, halfpoint, 0, [0, 8]], pred[:, halfpoint, 1, [0, 8]]
+    mem_true, adap_true = true[:, halfpoint, 0, [0, 8]], true[:, halfpoint, 1, [0, 8]]
+    fr_pred = odefunc.compute_firing_rate_torch(mem_pred - adap_pred, odefunc.gain_function_parameters)
+    fr_true = odefunc.compute_firing_rate_torch(mem_true - adap_true, odefunc.gain_function_parameters)
+    return torch.mean(abs(fr_pred - fr_true))
+    # return torch.mean(abs(pred[:, halfpoint, 0, [0, 8]] - true[:, halfpoint, 0, [0, 8]]))

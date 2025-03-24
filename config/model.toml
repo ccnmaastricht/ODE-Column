@@ -21,10 +21,8 @@ feedforward = [0, 0, 295, 186, 0, 0, 0, 0]
 
 [synaptic_strength]
 baseline = 0.0878
-#internal = 0.0878
-#lateral = 0.0878
-internal = 0.13
-lateral = 0.172 #0.23
+internal = 0.0878 # 0.13
+lateral = 0.23  # 0.0 # 0.0878 #
 
 [population_size]
 v1 = [47386, 13366, 70387, 17597, 20740, 4554, 19839, 4063]

@@ -184,7 +184,9 @@ class CoupledColumns:
 
     def run_single_sim(self, simulation_parameters: dict,
                        column_parameters: dict,
-                       rand_input: bool=True) -> list:
+                       ff_input: str='random',
+                       rand_membrane_init: bool=True,
+                       num_stim_phases: int=3) -> list:
         '''
         Runs a single simulation with either a fixed (in simulation.toml)
         or random stimulus input. Returns a list containing the membrane
@@ -198,6 +200,20 @@ class CoupledColumns:
             (simulation_parameters['initial_conditions']['membrane_potential'],
              simulation_parameters['initial_conditions']['adaptation']))
 
+        if rand_membrane_init:
+            # lowest = np.array([6.42979557, 7.63449402, 10.4924322, 11.3261861,
+            #                    4.28004375, 9.8121234, -4.6003687, 12.1522374])
+            # highest = np.array([-19.7279296, 8.68585084, 12.0828965, 11.7200528,
+            #                     0.0739902866, 9.52313487, 1.91320049, 11.9374244])
+
+            lowest = np.array([6.42979557, 7.63449402, 10.4924322, 11.3261861,
+                               4.28004375, 9.8121234, -4.6003687, 12.1522374]) - 1.0
+            highest = np.array([6.42979557, 7.63449402, 10.4924322, 11.3261861,
+                               4.28004375, 9.8121234, -4.6003687, 12.1522374]) + 1.0
+
+            initial_conditions[:8] = np.random.uniform(low=lowest, high=highest)
+            initial_conditions[8:16] = np.random.uniform(low=lowest, high=highest)
+
         layer_4_indices = column_parameters['layer_4_indices']
 
         states_list = []
@@ -209,24 +225,32 @@ class CoupledColumns:
         states_list.append(state)
 
         # Stimulus phase
-        if rand_input is True:
+        if ff_input=='random':
             rand_diff = np.random.uniform(-20.0, 20.0)
             feedforward_rate = create_feedforward_input(
                 self.num_populations, layer_4_indices,
-                protocol['mean_stimulus_drive'], rand_diff)
-        else:
+                32.0 + rand_diff, 32.0 - rand_diff)
+        elif ff_input=='fixed':
             feedforward_rate = create_feedforward_input(
                 self.num_populations, layer_4_indices,
-                protocol['mean_stimulus_drive'], protocol['difference_stimulus_drive'])
+                40.0, 24.0)
+        elif ff_input=='xor':
+            rand_binary = np.random.randint(0, 2, 2)
+            rand_fr = rand_binary * np.random.uniform(35.0, 45.0)
+            feedforward_rate = create_feedforward_input(
+                self.num_populations, layer_4_indices,
+                rand_fr[0], rand_fr[1])
+
         state = self.simulate(feedforward_rate, state[-1],
                                  protocol['stimulus_duration'], time_step)
         states_list.append(state)
 
         # Post-stimulus phase
-        feedforward_rate_no_stim = np.zeros(self.num_populations)
-        state = self.simulate(feedforward_rate_no_stim, state[-1],
-                                 protocol['post_stimulus_period'], time_step)
-        states_list.append(state)
+        if num_stim_phases == 3:
+            feedforward_rate_no_stim = np.zeros(self.num_populations)
+            state = self.simulate(feedforward_rate_no_stim, state[-1],
+                                     protocol['post_stimulus_period'], time_step)
+            states_list.append(state)
 
         # Convert list to numpy array
         state = np.concatenate(states_list)
@@ -262,6 +286,8 @@ class ColumnODEFunc(CoupledColumns):
 
         # Strict mask with only lat connections between 2/3 layers
         strict_mask = torch.zeros(mask.shape)
+        strict_mask[0, 0] += 1.0
+        strict_mask[8, 8] += 1.0
         strict_mask[1, 8] += 1.0
         strict_mask[9, 0] += 1.0
         self.strict_mask = strict_mask
@@ -277,6 +303,7 @@ class ColumnODEFunc(CoupledColumns):
         inner_weights = original_weights * self.synapse_time_constant
         inner_weights *= 1 - self.mask
         self.connection_weights = nn.Parameter(inner_weights + lateral_weights, requires_grad=True)
+
 
     def compute_firing_rate_torch(self, x, params):
         '''
@@ -296,11 +323,6 @@ class ColumnODEFunc(CoupledColumns):
             [np.interp(t.detach().numpy(), time_vec.detach().numpy(), stim[:, i].detach().numpy()) for i in
              range(stim.shape[1])], dtype=torch.float32)
 
-        # if t > 0.5 and t < 1.0:
-        #     feedforward_rate = stim[0]
-        # else:
-        #     feedforward_rate = stim[1]
-
         membrane_potential, adaptation = state[0], state[1]
 
         firing_rate = self.compute_firing_rate_torch(membrane_potential - adaptation, self.gain_function_parameters)
@@ -319,30 +341,31 @@ class ColumnODEFunc(CoupledColumns):
 
         return torch.stack([delta_membrane_potential, delta_adaptation])
 
-    def run_ode_3_stim_phases(self, input_state, stim, time_vec):
+    def run_ode_stim_phases(self, input_state, stim, time_vec, num_stim_phases=3):
         '''
         Runs a single sample in three phases: a pre-stimulus phase,
         a stimulus phase (with given stim) and a post-stimulus phase.
         '''
 
         # Prepare stimulus tensor in three phases
-        phase_length = int(len(time_vec)/3)
+        phase_length = int(len(time_vec)/num_stim_phases)
 
         empty_stim = torch.zeros(1, self.num_populations)
         empty_stim_phase = empty_stim.expand(phase_length, -1)
 
         stim_phase = stim.expand(phase_length, -1)
-        whole_stim_phase = torch.cat((empty_stim_phase, stim_phase, empty_stim_phase), dim=0)
-
-        # whole_stim_phase = torch.Tensor(2, 16)
-        # whole_stim_phase[1] = empty_stim
-        # whole_stim_phase[0] = stim
+        if num_stim_phases == 3:
+            whole_stim_phase = torch.cat((empty_stim_phase, stim_phase, empty_stim_phase), dim=0)
+        elif num_stim_phases == 2:
+            whole_stim_phase = torch.cat((empty_stim_phase, stim_phase), dim=0)
 
         output = torch_odeint(lambda t, y: self.dynamics_ode(t, y, whole_stim_phase, time_vec), input_state, time_vec)
 
-        # output_pre = torch_odeint(lambda t, y: self.dynamics_ode(t, y, empty_stim), input_state, time_vec)
-        # output_stim = torch_odeint(lambda t, y: self.dynamics_ode(t, y, stim), output_pre[0], time_vec)
-        # output_post = torch_odeint(lambda t, y: self.dynamics_ode(t, y, empty_stim), output_stim[0], time_vec)
-        # return torch.cat((output_pre, output_stim, output_post), dim=0)
+        return output
 
+    def run_ode_variable_stim(self, input_state, stim, time_vec):
+        '''
+        Runs a single sample with a variable, changing stimulus.
+        '''
+        output = torch_odeint(lambda t, y: self.dynamics_ode(t, y, stim, time_vec), input_state, time_vec)
         return output
