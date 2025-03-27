@@ -1,7 +1,6 @@
 import numpy as np
 from scipy.integrate import odeint
 from scipy.linalg import block_diag
-import math
 
 import torch
 import torch.nn as nn
@@ -200,36 +199,31 @@ class CoupledColumns:
             (simulation_parameters['initial_conditions']['membrane_potential'],
              simulation_parameters['initial_conditions']['adaptation']))
 
-        if rand_membrane_init:
-            # lowest = np.array([6.42979557, 7.63449402, 10.4924322, 11.3261861,
-            #                    4.28004375, 9.8121234, -4.6003687, 12.1522374])
-            # highest = np.array([-19.7279296, 8.68585084, 12.0828965, 11.7200528,
-            #                     0.0739902866, 9.52313487, 1.91320049, 11.9374244])
-
-            lowest = np.array([6.42979557, 7.63449402, 10.4924322, 11.3261861,
-                               4.28004375, 9.8121234, -4.6003687, 12.1522374]) - 1.0
-            highest = np.array([6.42979557, 7.63449402, 10.4924322, 11.3261861,
-                               4.28004375, 9.8121234, -4.6003687, 12.1522374]) + 1.0
-
-            initial_conditions[:8] = np.random.uniform(low=lowest, high=highest)
-            initial_conditions[8:16] = np.random.uniform(low=lowest, high=highest)
+        # if rand_membrane_init:
+        #     # lowest = np.array([6.42979557, 7.63449402, 10.4924322, 11.3261861,
+        #     #                    4.28004375, 9.8121234, -4.6003687, 12.1522374])
+        #     # highest = np.array([-19.7279296, 8.68585084, 12.0828965, 11.7200528,
+        #     #                     0.0739902866, 9.52313487, 1.91320049, 11.9374244])
+        #
+        #     lowest = np.array([6.42979557, 7.63449402, 10.4924322, 11.3261861,
+        #                        4.28004375, 9.8121234, -4.6003687, 12.1522374]) - 1.0
+        #     highest = np.array([6.42979557, 7.63449402, 10.4924322, 11.3261861,
+        #                        4.28004375, 9.8121234, -4.6003687, 12.1522374]) + 1.0
+        #
+        #     initial_conditions[:8] = np.random.uniform(low=lowest, high=highest)
+        #     initial_conditions[8:16] = np.random.uniform(low=lowest, high=highest)
 
         layer_4_indices = column_parameters['layer_4_indices']
 
         states_list = []
 
-        # Pre-stimulus phase
-        feedforward_rate_no_stim = np.zeros(self.num_populations)
-        state = self.simulate(feedforward_rate_no_stim, initial_conditions,
-                                 protocol['pre_stimulus_period'], time_step)
-        states_list.append(state)
-
-        # Stimulus phase
+        # Stimulus - feedforward input
         if ff_input=='random':
             rand_diff = np.random.uniform(-20.0, 20.0)
             feedforward_rate = create_feedforward_input(
                 self.num_populations, layer_4_indices,
-                32.0 + rand_diff, 32.0 - rand_diff)
+                32.0 + (rand_diff / 100.), 32.0 - (rand_diff / 100.))
+                # 32.0, 32.0)
         elif ff_input=='fixed':
             feedforward_rate = create_feedforward_input(
                 self.num_populations, layer_4_indices,
@@ -241,13 +235,19 @@ class CoupledColumns:
                 self.num_populations, layer_4_indices,
                 rand_fr[0], rand_fr[1])
 
+        # Pre-stimulus phase
+        feedforward_rate_no_stim = np.zeros(self.num_populations)
+        state = self.simulate(feedforward_rate_no_stim, initial_conditions,
+                                 protocol['pre_stimulus_period'], time_step)
+        states_list.append(state)
+
+        # Stimulus phase
         state = self.simulate(feedforward_rate, state[-1],
                                  protocol['stimulus_duration'], time_step)
         states_list.append(state)
 
         # Post-stimulus phase
         if num_stim_phases == 3:
-            feedforward_rate_no_stim = np.zeros(self.num_populations)
             state = self.simulate(feedforward_rate_no_stim, state[-1],
                                      protocol['post_stimulus_period'], time_step)
             states_list.append(state)
@@ -286,8 +286,6 @@ class ColumnODEFunc(CoupledColumns):
 
         # Strict mask with only lat connections between 2/3 layers
         strict_mask = torch.zeros(mask.shape)
-        strict_mask[0, 0] += 1.0
-        strict_mask[8, 8] += 1.0
         strict_mask[1, 8] += 1.0
         strict_mask[9, 0] += 1.0
         self.strict_mask = strict_mask
@@ -305,10 +303,11 @@ class ColumnODEFunc(CoupledColumns):
         self.connection_weights = nn.Parameter(inner_weights + lateral_weights, requires_grad=True)
 
 
-    def compute_firing_rate_torch(self, x, params):
+    def compute_firing_rate_torch(self, x):
         '''
         Compute the firing rates torch-friendly.
         '''
+        params = self.gain_function_parameters
         a, b, d = params.gain, params.threshold, params.noise_factor
         x_nom = a * x - b
         x_activ = x_nom / (1 - torch.exp(-d * x_nom))
@@ -316,7 +315,7 @@ class ColumnODEFunc(CoupledColumns):
 
     def dynamics_ode(self, t: torch.tensor, state: torch.tensor, stim: torch.tensor, time_vec: torch.tensor) -> torch.tensor:
         """
-        Compute the dynamics of the coupled columns.
+        Dynamics of the coupled columns, used by the ODE to learn connection_weights
         """
 
         feedforward_rate = torch.tensor(
@@ -325,7 +324,7 @@ class ColumnODEFunc(CoupledColumns):
 
         membrane_potential, adaptation = state[0], state[1]
 
-        firing_rate = self.compute_firing_rate_torch(membrane_potential - adaptation, self.gain_function_parameters)
+        firing_rate = self.compute_firing_rate_torch(membrane_potential - adaptation)
 
         feedforward_current = self.feedforward_weights * feedforward_rate
         background_current = self.background_weights * self.background_drive
