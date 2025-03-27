@@ -10,6 +10,51 @@ from src.coupled_columns import CoupledColumns, ColumnODEFunc
 from src.utils import load_config, huber_loss, mse_halfway_point
 
 
+def make_ds_dmf(ds_file, nr_samples):
+    if not os.path.exists('../data'):
+        os.makedirs('../data')
+    if os.path.exists(ds_file):
+        with open(ds_file, 'rb') as f:
+            ds = pickle.load(f)
+    else:
+        # Initialize two columns
+        col_params = load_config('../config/model.toml')
+        sim_params = load_config('../config/simulation.toml')
+        columns = CoupledColumns(col_params, 'MT')
+
+        # Make ds dict with two tensors states and stims
+        protocol, dt = sim_params['protocol'], sim_params['time_step']
+        time_steps = (protocol['pre_stimulus_period'] + protocol['post_stimulus_period'] + protocol['stimulus_duration']) / dt
+        ds = {
+            'states': torch.Tensor(nr_samples, int(time_steps), 3, columns.num_populations),
+            'stims': torch.Tensor(nr_samples, columns.num_populations)
+        }
+
+        # Generate training data and store in ds dict
+        for i in range(nr_samples):
+            state, stim = columns.run_single_sim(sim_params, col_params, ff_input='random', num_stim_phases=3)
+            ds['states'][i, :, :, :] = torch.tensor(state)   # membrane, adaptation and firing rate
+            ds['stims'][i, :] = torch.tensor(stim)  # stimulus input used
+
+        # Save ds dict as pickle
+        with open(ds_file, 'wb') as f:
+            pickle.dump(ds, f)
+    return ds['states'], ds['stims']
+
+def get_data(nr_samples, batch_size, fn):
+    # Get dataset (load pickle if existing, else make new one)
+    states, stims = make_ds_dmf(fn, nr_samples)
+
+    # Prepare train and test sets
+    split = int(nr_samples * 0.9)
+    train_states, test_states = states[:split, :, :2, :], states[split:, :, :2, :]  # lose the firing rate
+    train_stims, test_stims = stims[:split, :], stims[split:, :]
+
+    train_dataset = TensorDataset(train_states, train_stims)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+    return train_loader, test_states, test_stims
+
 def visualize_results(pred, true, stim, odefunc, train_loss, test_loss, weights, show=False):
     if not os.path.exists('../results/png'):
         os.makedirs('../results/png')
@@ -29,10 +74,10 @@ def visualize_results(pred, true, stim, odefunc, train_loss, test_loss, weights,
     fig.legend(loc="upper left")
 
     # Plot firing rate
-    col1_true_fr = odefunc.compute_firing_rate_torch(true[:, 0, 0] - true[:, 1, 0], odefunc.gain_function_parameters)
-    col2_true_fr = odefunc.compute_firing_rate_torch(true[:, 0, 8] - true[:, 1, 8], odefunc.gain_function_parameters)
-    col1_pred_fr = odefunc.compute_firing_rate_torch(pred[:, 0, 0] - pred[:, 1, 0], odefunc.gain_function_parameters)
-    col2_pred_fr = odefunc.compute_firing_rate_torch(pred[:, 0, 8] - pred[:, 1, 8], odefunc.gain_function_parameters)
+    col1_true_fr = odefunc.compute_firing_rate_torch(true[:, 0, 0] - true[:, 1, 0])
+    col2_true_fr = odefunc.compute_firing_rate_torch(true[:, 0, 8] - true[:, 1, 8])
+    col1_pred_fr = odefunc.compute_firing_rate_torch(pred[:, 0, 0] - pred[:, 1, 0])
+    col2_pred_fr = odefunc.compute_firing_rate_torch(pred[:, 0, 8] - pred[:, 1, 8])
 
     axes[1, 0].plot(col1_true_fr, label='true col 1')
     axes[1, 0].plot(col2_true_fr, label='true col 2')
@@ -64,52 +109,8 @@ def test_ode(test_states, test_stims, iter, odefunc, time_vec, train_loss, weigh
         true_state = test_states[iter, :, :, :]
 
         pred_state = odefunc.run_ode_stim_phases(true_state[0], stim, time_vec, num_stim_phases=3)
-        # test_loss = huber_loss(pred_state.unsqueeze(0), true_state.unsqueeze(0))
-        test_loss = mse_halfway_point(pred_state.unsqueeze(0), true_state.unsqueeze(0), odefunc)
+        test_loss = huber_loss(pred_state.unsqueeze(0), true_state.unsqueeze(0))
     visualize_results(pred_state, true_state, stim, odefunc, train_loss, test_loss, weights, show)
-
-def make_ds_dmf(ds_file, nr_samples):
-    if os.path.exists(ds_file):
-        with open(ds_file, 'rb') as f:
-            ds = pickle.load(f)
-    else:
-        # Initialize two columns
-        col_params = load_config('../config/model.toml')
-        sim_params = load_config('../config/simulation.toml')
-        columns = CoupledColumns(col_params, 'MT')
-
-        # Make ds dict with two tensors states and stims
-        protocol, dt = sim_params['protocol'], sim_params['time_step']
-        time_steps = (protocol['pre_stimulus_period'] + protocol['post_stimulus_period'], protocol['stimulus_duration']) / dt
-        ds = {
-            'states': torch.Tensor(nr_samples, int(time_steps), 3, columns.num_populations),
-            'stims': torch.Tensor(nr_samples, columns.num_populations)
-        }
-
-        # Generate training data and store in ds dict
-        for i in range(nr_samples):
-            state, stim = columns.run_single_sim(sim_params, col_params, ff_input='random', rand_membrane_init=False, num_stim_phases=3)
-            ds['states'][i, :, :, :] = torch.tensor(state)   # membrane, adaptation and firing rate
-            ds['stims'][i, :] = torch.tensor(stim)  # stimulus input used
-
-        # Save ds dict as pickle
-        with open(ds_file, 'wb') as f:
-            pickle.dump(ds, f)
-    return ds['states'], ds['stims']
-
-def get_data(nr_samples, batch_size, fn):
-    # Get dataset (load pickle if existing, else make new one)
-    states, stims = make_ds_dmf('../pickled_ds/' + fn + '.pkl', nr_samples)
-
-    # Prepare train and test sets
-    split = int(nr_samples * 0.9)
-    train_states, test_states = states[:split, :, :2, :], states[split:, :, :2, :]  # lose the firing rate
-    train_stims, test_stims = stims[:split, :], stims[split:, :]
-
-    train_dataset = TensorDataset(train_states, train_stims)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-
-    return train_loader, test_states, test_stims
 
 
 def train_ode_two_columns(nr_samples, batch_size, fn):
@@ -148,15 +149,12 @@ def train_ode_two_columns(nr_samples, batch_size, fn):
             ode_output = odefunc.run_ode_stim_phases(input_state, stim, time_vec, 3)
             pred_states[batch_iter, :, :, :] = ode_output
 
-        # loss = huber_loss(pred_states, true_states)  # 0=membrane
-        loss = mse_halfway_point(pred_states, true_states, odefunc)  # last timestep, membrane pot, layer 2/3e
+        loss = huber_loss(pred_states, true_states)  # only train on membrane potential
         loss.backward()
-        with torch.no_grad():
+        with torch.no_grad():  # only update the lateral weights
             odefunc.connection_weights.grad *= odefunc.strict_mask
         optimizer.step()
         scheduler.step()  # adjust learning rate
-
-        # print(f"Batch {iter + 1}: Learning rate {scheduler.get_last_lr()[0]}")
 
         # Print loss, save current weights in array
         print('Iter {:02d} | Total Loss {:.5f}'.format(iter + 1, loss.item()))
@@ -169,4 +167,4 @@ if __name__ == '__main__':
     nr_samples = 1000
     batch_size = 16
 
-    train_ode_two_columns(nr_samples, batch_size, 'states_dmf_17')
+    train_ode_two_columns(nr_samples, batch_size, '../data/states_two_cols.pkl')

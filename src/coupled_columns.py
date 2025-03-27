@@ -184,7 +184,6 @@ class CoupledColumns:
     def run_single_sim(self, simulation_parameters: dict,
                        column_parameters: dict,
                        ff_input: str='random',
-                       rand_membrane_init: bool=True,
                        num_stim_phases: int=3) -> list:
         '''
         Runs a single simulation with either a fixed (in simulation.toml)
@@ -199,20 +198,6 @@ class CoupledColumns:
             (simulation_parameters['initial_conditions']['membrane_potential'],
              simulation_parameters['initial_conditions']['adaptation']))
 
-        # if rand_membrane_init:
-        #     # lowest = np.array([6.42979557, 7.63449402, 10.4924322, 11.3261861,
-        #     #                    4.28004375, 9.8121234, -4.6003687, 12.1522374])
-        #     # highest = np.array([-19.7279296, 8.68585084, 12.0828965, 11.7200528,
-        #     #                     0.0739902866, 9.52313487, 1.91320049, 11.9374244])
-        #
-        #     lowest = np.array([6.42979557, 7.63449402, 10.4924322, 11.3261861,
-        #                        4.28004375, 9.8121234, -4.6003687, 12.1522374]) - 1.0
-        #     highest = np.array([6.42979557, 7.63449402, 10.4924322, 11.3261861,
-        #                        4.28004375, 9.8121234, -4.6003687, 12.1522374]) + 1.0
-        #
-        #     initial_conditions[:8] = np.random.uniform(low=lowest, high=highest)
-        #     initial_conditions[8:16] = np.random.uniform(low=lowest, high=highest)
-
         layer_4_indices = column_parameters['layer_4_indices']
 
         states_list = []
@@ -222,8 +207,7 @@ class CoupledColumns:
             rand_diff = np.random.uniform(-20.0, 20.0)
             feedforward_rate = create_feedforward_input(
                 self.num_populations, layer_4_indices,
-                32.0 + (rand_diff / 100.), 32.0 - (rand_diff / 100.))
-                # 32.0, 32.0)
+                32.0 + (rand_diff), 32.0 - (rand_diff))
         elif ff_input=='fixed':
             feedforward_rate = create_feedforward_input(
                 self.num_populations, layer_4_indices,
@@ -278,7 +262,11 @@ class ColumnODEFunc(CoupledColumns):
         self.resistance             = torch.tensor(self.resistance, dtype=torch.float32)
         self.adaptation_strength    = torch.tensor(self.adaptation_strength, dtype=torch.float32)
 
-        # Weights mask
+        self._make_masks()
+        self._initialize_connection_weights()
+
+    def _make_masks(self):
+        # Weights mask to select only external connections
         mask = torch.zeros(size=(self.num_populations, self.num_populations), dtype=torch.float32)
         mask[:8, 8:] += 1.0
         mask[8:, :8] += 1.0
@@ -290,11 +278,15 @@ class ColumnODEFunc(CoupledColumns):
         strict_mask[9, 0] += 1.0
         self.strict_mask = strict_mask
 
-        # Init the weights as trainable parameter
+    def _initialize_connection_weights(self):
+        '''
+        Connection weights consist of inner connections (8x8) for both columns
+        and external connections between columns, i.e. lateral connections
+        '''
         original_weights = torch.tensor(self.recurrent_weights, dtype=torch.float32).detach().clone()
         mean_W = self.synapse_time_constant * original_weights.mean() / 100.
         std_W = self.synapse_time_constant * original_weights.std() / 100.
-        lateral_weights = torch.normal(mean=mean_W, std=std_W, size=mask.shape)
+        lateral_weights = torch.normal(mean=mean_W, std=std_W, size=self.mask.shape)
         lateral_weights *= self.mask  # set inner connectivity to zero
         lateral_weights *= self.strict_mask  # only layer 2/3 connections
 
@@ -317,7 +309,7 @@ class ColumnODEFunc(CoupledColumns):
         """
         Dynamics of the coupled columns, used by the ODE to learn connection_weights
         """
-
+        # Get current stimulus (ff rate) based on current time t and the time vector time_vec
         feedforward_rate = torch.tensor(
             [np.interp(t.detach().numpy(), time_vec.detach().numpy(), stim[:, i].detach().numpy()) for i in
              range(stim.shape[1])], dtype=torch.float32)
@@ -326,9 +318,9 @@ class ColumnODEFunc(CoupledColumns):
 
         firing_rate = self.compute_firing_rate_torch(membrane_potential - adaptation)
 
-        feedforward_current = self.feedforward_weights * feedforward_rate
-        background_current = self.background_weights * self.background_drive
-        recurrent_current = torch.matmul(self.connection_weights, firing_rate)
+        feedforward_current = self.feedforward_weights * feedforward_rate       # stimulus feedforward input
+        background_current = self.background_weights * self.background_drive    # background input
+        recurrent_current = torch.matmul(self.connection_weights, firing_rate)  # recurrent input
 
         total_current = (feedforward_current + background_current) * self.synapse_time_constant + recurrent_current
 
@@ -343,7 +335,8 @@ class ColumnODEFunc(CoupledColumns):
     def run_ode_stim_phases(self, input_state, stim, time_vec, num_stim_phases=3):
         '''
         Runs a single sample in three phases: a pre-stimulus phase,
-        a stimulus phase (with given stim) and a post-stimulus phase.
+        a stimulus phase (with given stim) and a post-stimulus phase,
+        if number of stimulus phases is set to 3.
         '''
 
         # Prepare stimulus tensor in three phases

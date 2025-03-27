@@ -71,7 +71,7 @@ def huber_loss(y_pred, y_true):
     Computes Huber loss, a loss function suited for trajectories.
     '''
     hub_loss = torch.nn.SmoothL1Loss(beta=1.0)
-    return hub_loss(y_pred[:, :, 0, :], y_true[:, :, 0, :])
+    return hub_loss(y_pred[:, :, 0, :], y_true[:, :, 0, :])  # idx 0 = membrane potential
 
 def mse_halfway_point(pred, true, odefunc):
     '''
