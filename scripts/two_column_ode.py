@@ -167,4 +167,16 @@ if __name__ == '__main__':
     nr_samples = 1000
     batch_size = 16
 
-    train_ode_two_columns(nr_samples, batch_size, '../data/states_two_cols.pkl')
+    col_params = load_config('../config/model.toml')
+    sim_params = load_config('../config/simulation.toml')
+    odefunc = ColumnODEFunc(col_params, 'MT')
+
+    states, stim = odefunc.run_single_sim(sim_params, col_params, ff_input='fixed')
+
+    plt.plot(states[:, 2, 0])
+    plt.plot(states[:, 2, 8])
+    plt.show()
+
+    print(len(states))
+
+    # train_ode_two_columns(nr_samples, batch_size, '../data/states_two_cols.pkl')

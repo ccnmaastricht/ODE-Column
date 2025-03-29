@@ -82,7 +82,7 @@ def mse_halfway_point(pred, true, odefunc):
     halfpoint = int(pred.shape[1] / 2)  # int(pred.shape[1] - 1)
     mem_pred, adap_pred = pred[:, halfpoint, 0, [0, 8]], pred[:, halfpoint, 1, [0, 8]]
     mem_true, adap_true = true[:, halfpoint, 0, [0, 8]], true[:, halfpoint, 1, [0, 8]]
-    fr_pred = odefunc.compute_firing_rate_torch(mem_pred - adap_pred, odefunc.gain_function_parameters)
-    fr_true = odefunc.compute_firing_rate_torch(mem_true - adap_true, odefunc.gain_function_parameters)
+    fr_pred = odefunc.compute_firing_rate_torch(mem_pred - adap_pred)
+    fr_true = odefunc.compute_firing_rate_torch(mem_true - adap_true)
     return torch.mean(abs(fr_pred - fr_true))
     # return torch.mean(abs(pred[:, halfpoint, 0, [0, 8]] - true[:, halfpoint, 0, [0, 8]]))

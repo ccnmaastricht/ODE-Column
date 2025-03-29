@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -36,8 +37,7 @@ def get_params(J_local=87.8e-3, J_lateral=87.8e-3, area='MT'):
     }
     params['R'] = params['tau_m'] / params['C_m']
 
-    # POPULATION SIZES (N)
-    # N holds the population sizes for 16 populations (two dmf columns)
+    # POPULATION SIZES
     if area == 'V1':
         N = np.array([47386, 13366, 70387, 17597, 20740, 4554, 19839, 4063])  # V1
     if area == 'V2':
@@ -59,11 +59,10 @@ def get_params(J_local=87.8e-3, J_lateral=87.8e-3, area='MT'):
 
     K_bg = np.tile([2510, 2510, 2510, 2510, 2510, 2510, 2510, 2510], 2)
 
-    N = np.tile(N, 2)  # repeat N, so len(N) = 16
+    N = np.tile(N, 2)
     N = N / 2  # divide area in two
 
-    # SYNAPTIC STRENGTH (J)
-    # J is a 16x16 matrix containing synaptic strength between each set of populations
+    # SYNAPTIC STRENGTH
     J_E = 87.8e-3
     params['J_E'] = J_E
     k = 0
@@ -71,7 +70,7 @@ def get_params(J_local=87.8e-3, J_lateral=87.8e-3, area='MT'):
     for n in range(4):
         g[n] = - (N[k] / N[k + 1])  # relative inhibitory synaptic strength
         k += 2
-    J_column = np.array([J_E, J_E * g[0], J_E, J_E * g[1], J_E, J_E * g[2], J_E, J_E * g[3]])  # so each second population is inhibitory
+    J_column = np.array([J_E, J_E * g[0], J_E, J_E * g[1], J_E, J_E * g[2], J_E, J_E * g[3]])
     J = np.zeros((16, 16))
     J_column = np.tile(J_column.T, [8, 1])
     J[:8, :8] = J_column
@@ -81,9 +80,7 @@ def get_params(J_local=87.8e-3, J_lateral=87.8e-3, area='MT'):
     J[1, 8] = J_lateral
     J[9, 0] = J_lateral
 
-    # CONNECTION PROBABILITIES (P)
-    # P is a 16x16 matrix containing connection probability between each set of populations
-    # K is a 16x16 matrix containing the number of connections between each set of populations
+    # CONNECTION PROBABILITIES
     P_circuit = np.array(
         [[0.1009, 0.1689, 0.0437, 0.0818, 0.0323, 0.0000, 0.0076, 0.0000],
          [0.1346, 0.1371, 0.0316, 0.0515, 0.0755, 0.0000, 0.0042, 0.0000],
@@ -97,10 +94,9 @@ def get_params(J_local=87.8e-3, J_lateral=87.8e-3, area='MT'):
     P = np.zeros((16, 16))
     P[:8, :8] = P_circuit
     P[8:, 8:] = P_circuit
-    P[1, 8] = 0.1  # lateral connections
-    P[9, 0] = 0.1  # lateral connections
+    P[1, 8] = 0.1
+    P[9, 0] = 0.1
     K = np.log(1 - P) / np.log(1 - 1 / (N * N.T)) / N
-
 
     params['M'] = 16  # num populations
     params['N'] = N  # population sizes
@@ -109,7 +105,7 @@ def get_params(J_local=87.8e-3, J_lateral=87.8e-3, area='MT'):
     params['K'] = K  # number of connections
     params['W'] = J * K  # recurrent weight
 
-    params['W_bg'] = K_bg * J_E  # background input weight
+    params['W_bg'] = K_bg * J_E
 
     params['kappa'] = np.tile([1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 2)
     params['tau_a'] = 10.
@@ -118,7 +114,6 @@ def get_params(J_local=87.8e-3, J_lateral=87.8e-3, area='MT'):
     return params
 
 
-# specify cortical column (horizontal/vertical) AND layer
 def set_stimulation(stim, column, layer, nu, params):
     """
     Args:
@@ -153,8 +148,6 @@ def set_stimulation(stim, column, layer, nu, params):
     return stim
 
 
-# specify cortical column (horizontal/vertical) and NOT layer
-# layer = L4, i.e. only L4 receives external stimulus input
 def set_vis(stim, column, nu, params):
     """
     Args:
@@ -176,10 +169,9 @@ def set_vis(stim, column, nu, params):
     P_ext = [0.0983, 0.0619]
     N_ext = 3000
     K_ext = np.array(P_ext) * N_ext
-    W_ext = K_ext * params['J_E']  # W_ext: external weight
-    # nu: external input, in paper v_i_ext
-    stim[idx + 2] = W_ext[0] * nu  # excitatory in layer 4
-    stim[idx + 3] = W_ext[1] * nu  # inhibitory in layer 4
+    W_ext = K_ext * params['J_E']
+    stim[idx + 2] = W_ext[0] * nu
+    stim[idx + 3] = W_ext[1] * nu
 
     return stim
 
@@ -188,11 +180,6 @@ def update(state, params, stim, dt=1e-4):
     """
     Args:
     state (dict):   model state (I, A, H, R, N)
-        state['I']: input current
-        state['A']: adaptation
-        state['H']: membrane potential
-        state['R']: rate
-        state['N']: noise
 
     params (dict):  model parameters
     stim (array):   external input; shape=(M)
@@ -202,28 +189,22 @@ def update(state, params, stim, dt=1e-4):
     state (dict):   model state
     """
 
-    wbg = dt * np.dot(params['W'], state['R'])
-    nubg = np.dot(dt * params['W'], state['R'])
-
-    # Current (I)
     state['I'] += dt * (-state['I'] / params['tau_s'])  # self inhibition
     state['I'] += dt * np.dot(params['W'], state['R'])  # recurrent input
     state['I'] += dt * params['W_bg'] * params['nu_bg']  # background input
     state['I'] += dt * stim  # external input
-    # state['N'] += (- state['N'] / params['tau_s'] + params['sigma'] * np.sqrt(2 / params['tau_s']) * np.random.randn(
-    #     params['M'])) * dt
-    # state['I'] += state['N']  # noise
+    state['N'] += (- state['N'] / params['tau_s'] + params['sigma'] * np.sqrt(2 / params['tau_s']) * np.random.randn(
+        params['M'])) * dt
+    state['I'] += state['N']
 
-    # Adaptation (A/w) and membrane potential (H/h)
     state['A'] += dt * ((-state['A'] + state['R'] * params['kappa']) / params['tau_a'])  # adaptation
     state['H'] += dt * ((-state['H'] + params['R'] * state['I']) / params['tau_m'])  # membrane potential
 
-    # Firing rate (R/v)
-    X = np.float64((params['a'] * (state['H'] - state['A']) - params['b']))
+    X = np.array((params['a'] * (state['H'] - state['A']) - params['b']))
     state['R'] = X / (1 - np.exp(-params['d'] * X))
 
     [0.0001 for i in state['R'] if i <= 0.]  # ensure positive values (min = 0.0   Hz)
-    [500 for i in state['R'] if i > 500]  # limit firing rates (max = 500.0 Hz)
+    [500 for i in state['R'] if i > 500]  # limit firing rates     (max = 500.0 Hz)
 
     return state
 
@@ -231,7 +212,7 @@ def update(state, params, stim, dt=1e-4):
 if __name__ == '__main__':
 
     # Initialize the parameters
-    params = get_params(J_local=0.13, J_lateral=0.172, area='MT')
+    params = get_params(J_local=0.13, J_lateral=0.23, area='MT')
 
     # Intialize the starting state (all zeros?)
     state = {}
@@ -261,7 +242,7 @@ if __name__ == '__main__':
     # stim = set_stimulation(stim, column='V', layer='L6', nu=20, params=params)
 
     # Total time steps
-    T = 20000
+    T = 500
 
     # Array for saving firing rate
     R = np.zeros((M, T*2))
@@ -269,15 +250,15 @@ if __name__ == '__main__':
     # Run simulation
     for t in range(T):
         state = update(state, params, stim)
-        R[:, t] = state['H']
+        R[:, t] = state['R']
 
     stim[:8] = 40.
-    stim[8:] = 24.
+    stim[8:] = 0.
 
     for t in range(T):
         state = update(state, params, stim)
-        R[:, T+t] = state['H']
+        R[:, T+t] = state['R']
 
-    plt.plot(R[0,:])
-    plt.plot(R[8, :])
+    plt.plot(R[2,:])
+    plt.plot(R[10, :])
     plt.show()

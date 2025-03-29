@@ -52,7 +52,7 @@ def visualize_hopf(true_y, pred_y, ii, val_loss, train_loss):
     ax_phase.set_ylim(-2, 2)
 
     fig.tight_layout()
-    plt.savefig('results/png/{:03d}'.format(ii))
+    plt.savefig('../results/png/{:03d}'.format(ii))
     plt.close(fig)
 
 
@@ -116,8 +116,8 @@ def dynamics(t, state, time_vec, mu_vec, omega):
     x, y = state[0]
     # interpolate mu depending on the current time
     mu_t = np.interp(t, time_vec, mu_vec)
-    dx = (mu_t + x**2 + y**2) * x - omega.item() * y
-    dy = (mu_t + x**2 + y**2) * y + omega.item() * x
+    dx = (mu_t - x**2 - y**2) * x - omega.item() * y
+    dy = (mu_t - x**2 - y**2) * y + omega.item() * x
     return torch.tensor([dx, dy])
 
 def make_hopf_ds(save=True):
@@ -164,7 +164,8 @@ def make_hopf_ds(save=True):
 if __name__ == '__main__':
 
     # set params for hopf bifurcation
-    ds_file          = 'ds_bifurcation.pkl'
+    # ds_file          = '../pickled_ds/ds_uc_5000_omg.pkl'
+    ds_file          = '../data/ds_bifurcation.pkl'
     nr_samples       = 5000
     batch_size       = 32
     total_time       = 1000

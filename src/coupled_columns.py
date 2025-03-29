@@ -159,10 +159,10 @@ class CoupledColumns:
 
         delta_membrane_potential = (
             -membrane_potential +
-            total_current * self.resistance) / self.time_constants['membrane']
+            np.array(total_current * self.resistance)) / self.time_constants['membrane']
 
-        delta_adaptation = (-adaptation + self.adaptation_strength *
-                            firing_rate) / self.time_constants['adaptation']
+        delta_adaptation = (-adaptation + np.array(self.adaptation_strength *
+                            firing_rate)) / self.time_constants['adaptation']
 
         return np.concatenate([delta_membrane_potential, delta_adaptation])
 
