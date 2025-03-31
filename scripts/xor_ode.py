@@ -80,7 +80,7 @@ def run_four_xor_samples(odefunc, initial_state, time_vec, time_steps, layer_4_i
     # compute firing rates
     firing_rates = odefunc.compute_firing_rate_torch(batch_output[:, :, 0, :] - batch_output[:, :, 1, :])
 
-    # for i in range(nr_batch_samples):
+    # for i in range(batch_size):
     #     print(stim_batch[i])
     #     plt.plot(firing_rates[i, :, 0].detach().numpy())
     #     plt.plot(firing_rates[i, :, 8].detach().numpy())
@@ -124,7 +124,7 @@ def train_xor_ode(nr_samples, batch_size):
                                      odefunc.ff_weights_2,
                                      odefunc.ff_weights_AC,
                                      odefunc.ff_weights_BC,
-                                     # odefunc.connection_weights
+                                     odefunc.connection_weights
                                      ], lr=1e-4, alpha=0.95)
     # optimizer = torch.optim.Adam([odefunc.ff_weights_1,
     #                                  odefunc.ff_weights_2,
@@ -151,14 +151,14 @@ def train_xor_ode(nr_samples, batch_size):
         print("Gradient: ", torch.norm(odefunc.ff_weights_2.grad))
         print("Gradient: ", torch.norm(odefunc.ff_weights_AC.grad))
         print("Gradient: ", torch.norm(odefunc.ff_weights_BC.grad))
-        # print("Gradient: ", torch.norm(odefunc.connection_weights.grad))
+        print("Gradient: ", torch.norm(odefunc.connection_weights.grad))
 
         with torch.no_grad():  # make sure not to update illegal connections
             odefunc.ff_weights_1.grad *= odefunc.ff_weights_mask
             odefunc.ff_weights_2.grad *= odefunc.ff_weights_mask
             odefunc.ff_weights_AC.grad *= odefunc.ff_weights_mask[:8]
             odefunc.ff_weights_BC.grad *= odefunc.ff_weights_mask[:8]
-            # odefunc.connection_weights.grad[:16, :16] *= odefunc.mask
+            odefunc.connection_weights.grad[:16, :16] *= odefunc.mask
 
         optimizer.step()
         scheduler.step()  # adjust learning rate
@@ -184,8 +184,8 @@ def train_xor_ode(nr_samples, batch_size):
                                                                                odefunc.ff_weights_AC[3]))
         print('     FF weights col B to C: {:.4f}, {:.4f}'.format(odefunc.ff_weights_BC[2],
                                                                                odefunc.ff_weights_BC[3]))
-        # print('     Lat weights between A and B: {:.4f}, {:.4f}'.format(odefunc.connection_weights[1, 8],
-        #                                                                 odefunc.connection_weights[9, 0]))
+        print('     Lat weights between A and B: {:.4f}, {:.4f}'.format(odefunc.connection_weights[1, 8],
+                                                                        odefunc.connection_weights[9, 0]))
 
 
 def train_fr_classifier(batch_size, fn_ds):

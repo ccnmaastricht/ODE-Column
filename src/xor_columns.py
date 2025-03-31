@@ -55,21 +55,21 @@ class ColumnsXOR(ColumnODEFunc):
 
         # Connection weights to three columns
         # Set lateral connections to zero for now
-        original_weights = torch.tensor(self.recurrent_weights, dtype=torch.float32) * self.synapse_time_constant
+        original_weights = torch.tensor(self.recurrent_weights, dtype=torch.float32) * 0.01 # * self.synapse_time_constant
         conn_weights = torch.zeros((24, 24))
         conn_weights[:16, :16] = original_weights
         conn_weights[16:, 16:] = original_weights[:8, :8]
         conn_weights[1, 8], conn_weights[9, 0] = 0., 0.  # set lateral connections to zero
-        self.connection_weights = conn_weights
+        # self.connection_weights = conn_weights
 
-        # # Learnable lateral weights
-        # mean_W = original_weights.mean() / 100.
-        # std_W = original_weights.std() / 100.
-        # lateral_weights = torch.normal(mean=mean_W, std=std_W, size=self.mask.shape)
-        # lateral_weights *= self.strict_mask  # only layer 2/3 connections
-        #
-        # conn_weights[:16, :16] += lateral_weights
-        # self.connection_weights = nn.Parameter(conn_weights,  requires_grad=True)
+        # Learnable lateral weights
+        mean_W = 0. # original_weights.mean() / 100.
+        std_W = 0. # original_weights.std() / 100.
+        lateral_weights = torch.normal(mean=mean_W, std=std_W, size=self.mask.shape)
+        lateral_weights *= self.strict_mask  # only layer 2/3 connections
+
+        conn_weights[:16, :16] += lateral_weights
+        self.connection_weights = nn.Parameter(conn_weights,  requires_grad=True)
 
 
     def dynamics_xor(self, t: torch.tensor, state: torch.tensor, stim: torch.tensor, time_vec: torch.tensor) -> torch.tensor:
@@ -86,7 +86,7 @@ class ColumnsXOR(ColumnODEFunc):
 
         firing_rate = self.compute_firing_rate_torch(membrane_potential - adaptation)
 
-        firing_rate_C = firing_rate * 10.0  # amplify firing rates received by C by factor
+        firing_rate_C = firing_rate * 10.0  # amplify firing rates received by C by factor 10
 
         # Compute feedforward current for columns A and B, receiving a weighted sum of both inputs
         ff_current_AB = (ff_rate[0] * self.ff_weights_1) + (ff_rate[1] * self.ff_weights_2)
@@ -96,9 +96,9 @@ class ColumnsXOR(ColumnODEFunc):
         feedforward_current = torch.relu(ff_current_ABC)  # make sure ff_currents are never negative
 
         background_current = self.bg_weights * self.background_drive
-        recurrent_current = torch.matmul(self.connection_weights, firing_rate)
+        recurrent_current = torch.matmul(self.connection_weights, firing_rate) * 100.
 
-        total_current = (background_current) * self.synapse_time_constant + feedforward_current + recurrent_current
+        total_current = (background_current + recurrent_current) * self.synapse_time_constant + feedforward_current
 
         delta_membrane_potential = (-membrane_potential +
             total_current * self.resistance) / self.membrane_time_constant

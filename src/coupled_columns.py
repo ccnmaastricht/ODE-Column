@@ -278,6 +278,13 @@ class ColumnODEFunc(CoupledColumns):
         strict_mask[9, 0] += 1.0
         self.strict_mask = strict_mask
 
+        # Winner-takes-all mask with lat connections between 2/3 layers
+        # and self-excitation connections for L2/3e
+        wta_mask = torch.zeros(mask.shape)
+        wta_mask[1, 8], wta_mask[9, 0] = 1.0, 1.0
+        wta_mask[0, 0], wta_mask[8, 8] = 1.0, 1.0
+        self.wta_mask = wta_mask
+
     def _initialize_connection_weights(self):
         '''
         Connection weights consist of inner connections (8x8) for both columns
