@@ -1,4 +1,3 @@
-import numpy as np
 import matplotlib.pyplot as plt
 import os
 import pickle
@@ -7,7 +6,13 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.coupled_columns import CoupledColumns, ColumnODEFunc
-from src.utils import load_config, huber_loss, mse_halfway_point
+from src.utils import load_config, huber_loss_membrane, mse_halfway_point
+
+
+'''
+Training a two-column model with a neural ODE to try to learn the lateral
+connections between columns. 
+'''
 
 
 def make_ds_dmf(ds_file, nr_samples):
@@ -109,7 +114,7 @@ def test_ode(test_states, test_stims, iter, odefunc, time_vec, train_loss, weigh
         true_state = test_states[iter, :, :, :]
 
         pred_state = odefunc.run_ode_stim_phases(true_state[0], stim, time_vec, num_stim_phases=3)
-        test_loss = huber_loss(pred_state.unsqueeze(0), true_state.unsqueeze(0))
+        test_loss = huber_loss_membrane(pred_state.unsqueeze(0), true_state.unsqueeze(0))
     visualize_results(pred_state, true_state, stim, odefunc, train_loss, test_loss, weights, show)
 
 
@@ -124,7 +129,7 @@ def train_ode_two_columns(nr_samples, batch_size, fn):
     # Initialize the ODE function
     col_params = load_config('../config/model.toml')
     sim_params = load_config('../config/simulation.toml')
-    odefunc = ColumnODEFunc(col_params, 'MT')
+    odefunc = ColumnODEFunc(col_params, 'MT', learn_wta=True)
 
     # Initialize the optimizer and add connection weights as learnable parameter
     optimizer = torch.optim.RMSprop([odefunc.connection_weights], lr=1e-2, alpha=0.9)
@@ -149,10 +154,10 @@ def train_ode_two_columns(nr_samples, batch_size, fn):
             ode_output = odefunc.run_ode_stim_phases(input_state, stim, time_vec, 3)
             pred_states[batch_iter, :, :, :] = ode_output
 
-        loss = huber_loss(pred_states, true_states)  # only train on membrane potential
+        loss = huber_loss_membrane(pred_states, true_states)  # only train on membrane potential
         loss.backward()
         with torch.no_grad():  # only update the lateral weights
-            odefunc.connection_weights.grad *= odefunc.strict_mask
+            odefunc.connection_weights.grad *= odefunc.lat_mask
         optimizer.step()
         scheduler.step()  # adjust learning rate
 
@@ -167,16 +172,4 @@ if __name__ == '__main__':
     nr_samples = 1000
     batch_size = 16
 
-    col_params = load_config('../config/model.toml')
-    sim_params = load_config('../config/simulation.toml')
-    odefunc = ColumnODEFunc(col_params, 'MT')
-
-    states, stim = odefunc.run_single_sim(sim_params, col_params, ff_input='fixed')
-
-    plt.plot(states[:, 2, 0])
-    plt.plot(states[:, 2, 8])
-    plt.show()
-
-    print(len(states))
-
-    # train_ode_two_columns(nr_samples, batch_size, '../data/states_two_cols.pkl')
+    train_ode_two_columns(nr_samples, batch_size, '../data/states_two_cols.pkl')

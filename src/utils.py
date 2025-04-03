@@ -48,10 +48,11 @@ def gain_function(x: np.array, a: float, b: float, d: float) -> np.array:
     return (a * x - b) / (1 - np.exp(-d * (a * x - b)))
 
 
-def create_feedforward_input(num_populations: int, layer_4_indices: tuple,
+def create_feedforward_input(num_populations: int,
                              input_colA: float,
                              input_colB: float) -> np.array:
     """Create feedforward input array for the simulation."""
+    layer_4_indices = [[2, 3], [10, 11]]
     feedforward_rate = np.zeros(num_populations)
     feedforward_rate[layer_4_indices[0]] = input_colA
     feedforward_rate[layer_4_indices[1]] = input_colB
@@ -66,9 +67,23 @@ def compute_firing_rate(membrane_potential: np.array, adaptation: np.array,
                          gain_function_parameters.threshold,
                          gain_function_parameters.noise_factor)
 
-def huber_loss(y_pred, y_true):
+def huber_loss_firing_rates(pred, true, odefunc):
     '''
     Computes Huber loss, a loss function suited for trajectories.
+    Uses the L2/3e firing rate of the model prediction and target.
+    '''
+    # Compute firing rates for pred L2/3e
+    mem_pred, adap_pred = pred[:, :, 0, [0, 8]], pred[:, :, 1, [0, 8]]
+    fr_pred = odefunc.compute_firing_rate_torch(mem_pred - adap_pred)
+
+    # Compute loss between ode prediction and WangWong simulated data
+    hub_loss = torch.nn.SmoothL1Loss(beta=1.0)
+    return hub_loss(fr_pred, true)
+
+def huber_loss_membrane(y_pred, y_true):
+    '''
+    Computes Huber loss, a loss function suited for trajectories.
+    Uses the membrane potential of the model prediction and target.
     '''
     hub_loss = torch.nn.SmoothL1Loss(beta=1.0)
     return hub_loss(y_pred[:, :, 0, :], y_true[:, :, 0, :])  # idx 0 = membrane potential

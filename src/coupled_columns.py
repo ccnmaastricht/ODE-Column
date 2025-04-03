@@ -206,18 +206,12 @@ class CoupledColumns:
         if ff_input=='random':
             rand_diff = np.random.uniform(-20.0, 20.0)
             feedforward_rate = create_feedforward_input(
-                self.num_populations, layer_4_indices,
+                self.num_populations,
                 32.0 + (rand_diff), 32.0 - (rand_diff))
         elif ff_input=='fixed':
             feedforward_rate = create_feedforward_input(
-                self.num_populations, layer_4_indices,
+                self.num_populations,
                 40.0, 24.0)
-        elif ff_input=='xor':
-            rand_binary = np.random.randint(0, 2, 2)
-            rand_fr = rand_binary * np.random.uniform(35.0, 45.0)
-            feedforward_rate = create_feedforward_input(
-                self.num_populations, layer_4_indices,
-                rand_fr[0], rand_fr[1])
 
         # Pre-stimulus phase
         feedforward_rate_no_stim = np.zeros(self.num_populations)
@@ -250,7 +244,7 @@ class CoupledColumns:
 
 
 class ColumnODEFunc(CoupledColumns):
-    def __init__(self, column_parameters: dict, area: str):
+    def __init__(self, column_parameters: dict, area: str, learn_wta: bool):
         super().__init__(column_parameters, area)
 
         self.feedforward_weights    = torch.tensor(self.feedforward_weights, dtype=torch.float32)
@@ -263,24 +257,26 @@ class ColumnODEFunc(CoupledColumns):
         self.adaptation_strength    = torch.tensor(self.adaptation_strength, dtype=torch.float32)
 
         self._make_masks()
-        self._initialize_connection_weights()
+
+        if learn_wta:  # learn wta necessary connection weights
+            self._initialize_connection_weights()
 
     def _make_masks(self):
         # Weights mask to select only external connections
-        mask = torch.zeros(size=(self.num_populations, self.num_populations), dtype=torch.float32)
-        mask[:8, 8:] += 1.0
-        mask[8:, :8] += 1.0
-        self.mask = mask
+        ext_mask = torch.zeros(size=(self.num_populations, self.num_populations), dtype=torch.float32)
+        ext_mask[:8, 8:] += 1.0
+        ext_mask[8:, :8] += 1.0
+        self.ext_mask = ext_mask
 
-        # Strict mask with only lat connections between 2/3 layers
-        strict_mask = torch.zeros(mask.shape)
-        strict_mask[1, 8] += 1.0
-        strict_mask[9, 0] += 1.0
-        self.strict_mask = strict_mask
+        # Mask with only lat connections between 2/3 layers
+        lat_mask = torch.zeros(ext_mask.shape)
+        lat_mask[1, 8] += 1.0
+        lat_mask[9, 0] += 1.0
+        self.lat_mask = lat_mask
 
         # Winner-takes-all mask with lat connections between 2/3 layers
         # and self-excitation connections for L2/3e
-        wta_mask = torch.zeros(mask.shape)
+        wta_mask = torch.zeros(ext_mask.shape)
         wta_mask[1, 8], wta_mask[9, 0] = 1.0, 1.0
         wta_mask[0, 0], wta_mask[8, 8] = 1.0, 1.0
         self.wta_mask = wta_mask
@@ -293,12 +289,12 @@ class ColumnODEFunc(CoupledColumns):
         original_weights = torch.tensor(self.recurrent_weights, dtype=torch.float32).detach().clone()
         mean_W = self.synapse_time_constant * original_weights.mean() / 100.
         std_W = self.synapse_time_constant * original_weights.std() / 100.
-        lateral_weights = torch.normal(mean=mean_W, std=std_W, size=self.mask.shape)
-        lateral_weights *= self.mask  # set inner connectivity to zero
-        lateral_weights *= self.strict_mask  # only layer 2/3 connections
+        lateral_weights = torch.normal(mean=mean_W, std=std_W, size=self.ext_mask.shape)
+        lateral_weights *= self.ext_mask  # set inner connectivity to zero
+        lateral_weights *= self.lat_mask  # only layer 2/3 connections
 
         inner_weights = original_weights * self.synapse_time_constant
-        inner_weights *= 1 - self.mask
+        inner_weights *= 1 - self.ext_mask
         self.connection_weights = nn.Parameter(inner_weights + lateral_weights, requires_grad=True)
 
 

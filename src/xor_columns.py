@@ -4,45 +4,74 @@ import torch
 import torch.nn as nn
 from torchdiffeq import odeint as torch_odeint
 
-from src.utils import GainFunctionParams, compute_firing_rate, create_feedforward_input
 from src.coupled_columns import ColumnODEFunc
+
+
+'''
+Possible ff weights to solve XOR solution: 
+rand_weights_1 = torch.tensor([0.0000, 0.0000, 0.0043, 0.0027, 0.0000, 0.0000, 0.0000, 0.0000,
+                               0.0000, 0.0000, 0.0130, 0.0082, 0.0000, 0.0000, 0.0000, 0.0000])
+rand_weights_2 = torch.tensor([0.0000, 0.0000, 0.0043, 0.0027, 0.0000, 0.0000, 0.0000, 0.0000,
+                               0.0000, 0.0000, 0.0130, 0.0082, 0.0000, 0.0000, 0.0000, 0.0000])
+rand_weights_C = torch.tensor([0.0000, 0.0000, 0.0082, 0.0130, 0.0000, 0.0000, 0.0000, 0.0000,
+                               0.0000, 0.0000, 0.0130, 0.0082, 0.0000, 0.0000, 0.0000, 0.0000])
+Column A receives the same input, but less strong than column B, hence column A represents the AND 
+and column B the OR. If both column have high firing rates, column As activity will inhibit column C, 
+thus resulting in low firing rates. However, if only column B is activated, column C will not be 
+inhibited and show high firing rates as a result. 
+'''
 
 
 class ColumnsXOR(ColumnODEFunc):
     def __init__(self, column_parameters: dict, area: str):
-        super().__init__(column_parameters, area)
+        super().__init__(column_parameters, area, learn_wta=False)
 
-        # Initialize feedforward weights for all columns A, B, C
-        original_weights = self.feedforward_weights.clone().detach() * self.synapse_time_constant
-        std_W = 3. * self.synapse_time_constant
-        rand_weights_1 = abs(torch.normal(mean=original_weights, std=std_W))
-        rand_weights_2 = abs(torch.normal(mean=original_weights, std=std_W))
-        # rand_weights_1 = torch.tensor([0.0000, 0.0000, 0.0043, 0.0027, 0.0000, 0.0000, 0.0000, 0.0000,
-        #                                0.0000, 0.0000, 0.0130, 0.0082, 0.0000, 0.0000, 0.0000, 0.0000])
-        # rand_weights_2 = torch.tensor([0.0000, 0.0000, 0.0043, 0.0027, 0.0000, 0.0000, 0.0000, 0.0000,
-        #                                0.0000, 0.0000, 0.0130, 0.0082, 0.0000, 0.0000, 0.0000, 0.0000])
+        self._make_ff_masks()
+        self._initialize_ff_weights()
+        self._initialize_connection_weights()
+        self._extend_params_to_three()
 
-        # Initialize feedforward weights between columns C and A, B
-        rand_weights_C = abs(torch.normal(mean=original_weights, std=std_W))
-        # rand_weights_C = torch.tensor([0.0000, 0.0000, 0.0082, 0.0130, 0.0000, 0.0000, 0.0000, 0.0000,
-        #                                0.0000, 0.0000, 0.0130, 0.0082, 0.0000, 0.0000, 0.0000, 0.0000])
-
+    def _make_ff_masks(self):
+        '''
+        Makes a mask for the feedforward weights that only targets L4
+        in two columns
+        '''
         # Mask for only layer 4 of both columns
-        ff_weights_mask = torch.zeros(original_weights.shape)
+        ff_weights_mask = torch.zeros(16)
         ff_weights_mask[2:4] += 1.0  # col A
         ff_weights_mask[10:12] += 1.0  # col B
         self.ff_weights_mask = ff_weights_mask
 
-        ff_weights_1 = rand_weights_1 * ff_weights_mask
-        ff_weights_2 = rand_weights_2 * ff_weights_mask
-        weights_AC = rand_weights_C[:8] * ff_weights_mask[:8]
-        weights_BC = rand_weights_C[8:] * ff_weights_mask[:8]
+    def _initialize_ff_weights(self):
+        '''
+        Initializes the feedforward weights between the inputs, columns
+        A, B and C as learnable parameters
+        '''
+        # Initialize feedforward weights for inputs 1 and 2, that connect to columns A and B
+        original_weights = self.feedforward_weights.clone().detach() * self.synapse_time_constant
+        std_W = 3. * self.synapse_time_constant
+        rand_weights_1 = abs(torch.normal(mean=original_weights, std=std_W))
+        rand_weights_2 = abs(torch.normal(mean=original_weights, std=std_W))
+
+        # Initialize feedforward weights between columns C and A, B
+        rand_weights_C = abs(torch.normal(mean=original_weights, std=std_W))
+
+        # Multiply with mask
+        ff_weights_1 = rand_weights_1 * self.ff_weights_mask
+        ff_weights_2 = rand_weights_2 * self.ff_weights_mask
+        weights_AC = rand_weights_C[:8] * self.ff_weights_mask[:8]
+        weights_BC = rand_weights_C[8:] * self.ff_weights_mask[:8]
 
         self.ff_weights_1 = nn.Parameter(ff_weights_1, requires_grad=True)  # learnable parameters
         self.ff_weights_2 = nn.Parameter(ff_weights_2, requires_grad=True)
         self.ff_weights_AC = nn.Parameter(weights_AC, requires_grad=True)
         self.ff_weights_BC = nn.Parameter(weights_BC, requires_grad=True)
 
+    def _extend_params_to_three(self):
+        '''
+        Extends the background weights and adaptation strength from two
+        to three columns.
+        '''
         # Background weights to three columns
         bg_weights = self.background_weights.clone().detach()
         bg_weights = torch.cat((bg_weights, bg_weights[:8]), dim=0)
@@ -53,7 +82,11 @@ class ColumnsXOR(ColumnODEFunc):
         adap_strength = torch.cat((adap_strength, adap_strength[:8]), dim=0)
         self.adap_strength = adap_strength
 
-        # Connection weights to three columns
+    def _initialize_connection_weights(self):
+        '''
+        Extends the connection weights to three columns and initializes the
+        lateral connections as learnable parameters.
+        '''
         # Set lateral connections to zero for now
         original_weights = torch.tensor(self.recurrent_weights, dtype=torch.float32) * 0.01 # * self.synapse_time_constant
         conn_weights = torch.zeros((24, 24))
@@ -63,11 +96,9 @@ class ColumnsXOR(ColumnODEFunc):
         # self.connection_weights = conn_weights
 
         # Learnable lateral weights
-        mean_W = 0. # original_weights.mean() / 100.
-        std_W = 0. # original_weights.std() / 100.
-        lateral_weights = torch.normal(mean=mean_W, std=std_W, size=self.mask.shape)
-        lateral_weights *= self.strict_mask  # only layer 2/3 connections
-
+        mean_W, std_W = 0., 0.
+        lateral_weights = torch.normal(mean=mean_W, std=std_W, size=(16, 16))
+        lateral_weights *= self.lat_mask  # only layer 2/3 connections
         conn_weights[:16, :16] += lateral_weights
         self.connection_weights = nn.Parameter(conn_weights,  requires_grad=True)
 
@@ -85,7 +116,6 @@ class ColumnsXOR(ColumnODEFunc):
         membrane_potential, adaptation = state[0], state[1]
 
         firing_rate = self.compute_firing_rate_torch(membrane_potential - adaptation)
-
         firing_rate_C = firing_rate * 10.0  # amplify firing rates received by C by factor 10
 
         # Compute feedforward current for columns A and B, receiving a weighted sum of both inputs

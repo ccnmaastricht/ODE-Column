@@ -1,9 +1,9 @@
-time_step = 1e-4
+time_step = 1e-3
 
 [protocol]
-pre_stimulus_period = 0.05  # *10s
-post_stimulus_period = 0.05
-stimulus_duration = 0.05
+pre_stimulus_period = 0.5  # *10s
+post_stimulus_period = 0.5
+stimulus_duration = 0.5
 
 [initial_conditions]
 membrane_potential = [

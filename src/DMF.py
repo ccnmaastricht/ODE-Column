@@ -259,6 +259,8 @@ if __name__ == '__main__':
         state = update(state, params, stim)
         R[:, T+t] = state['R']
 
+    print(np.mean(R, axis=1))
+
     plt.plot(R[2,:])
     plt.plot(R[10, :])
     plt.show()

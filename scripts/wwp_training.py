@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import TensorDataset, DataLoader
 
-from src.utils import load_config
+from src.utils import load_config, huber_loss_firing_rates, create_feedforward_input
 from src.ww_model import DM
 from src.coupled_columns import ColumnODEFunc
 
@@ -63,11 +63,10 @@ def make_ds_wwp(ds_file, nr_samples, time_steps):
 
         for i in range(nr_samples):
 
-            # Random input between 5 and 40Hz, difference between them has to be larger than 5Hz
-            while True:
-                muA, muB = np.random.uniform(5.0, 40.0, 2)
-                if abs(muA - muB) > 5.0:
-                    break
+            # Random input between 15 and 40Hz, which random (but small) difference between them
+            muA = np.random.uniform(15.0, 40.0)
+            diff_mag = muA / np.random.uniform(7.5, 15.0)
+            muB = muA + np.random.choice([diff_mag, diff_mag*-1.0])
 
             R = dm.run_sim(muA, muB)
             R = R[:, ::10]  # only take every tenth time sample
@@ -97,19 +96,8 @@ def get_data(nr_samples, batch_size, time_steps, fn):
     return train_loader, test_states, test_stims
 
 def get_stim(raw_stim):
-    stim = torch.zeros(16)
-    stim[2:4] += raw_stim[0]  # input column A
-    stim[10:12] += raw_stim[1]  # input column B
-    return stim
-
-def huber_loss_firing_rates(pred, true, odefunc):
-    # Compute firing rates for pred L2/3e
-    mem_pred, adap_pred = pred[:, :, 0, [0, 8]], pred[:, :, 1, [0, 8]]
-    fr_pred = odefunc.compute_firing_rate_torch(mem_pred - adap_pred)
-
-    # Compute loss between ode prediction and WangWong simulated data
-    hub_loss = torch.nn.SmoothL1Loss(beta=1.0)
-    return hub_loss(fr_pred, true)
+    stim = create_feedforward_input(16, raw_stim[0], raw_stim[1])
+    return torch.tensor(stim)
 
 def test_ode(input_state, test_states, test_stims, iter, odefunc, time_vec, train_loss, weights, show=False):
     with torch.no_grad():
@@ -133,7 +121,7 @@ def train_wwp_ode(nr_samples, batch_size, time_steps, fn, lambda_potjans):
     # Initialize the ODE function
     col_params = load_config('../config/model.toml')
     sim_params = load_config('../config/simulation.toml')
-    odefunc = ColumnODEFunc(col_params, 'MT')
+    odefunc = ColumnODEFunc(col_params, 'MT', learn_wta=True)
 
     # Initial state is always the same
     membrane = torch.tensor(sim_params['initial_conditions']['membrane_potential'])
@@ -152,6 +140,8 @@ def train_wwp_ode(nr_samples, batch_size, time_steps, fn, lambda_potjans):
 
     # Store weights
     weights = []
+    # Store loss
+    losses = []
 
     for iter, (true_states, stim_batch) in enumerate(train_loader):
         optimizer.zero_grad()
@@ -172,21 +162,18 @@ def train_wwp_ode(nr_samples, batch_size, time_steps, fn, lambda_potjans):
         wang_wong_loss = huber_loss_firing_rates(pred_states, true_states, odefunc)
 
 
-        ### Potjans resting state training
-        stim = get_stim(torch.tensor([0., 0.]))  # input = 0Hz
-        ode_output = odefunc.run_ode_stim_phases(input_state, stim, time_vec, 3)
+        # ### Potjans resting state training
+        # stim = get_stim(torch.tensor([0., 0.]))  # input = 0Hz
+        # ode_output = odefunc.run_ode_stim_phases(input_state, stim, time_vec, 3)
+        #
+        # # Compute firing rates
+        # mem, adap = ode_output[:, 0, :], ode_output[:, 1, :]
+        # resting_state_fr = odefunc.compute_firing_rate_torch(mem - adap)
+        # mean_resting_state_fr = torch.mean(resting_state_fr, dim=0)
+        # potjans_loss = abs(torch.mean(mean_resting_state_fr - potjans_mean_fr))
 
-        # Compute firing rates
-        mem, adap = ode_output[:, 0, :], ode_output[:, 1, :]
-        resting_state_fr = odefunc.compute_firing_rate_torch(mem - adap)
-        mean_resting_state_fr = torch.mean(resting_state_fr, dim=0)
-        potjans_loss = abs(torch.mean(mean_resting_state_fr - potjans_mean_fr))
 
-
-        loss = wang_wong_loss + (potjans_loss * lambda_potjans)
-        print(wang_wong_loss)
-        print(potjans_loss)
-        print(loss)
+        loss = wang_wong_loss # + (potjans_loss * lambda_potjans)
         loss.backward()
         with torch.no_grad():  # only update lateral and self-excitation weights
             odefunc.connection_weights.grad *= odefunc.wta_mask
@@ -196,18 +183,26 @@ def train_wwp_ode(nr_samples, batch_size, time_steps, fn, lambda_potjans):
         # Print loss, save current weights in array
         print('Iter {:02d} | Total Loss {:.5f}'.format(iter + 1, loss.item()))
         weights.append(odefunc.connection_weights.detach().numpy().copy())
+        losses.append(loss.item())
         # Test ODE model and visualize results
         test_ode(input_state, test_states, test_stims, iter, odefunc, time_vec, loss.item(), weights)
+    return losses
 
 
 if __name__ == '__main__':
 
     time_steps = 1500
-    nr_samples = 1000
+    nr_samples = 2000
     batch_size = 16
 
     lambda_potjans = 0.1
 
     fn = '../data/ds_wwp.pkl'
 
-    train_wwp_ode(nr_samples, batch_size, time_steps, fn, lambda_potjans)
+    losses = train_wwp_ode(nr_samples, batch_size, time_steps, fn, lambda_potjans)
+
+    # print(losses)
+    fig = plt.plot(losses)
+    plt.xlabel('Number of batches (batch size=16)')
+    plt.ylabel('Huber loss')
+    plt.savefig('../results/loss_ww')
