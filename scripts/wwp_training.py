@@ -12,6 +12,38 @@ from src.coupled_columns import ColumnODEFunc
 
 
 
+def visualize_all_layers(pred, true, stim, odefunc, train_loss, test_loss, weights, show=False):
+    if not os.path.exists('../results/png'):
+        os.makedirs('../results/png')
+    fig, axes = plt.subplots(2, 2, figsize=(10, 10))
+
+    fig.text(0.2, 0.03, f"Input column 1: {stim[2]:.1f}", ha='center', fontsize=10, color='#1f77b4', fontweight='bold')
+    fig.text(0.4, 0.03, f"Input column 2: {stim[10]:.1f}", ha='center', fontsize=10, color='#ff7f0e', fontweight='bold')
+    fig.text(0.8, 0.03, f"Validation loss: {test_loss:.2f}", ha='center', fontsize=10, fontweight='bold')
+    fig.text(0.6, 0.03, f"Training loss: {train_loss:.2f}", ha='center', fontsize=10, fontweight='bold')
+
+    # Plot firing rates
+    fr_rates = odefunc.compute_firing_rate_torch(pred[:, 0, :] - pred[:, 1, :])
+
+    for i in range(2):
+        for j in range(2):
+            idx = int((i * 4) + (j * 2))
+
+            axes[i, j].plot(fr_rates[:,idx], label='column 1, excitatory')
+            axes[i, j].plot(fr_rates[:,idx + 8], label='column 2, excitatory')
+            # axes[i, j].plot(fr_rates[:,idx + 1], '--', label='column 1, inhibitory')
+            # axes[i, j].plot(fr_rates[:,idx + 9], '--', label='column 1, inhibitory')
+
+            titles = ['L23', 'L4', 'L5', 'L6']
+            axes[i, j].set_title(titles[int(idx / 2)])
+
+    plt.tight_layout(pad=3.0)
+    fig.subplots_adjust(left=0.15)
+    plt.savefig('../results/png/{:02d}'.format(len(weights)))
+    if show:
+        plt.show()
+    plt.close(fig)
+
 def visualize_results(pred, true, stim, odefunc, train_loss, test_loss, weights, show=False):
     if not os.path.exists('../results/png'):
         os.makedirs('../results/png')
@@ -82,31 +114,17 @@ def make_ds_wwp(ds_file, nr_samples, time_steps):
     return ds['states'], ds['stims']
 
 def get_data(nr_samples, batch_size, time_steps, fn):
-    states, stims = make_ds_wwp(fn, nr_samples, time_steps)
+    states, stims = make_ds_wwp(fn, nr_samples+10, time_steps)
 
     states = states / 20.  # scale down wang-wong firing rates to match with L23
 
-    # Prepare train and test sets
-    split = int(nr_samples * 0.9)
-    train_states, test_states = states[:split, :, :], states[split:, :, :]
-    train_stims, test_stims = stims[:split, :], stims[split:, :]
-
-    train_dataset = TensorDataset(train_states, train_stims)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    return train_loader, test_states, test_stims
+    ds = TensorDataset(states, stims)
+    data_loader = DataLoader(ds, batch_size=batch_size, shuffle=True)
+    return data_loader
 
 def get_stim(raw_stim):
     stim = create_feedforward_input(16, raw_stim[0], raw_stim[1])
     return torch.tensor(stim)
-
-def test_ode(input_state, test_states, test_stims, iter, odefunc, time_vec, train_loss, weights, show=False):
-    with torch.no_grad():
-        stim = get_stim(test_stims[iter])
-        true_state = test_states[iter, :, :]
-
-        pred_state = odefunc.run_ode_stim_phases(input_state, stim, time_vec, num_stim_phases=3)
-        test_loss = huber_loss_firing_rates(pred_state.unsqueeze(0), true_state.unsqueeze(0), odefunc)
-    visualize_results(pred_state, true_state, stim, odefunc, train_loss, test_loss, weights, show)
 
 
 def train_wwp_ode(nr_samples, batch_size, time_steps, fn, lambda_potjans):
@@ -116,7 +134,7 @@ def train_wwp_ode(nr_samples, batch_size, time_steps, fn, lambda_potjans):
     '''
 
     # Get the train and test data
-    train_loader, test_states, test_stims = get_data(nr_samples, batch_size, time_steps, fn)
+    data_loader = get_data(nr_samples, batch_size, time_steps, fn)
 
     # Initialize the ODE function
     col_params = load_config('../config/model.toml')
@@ -143,10 +161,10 @@ def train_wwp_ode(nr_samples, batch_size, time_steps, fn, lambda_potjans):
     # Store loss
     losses = []
 
-    for iter, (true_states, stim_batch) in enumerate(train_loader):
+    for iter, (true_states, stim_batch) in enumerate(data_loader):
         optimizer.zero_grad()
 
-        nr_batch_samples = true_states.shape[0]
+        nr_batch_samples = true_states.shape[0] - 4  # use last four samples for testing
         time_steps = true_states.shape[1]
         time_vec = torch.linspace(0., time_steps * sim_params['time_step'], time_steps)
 
@@ -159,7 +177,7 @@ def train_wwp_ode(nr_samples, batch_size, time_steps, fn, lambda_potjans):
 
             ode_output = odefunc.run_ode_stim_phases(input_state, stim, time_vec, 3)  # input_state defined earlier, always the same
             pred_states[batch_iter, :, :, :] = ode_output
-        wang_wong_loss = huber_loss_firing_rates(pred_states, true_states, odefunc)
+        wang_wong_loss = huber_loss_firing_rates(pred_states, true_states[:-4], odefunc)
 
 
         # ### Potjans resting state training
@@ -183,26 +201,42 @@ def train_wwp_ode(nr_samples, batch_size, time_steps, fn, lambda_potjans):
         # Print loss, save current weights in array
         print('Iter {:02d} | Total Loss {:.5f}'.format(iter + 1, loss.item()))
         weights.append(odefunc.connection_weights.detach().numpy().copy())
-        losses.append(loss.item())
+
         # Test ODE model and visualize results
-        test_ode(input_state, test_states, test_stims, iter, odefunc, time_vec, loss.item(), weights)
-    return losses
+        with torch.no_grad():
+            batch_loss = 0
+            nr_test_samples = 1
+
+            for i in range(nr_test_samples):
+                test_iter = nr_batch_samples + i
+
+                stim = get_stim(stim_batch[test_iter])
+                test_state = true_states[test_iter, :, :]
+
+                pred_state = odefunc.run_ode_stim_phases(input_state, stim, time_vec, num_stim_phases=3)
+
+                test_loss = huber_loss_firing_rates(pred_state.unsqueeze(0), test_state.unsqueeze(0), odefunc)
+                batch_loss += test_loss / nr_test_samples
+
+            # Add mean loss to list
+            losses.append(batch_loss)
+            # Visualize final test sample
+            visualize_results(pred_state, test_state, stim, odefunc, loss.item(), test_loss, weights, show=False)
+    return odefunc
 
 
 if __name__ == '__main__':
 
     time_steps = 1500
     nr_samples = 2000
-    batch_size = 16
+    batch_size = 20
 
     lambda_potjans = 0.1
 
     fn = '../data/ds_wwp.pkl'
 
-    losses = train_wwp_ode(nr_samples, batch_size, time_steps, fn, lambda_potjans)
+    model = train_wwp_ode(nr_samples, batch_size, time_steps, fn, lambda_potjans)
 
-    # print(losses)
-    fig = plt.plot(losses)
-    plt.xlabel('Number of batches (batch size=16)')
-    plt.ylabel('Huber loss')
-    plt.savefig('../results/loss_ww')
+    with open('../ww_trained_model.pkl', 'wb') as f:
+        pickle.dump(model, f)
+

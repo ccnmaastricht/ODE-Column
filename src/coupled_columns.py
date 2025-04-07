@@ -335,7 +335,7 @@ class ColumnODEFunc(CoupledColumns):
 
         return torch.stack([delta_membrane_potential, delta_adaptation])
 
-    def run_ode_stim_phases(self, input_state, stim, time_vec, num_stim_phases=3):
+    def run_ode_stim_phases(self, input_state, stim, time_vec, num_stim_phases=3, no_post=False):
         '''
         Runs a single sample in three phases: a pre-stimulus phase,
         a stimulus phase (with given stim) and a post-stimulus phase,
@@ -349,8 +349,10 @@ class ColumnODEFunc(CoupledColumns):
         empty_stim_phase = empty_stim.expand(phase_length, -1)
 
         stim_phase = stim.expand(phase_length, -1)
-        if num_stim_phases == 3:
+        if num_stim_phases == 3 and not no_post:
             whole_stim_phase = torch.cat((empty_stim_phase, stim_phase, empty_stim_phase), dim=0)
+        if num_stim_phases == 3 and no_post:
+            whole_stim_phase = torch.cat((empty_stim_phase, stim_phase, stim_phase), dim=0)
         elif num_stim_phases == 2:
             whole_stim_phase = torch.cat((empty_stim_phase, stim_phase), dim=0)
 

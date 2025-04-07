@@ -33,14 +33,20 @@ class ColumnsXOR(ColumnODEFunc):
 
     def _make_ff_masks(self):
         '''
-        Makes a mask for the feedforward weights that only targets L4
-        in two columns
+        Makes masks for the feedforward weights that only targets L4
         '''
         # Mask for only layer 4 of both columns
         ff_weights_mask = torch.zeros(16)
         ff_weights_mask[2:4] += 1.0  # col A
         ff_weights_mask[10:12] += 1.0  # col B
         self.ff_weights_mask = ff_weights_mask
+
+        ff_weights_mask_A = torch.zeros(16)
+        ff_weights_mask_A[2:4] += 1.0  # col A
+        ff_weights_mask_B = torch.zeros(16)
+        ff_weights_mask_B[10:12] += 1.0  # col B
+        self.ff_weights_mask_A = ff_weights_mask_A
+        self.ff_weights_mask_B = ff_weights_mask_B
 
     def _initialize_ff_weights(self):
         '''
@@ -57,8 +63,8 @@ class ColumnsXOR(ColumnODEFunc):
         rand_weights_C = abs(torch.normal(mean=original_weights, std=std_W))
 
         # Multiply with mask
-        ff_weights_1 = rand_weights_1 * self.ff_weights_mask
-        ff_weights_2 = rand_weights_2 * self.ff_weights_mask
+        ff_weights_1 = rand_weights_1 * self.ff_weights_mask_A
+        ff_weights_2 = rand_weights_2 * self.ff_weights_mask_B
         weights_AC = rand_weights_C[:8] * self.ff_weights_mask[:8]
         weights_BC = rand_weights_C[8:] * self.ff_weights_mask[:8]
 
@@ -88,7 +94,7 @@ class ColumnsXOR(ColumnODEFunc):
         lateral connections as learnable parameters.
         '''
         # Set lateral connections to zero for now
-        original_weights = torch.tensor(self.recurrent_weights, dtype=torch.float32) * 0.01 # * self.synapse_time_constant
+        original_weights = torch.tensor(self.recurrent_weights, dtype=torch.float32) * self.synapse_time_constant
         conn_weights = torch.zeros((24, 24))
         conn_weights[:16, :16] = original_weights
         conn_weights[16:, 16:] = original_weights[:8, :8]
@@ -96,7 +102,8 @@ class ColumnsXOR(ColumnODEFunc):
         # self.connection_weights = conn_weights
 
         # Learnable lateral weights
-        mean_W, std_W = 0., 0.
+        mean_W = original_weights.mean() / 10.
+        std_W = original_weights.std() / 10.
         lateral_weights = torch.normal(mean=mean_W, std=std_W, size=(16, 16))
         lateral_weights *= self.lat_mask  # only layer 2/3 connections
         conn_weights[:16, :16] += lateral_weights
@@ -105,7 +112,7 @@ class ColumnsXOR(ColumnODEFunc):
 
     def dynamics_xor(self, t: torch.tensor, state: torch.tensor, stim: torch.tensor, time_vec: torch.tensor) -> torch.tensor:
         """
-        Dynamics from which XOR ODE should learn the feedforward weights
+        Dynamics from which XOR ODE should learn the weights
         """
 
         ff_rate = torch.tensor(np.array(
@@ -116,7 +123,7 @@ class ColumnsXOR(ColumnODEFunc):
         membrane_potential, adaptation = state[0], state[1]
 
         firing_rate = self.compute_firing_rate_torch(membrane_potential - adaptation)
-        firing_rate_C = firing_rate * 10.0  # amplify firing rates received by C by factor 10
+        firing_rate_C = firing_rate * 10.  # amp up input from A, B to C
 
         # Compute feedforward current for columns A and B, receiving a weighted sum of both inputs
         ff_current_AB = (ff_rate[0] * self.ff_weights_1) + (ff_rate[1] * self.ff_weights_2)
@@ -126,9 +133,9 @@ class ColumnsXOR(ColumnODEFunc):
         feedforward_current = torch.relu(ff_current_ABC)  # make sure ff_currents are never negative
 
         background_current = self.bg_weights * self.background_drive
-        recurrent_current = torch.matmul(self.connection_weights, firing_rate) * 100.
+        recurrent_current = torch.matmul(self.connection_weights, firing_rate)
 
-        total_current = (background_current + recurrent_current) * self.synapse_time_constant + feedforward_current
+        total_current = (background_current * self.synapse_time_constant) + feedforward_current + recurrent_current
 
         delta_membrane_potential = (-membrane_potential +
             total_current * self.resistance) / self.membrane_time_constant
