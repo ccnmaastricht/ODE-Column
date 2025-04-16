@@ -1,1 +1,23 @@
-/ww_trained_model.pkl
+
+# macOS system files
+.DS_Store
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*.so
+
+# JetBrains IDE (PyCharm, IntelliJ, etc.)
+.idea/
+
+# Logs and data outputs
+*.log
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+
+# Project-specific folders
+data/
+results/
+pickled_ds/
