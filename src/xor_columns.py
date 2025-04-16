@@ -63,8 +63,8 @@ class ColumnsXOR(ColumnODEFunc):
         rand_weights_C = abs(torch.normal(mean=original_weights, std=std_W))
 
         # Multiply with mask
-        ff_weights_1 = rand_weights_1 * self.ff_weights_mask_A
-        ff_weights_2 = rand_weights_2 * self.ff_weights_mask_B
+        ff_weights_1 = rand_weights_1 * self.ff_weights_mask
+        ff_weights_2 = rand_weights_2 * self.ff_weights_mask
         weights_AC = rand_weights_C[:8] * self.ff_weights_mask[:8]
         weights_BC = rand_weights_C[8:] * self.ff_weights_mask[:8]
 
@@ -99,15 +99,15 @@ class ColumnsXOR(ColumnODEFunc):
         conn_weights[:16, :16] = original_weights
         conn_weights[16:, 16:] = original_weights[:8, :8]
         conn_weights[1, 8], conn_weights[9, 0] = 0., 0.  # set lateral connections to zero
-        # self.connection_weights = conn_weights
+        self.connection_weights = conn_weights
 
-        # Learnable lateral weights
-        mean_W = original_weights.mean() / 10.
-        std_W = original_weights.std() / 10.
-        lateral_weights = torch.normal(mean=mean_W, std=std_W, size=(16, 16))
-        lateral_weights *= self.lat_mask  # only layer 2/3 connections
-        conn_weights[:16, :16] += lateral_weights
-        self.connection_weights = nn.Parameter(conn_weights,  requires_grad=True)
+        # # Learnable lateral weights
+        # mean_W = original_weights.mean() / 10.
+        # std_W = original_weights.std() / 10.
+        # lateral_weights = torch.normal(mean=mean_W, std=std_W, size=(16, 16))
+        # lateral_weights *= self.lat_mask  # only layer 2/3 connections
+        # conn_weights[:16, :16] += lateral_weights
+        # self.connection_weights = nn.Parameter(conn_weights,  requires_grad=True)
 
 
     def dynamics_xor(self, t: torch.tensor, state: torch.tensor, stim: torch.tensor, time_vec: torch.tensor) -> torch.tensor:
@@ -118,7 +118,7 @@ class ColumnsXOR(ColumnODEFunc):
         ff_rate = torch.tensor(np.array(
             [np.stack([np.interp(t.detach().numpy(), time_vec.detach().numpy(), stim[:, i, j].detach().numpy())
                        for j in range(stim.shape[2])]) for i in range(stim.shape[1])]), dtype=torch.float32)
-        ff_rate = ff_rate * 10.  # input in range ~10Hz
+        ff_rate = ff_rate * 20.  # input in range ~20Hz
 
         membrane_potential, adaptation = state[0], state[1]
 
@@ -126,7 +126,7 @@ class ColumnsXOR(ColumnODEFunc):
         firing_rate_C = firing_rate * 10.  # amp up input from A, B to C
 
         # Compute feedforward current for columns A and B, receiving a weighted sum of both inputs
-        ff_current_AB = (ff_rate[0] * self.ff_weights_1) + (ff_rate[1] * self.ff_weights_2)
+        ff_current_AB = (ff_rate[0] * self.ff_weights_1) + (ff_rate[1] * self.ff_weights_2)  ################## ff_weights_2 ###################
         # Input to column C are L2/3 firing rates of columns A, B
         ff_current_C = (firing_rate_C[0] * self.ff_weights_AC) + (firing_rate_C[8] * self.ff_weights_BC)
         ff_current_ABC = torch.cat((ff_current_AB, ff_current_C), dim=0)

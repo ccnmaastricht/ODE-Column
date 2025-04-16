@@ -12,6 +12,7 @@ from src.xor_columns import ColumnsXOR
 from src.utils import load_config, create_feedforward_input
 
 
+
 def vis_xor_results(firing_rates, stim, train_loss, iter1, iter2):
     if not os.path.exists('../results/png'):
         os.makedirs('../results/png')
@@ -48,7 +49,7 @@ def make_stim():
                                [0., 1.],
                                [1., 1.]])
     for i in range(4):
-        rand_fr = conditions[i] * torch.empty(1).uniform_(0.875, 1.125)
+        rand_fr = conditions[i] * torch.empty(1).uniform_(0.975, 1.025)
         stim = create_feedforward_input(16, rand_fr[0], rand_fr[1])
         stims[i, :] = torch.tensor(stim)
 
@@ -86,13 +87,6 @@ def run_four_xor_samples(odefunc, initial_state, time_vec, time_steps, batch_siz
     # Compute firing rates
     firing_rates = odefunc.compute_firing_rate_torch(batch_output[:, :, 0, :] - batch_output[:, :, 1, :])
 
-    # for i in range(batch_size):
-    #     print(stim_batch[i])
-    #     plt.plot(firing_rates[i, :, 0].detach().numpy())
-    #     plt.plot(firing_rates[i, :, 8].detach().numpy())
-    #     plt.plot(firing_rates[i, :, 16].detach().numpy())
-    #     plt.show()
-
     # pass final firing rate to loss functions
     final_fr_C = firing_rates[:, -1, 16]  # final firing rates column C
     xor_output = min_max(final_fr_C)
@@ -124,14 +118,14 @@ def train_xor_ode(nr_samples, batch_size):
     initial_state = torch.cat((initial_state, initial_state[:, :8]), dim=-1)  # extent to three columns
 
     # Initialize the optimizer and add weights as learnable parameters
-    optimizer = torch.optim.RMSprop([{'params': odefunc.ff_weights_1, 'lr': 1e-4},
-                                    {'params': odefunc.ff_weights_2, 'lr': 1e-4},
-                                    {'params': odefunc.ff_weights_AC, 'lr': 1e-4},
-                                    {'params': odefunc.ff_weights_BC, 'lr': 1e-4},
-                                    {'params': odefunc.connection_weights, 'lr': 1e-4},
-                                     ], alpha=0.95)
+    optimizer = torch.optim.RMSprop([odefunc.ff_weights_1,
+                                    odefunc.ff_weights_2,
+                                    odefunc.ff_weights_AC,
+                                    odefunc.ff_weights_BC,
+                                    # odefunc.connection_weights,
+                                     ], lr=1e-4, alpha=0.95)
 
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)  # higher gamma = slower decay
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.8)  # higher gamma = slower decay
 
     nr_batches = int(nr_samples/batch_size)
     time_steps = int(sim_params['protocol']['stimulus_duration'] * 2 / sim_params['time_step'])
@@ -147,18 +141,12 @@ def train_xor_ode(nr_samples, batch_size):
                                                 batch_size=batch_size, mode="training")
         loss.backward()
 
-        # print("Gradient weights input 1: ", torch.norm(odefunc.ff_weights_1.grad))
-        # print("Gradient weights input 1: ", torch.norm(odefunc.ff_weights_2.grad))
-        # print("Gradient weights A-C: ", torch.norm(odefunc.ff_weights_AC.grad))
-        # print("Gradient weights B-C: ", torch.norm(odefunc.ff_weights_BC.grad))
-        # print("Gradient connection weights: ", torch.norm(odefunc.connection_weights.grad))
-
         with torch.no_grad():  # make sure not to update illegal connections
-            odefunc.ff_weights_1.grad *= odefunc.ff_weights_mask_A
-            odefunc.ff_weights_2.grad *= odefunc.ff_weights_mask_B
+            odefunc.ff_weights_1.grad *= odefunc.ff_weights_mask
+            odefunc.ff_weights_2.grad *= odefunc.ff_weights_mask
             odefunc.ff_weights_AC.grad *= odefunc.ff_weights_mask[:8]
             odefunc.ff_weights_BC.grad *= odefunc.ff_weights_mask[:8]
-            odefunc.connection_weights.grad[:16, :16] *= odefunc.lat_mask
+            # odefunc.connection_weights.grad[:16, :16] *= odefunc.lat_mask
 
         optimizer.step()
         scheduler.step()  # adjust learning rate
@@ -166,13 +154,9 @@ def train_xor_ode(nr_samples, batch_size):
         print('Iter {:02d} | Total Loss {:.5f}'.format(itr + 1, loss.item()))
 
         # Test ODE model and visualize results
-        nr_test_samples = 4
+        nr_test_samples = 100
 
         with torch.no_grad():
-            # fr_rates, stims, _ = run_four_xor_samples(odefunc, initial_state, time_vec, time_steps,
-            #                                        batch_size=4, mode="testing")
-            # for test_itr in range(4):
-            #     vis_xor_results(fr_rates[test_itr], stims[test_itr], loss.item(), itr, test_itr)
 
             # Visualizing accuracy results
             final_fr_rates = []
@@ -206,20 +190,20 @@ def train_xor_ode(nr_samples, batch_size):
             accuracy_binary.append((np.sum(TP_binary) + np.sum(TN_binary)).item() / nr_test_samples)
             print(accuracy_binary)
 
-        print('     FF weights input 1: {:.4f}, {:.4f}, {:.4f}, {:.4f}'.format(odefunc.ff_weights_1[2],
-                                                                               odefunc.ff_weights_1[3],
-                                                                               odefunc.ff_weights_1[10],
-                                                                               odefunc.ff_weights_1[11]))
-        print('     FF weights input 2: {:.4f}, {:.4f}, {:.4f}, {:.4f}'.format(odefunc.ff_weights_2[2],
-                                                                               odefunc.ff_weights_2[3],
-                                                                               odefunc.ff_weights_2[10],
-                                                                               odefunc.ff_weights_2[11]))
-        print('     FF weights col A to C: {:.4f}, {:.4f}'.format(odefunc.ff_weights_AC[2],
-                                                                               odefunc.ff_weights_AC[3]))
-        print('     FF weights col B to C: {:.4f}, {:.4f}'.format(odefunc.ff_weights_BC[2],
-                                                                               odefunc.ff_weights_BC[3]))
-        print('     Lat weights between A and B: {:.4f}, {:.4f}'.format(odefunc.connection_weights[1, 8],
-                                                                        odefunc.connection_weights[9, 0]))
+            print('     FF weights input 1: {:.4f}, {:.4f}, {:.4f}, {:.4f}'.format(odefunc.ff_weights_1[2],
+                                                                                   odefunc.ff_weights_1[3],
+                                                                                   odefunc.ff_weights_1[10],
+                                                                                   odefunc.ff_weights_1[11]))
+            print('     FF weights input 2: {:.4f}, {:.4f}, {:.4f}, {:.4f}'.format(odefunc.ff_weights_2[2],
+                                                                                   odefunc.ff_weights_2[3],
+                                                                                   odefunc.ff_weights_2[10],
+                                                                                   odefunc.ff_weights_2[11]))
+            print('     FF weights col A to C: {:.4f}, {:.4f}'.format(odefunc.ff_weights_AC[2],
+                                                                                   odefunc.ff_weights_AC[3]))
+            print('     FF weights col B to C: {:.4f}, {:.4f}'.format(odefunc.ff_weights_BC[2],
+                                                                                   odefunc.ff_weights_BC[3]))
+            # print('     Lat weights between A and B: {:.4f}, {:.4f}'.format(odefunc.connection_weights[1, 8],
+            #                                                                 odefunc.connection_weights[9, 0]))
 
     return accuracy_norm, accuracy_binary
 
@@ -279,10 +263,15 @@ def train_fr_classifier(batch_size, fn_ds):
 
 
 if __name__ == '__main__':
-    nr_samples = 200
+    nr_samples = 80
     batch_size = 4
 
-    acc1, acc2 = train_xor_ode(nr_samples, batch_size)
+    for i in range(10):
+
+        print()
+        print('ITERATION', i)
+
+        acc1, acc2 = train_xor_ode(nr_samples, batch_size)
 
     fig = plt.plot(acc1)
     plt.xlabel('Number of batches (batch size=4)')
