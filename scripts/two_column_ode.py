@@ -5,8 +5,8 @@ import pickle
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.coupled_columns import CoupledColumns, ColumnODEFunc
-from src.utils import load_config, huber_loss_membrane, mse_halfway_point
+from src.coupled_columns import ColumnLayer, ColumnLayerWTA
+from src.utils import *
 
 
 '''
@@ -15,31 +15,49 @@ connections between columns.
 '''
 
 
+def init_network(network_class):
+    # Column network setup
+    col_params = load_config('../config/model.toml')
+    sim_params = load_config('../config/simulation.toml')
+    network = network_class(col_params, area='mt')
+
+    # Initial state
+    membrane = torch.tensor(sim_params['initial_conditions']['membrane_potential'])
+    adaptation = torch.tensor(sim_params['initial_conditions']['adaptation'])
+    mem_adap = torch.stack([membrane, adaptation])
+    initial_state = torch.tile(mem_adap, (num_columns,))
+
+    # Time vector - add pre- and post-stimulus phase
+    time_steps = int((stim_phase * 3) / dt)
+    time_vec = torch.linspace(0., time_steps * dt, time_steps)
+
+    return network, initial_state, time_vec
+
 def make_ds_dmf(ds_file, nr_samples):
+
     if not os.path.exists('../data'):
         os.makedirs('../data')
     if os.path.exists(ds_file):
         with open(ds_file, 'rb') as f:
             ds = pickle.load(f)
     else:
-        # Initialize two columns
-        col_params = load_config('../config/model.toml')
-        sim_params = load_config('../config/simulation.toml')
-        columns = CoupledColumns(col_params, 'MT')
+
+        network, initial_state, time_vec = init_network(ColumnLayer)
 
         # Make ds dict with two tensors states and stims
-        protocol, dt = sim_params['protocol'], sim_params['time_step']
-        time_steps = (protocol['pre_stimulus_period'] + protocol['post_stimulus_period'] + protocol['stimulus_duration']) / dt
         ds = {
-            'states': torch.Tensor(nr_samples, int(time_steps), 3, columns.num_populations),
-            'stims': torch.Tensor(nr_samples, columns.num_populations)
+            'states': torch.Tensor(nr_samples, len(time_vec), 2, network.num_populations),
+            'stims': torch.Tensor(nr_samples, len(time_vec), network.num_populations)
         }
 
         # Generate training data and store in ds dict
         for i in range(nr_samples):
-            state, stim = columns.run_single_sim(sim_params, col_params, ff_input='random', num_stim_phases=3)
-            ds['states'][i, :, :, :] = torch.tensor(state)   # membrane, adaptation and firing rate
-            ds['stims'][i, :] = torch.tensor(stim)  # stimulus input used
+
+            stim = make_rand_stim_three_phases(network.num_populations, time_vec)
+            state = network.run_ode(initial_state, stim, time_vec)
+
+            ds['states'][i, :, :, :] = state   # membrane, adaptation and firing rate
+            ds['stims'][i, :, :] = stim  # stimulus input used
 
         # Save ds dict as pickle
         with open(ds_file, 'wb') as f:
@@ -53,14 +71,14 @@ def get_data(nr_samples, batch_size, fn):
     # Prepare train and test sets
     split = int(nr_samples * 0.9)
     train_states, test_states = states[:split, :, :2, :], states[split:, :, :2, :]  # lose the firing rate
-    train_stims, test_stims = stims[:split, :], stims[split:, :]
+    train_stims, test_stims = stims[:split, :, :], stims[split:, :, :]
 
     train_dataset = TensorDataset(train_states, train_stims)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
     return train_loader, test_states, test_stims
 
-def visualize_results(pred, true, stim, odefunc, train_loss, test_loss, weights, show=False):
+def visualize_results(pred, true, stim, odefunc, train_loss, test_loss, weights):
     if not os.path.exists('../results/png'):
         os.makedirs('../results/png')
     fig, axes = plt.subplots(2, 2, figsize=(9, 7))
@@ -104,19 +122,7 @@ def visualize_results(pred, true, stim, odefunc, train_loss, test_loss, weights,
     plt.tight_layout(pad=3.0)
     fig.subplots_adjust(left=0.15)
     plt.savefig('../results/png/{:02d}'.format(len(weights)))
-    if show:
-        plt.show()
     plt.close(fig)
-
-def test_ode(test_states, test_stims, iter, odefunc, time_vec, train_loss, weights, show=False):
-    with torch.no_grad():
-        stim = test_stims[iter]
-        true_state = test_states[iter, :, :, :]
-
-        pred_state = odefunc.run_ode_stim_phases(true_state[0], stim, time_vec, num_stim_phases=3)
-        test_loss = huber_loss_membrane(pred_state.unsqueeze(0), true_state.unsqueeze(0))
-    visualize_results(pred_state, true_state, stim, odefunc, train_loss, test_loss, weights, show)
-
 
 def train_ode_two_columns(nr_samples, batch_size, fn):
     '''
@@ -126,13 +132,11 @@ def train_ode_two_columns(nr_samples, batch_size, fn):
     # Get the train and test set
     train_loader, test_states, test_stims = get_data(nr_samples, batch_size, fn)
 
-    # Initialize the ODE function
-    col_params = load_config('../config/model.toml')
-    sim_params = load_config('../config/simulation.toml')
-    odefunc = ColumnODEFunc(col_params, 'MT', learn_wta=True)
+    # Initialize network, initial state and time vector
+    network, initial_state, time_vec = init_network(ColumnLayerWTA)
 
     # Initialize the optimizer and add connection weights as learnable parameter
-    optimizer = torch.optim.RMSprop([odefunc.connection_weights], lr=1e-2, alpha=0.9)
+    optimizer = torch.optim.RMSprop([network.recurrent_weights], lr=1e-2, alpha=0.9)
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99)  # higher gamma = slower decay
 
     # Store weights
@@ -142,34 +146,45 @@ def train_ode_two_columns(nr_samples, batch_size, fn):
         optimizer.zero_grad()
 
         nr_batch_samples = true_states.shape[0]
-        time_steps = true_states.shape[1]
-        time_vec = torch.linspace(0., time_steps * sim_params['time_step'], time_steps)
-
         pred_states = torch.Tensor(true_states.shape)
 
         for batch_iter in range(nr_batch_samples):
             stim = stim_batch[batch_iter]
-            input_state = true_states[batch_iter, 0, :, :]
 
-            ode_output = odefunc.run_ode_stim_phases(input_state, stim, time_vec, 3)
+            ode_output = network.run_ode(initial_state, stim, time_vec)
             pred_states[batch_iter, :, :, :] = ode_output
 
         loss = huber_loss_membrane(pred_states, true_states)  # only train on membrane potential
         loss.backward()
+
         with torch.no_grad():  # only update the lateral weights
-            odefunc.connection_weights.grad *= odefunc.lat_mask
+            network.recurrent_weights.grad *= network.lat_in_mask
+
         optimizer.step()
         scheduler.step()  # adjust learning rate
 
         # Print loss, save current weights in array
         print('Iter {:02d} | Total Loss {:.5f}'.format(iter + 1, loss.item()))
-        weights.append(odefunc.connection_weights.detach().numpy().copy())
+        weights.append(network.recurrent_weights.detach().numpy().copy())
+
         # Test ODE model and visualize results
-        test_ode(test_states, test_stims, iter, odefunc, time_vec, loss.item(), weights)
+        with torch.no_grad():
+            stim = test_stims[iter]
+            true_state = test_states[iter, :, :, :]
+
+            pred_state = network.run_ode(initial_state, stim, time_vec)
+            test_loss = huber_loss_membrane(pred_state.unsqueeze(0), true_state.unsqueeze(0))
+        visualize_results(pred_state, true_state, stim[500,:], network, loss.item(), test_loss.item(), weights)
 
 
 if __name__ == '__main__':
+
     nr_samples = 1000
     batch_size = 16
 
-    train_ode_two_columns(nr_samples, batch_size, '../data/states_two_cols.pkl')
+    num_columns = 2
+    dt = 1e-3
+    stim_phase = 0.5
+
+    train_ode_two_columns(nr_samples, batch_size, '../data/ds_learn_lat.pkl')
+

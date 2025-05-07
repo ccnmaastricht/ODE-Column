@@ -6,7 +6,7 @@ import matplotlib.colors as mcolors
 import numpy as np
 
 from src.utils import load_config
-from wwp_training import get_stim
+from wta_training import get_stim
 
 
 

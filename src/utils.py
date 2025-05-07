@@ -48,12 +48,36 @@ def gain_function(x: np.array, a: float, b: float, d: float) -> np.array:
     return (a * x - b) / (1 - np.exp(-d * (a * x - b)))
 
 
+def make_rand_stim_three_phases(num_populations, time_vec):
+    """Make a random stimulus input for three phases: pre,
+    stimulus and post."""
+    rand_diff = np.random.uniform(-20.0, 20.0)
+    input_A = 32.0 + rand_diff
+    input_B = 32.0 - rand_diff
+    raw_stim = torch.tensor([input_A, input_B])
+
+    stim_vector = set_stim_three_phases(num_populations, time_vec, raw_stim)
+    return stim_vector
+
+
+def set_stim_three_phases(num_populations, time_vec, raw_stim):
+    """Extent the given input stimulus to fit the time vector
+    in three phases: pre-, stimulus, and post-."""
+    stim = create_feedforward_input(num_populations, raw_stim[0], raw_stim[1])
+
+    stim_vector = torch.zeros((len(time_vec), num_populations))
+    stim_onset = int(len(time_vec) / 3)
+    stim_offset = int(stim_onset + len(time_vec) / 3)
+    stim_vector[stim_onset:stim_offset, :] = stim
+    return stim_vector
+
+
 def create_feedforward_input(num_populations: int,
                              input_colA: float,
                              input_colB: float) -> np.array:
     """Create feedforward input array for the simulation."""
     layer_4_indices = [[2, 3], [10, 11]]
-    feedforward_rate = np.zeros(num_populations)
+    feedforward_rate = torch.zeros(num_populations)
     feedforward_rate[layer_4_indices[0]] = input_colA
     feedforward_rate[layer_4_indices[1]] = input_colB
     return feedforward_rate
@@ -66,6 +90,46 @@ def compute_firing_rate(membrane_potential: np.array, adaptation: np.array,
                          gain_function_parameters.gain,
                          gain_function_parameters.threshold,
                          gain_function_parameters.noise_factor)
+
+def torch_interp(x, xp, fp):
+    """
+    Interpolates fp at points x, given base points xp.
+    """
+    x = torch.clamp(x, xp[0], xp[-1])  # clamp x to the valid range of xp
+
+    idx = torch.searchsorted(xp, x, right=True)
+    idx = torch.clamp(idx, 1, len(xp) - 1)
+
+    x0 = xp[idx - 1]
+    x1 = xp[idx]
+    y0 = fp[idx - 1]
+    y1 = fp[idx]
+
+    slope = (y1 - y0) / (x1 - x0).unsqueeze(-1)
+    return y0 + slope * (x.unsqueeze(-1) - x0.unsqueeze(-1))
+
+def min_max(firing_rates):
+    '''
+    Function to binary classify final firing rates by means of
+    min-maxing. Thus, the maximum final firing rate will receive
+    score=1 and the minimum will receive score=0.
+    '''
+    max_val = torch.max(firing_rates)
+    min_val = torch.min(firing_rates)
+    return (firing_rates - min_val) / (max_val - min_val)
+
+def fr_to_binary(firing_rates, scaling_factor=3.0):
+    '''
+    Function to binary classify final firing rates. Loosely
+    z-scores the input and passes it to a sigmoid function to
+    obtain values between 0 and 1.
+    '''
+    threshold = torch.mean(firing_rates)
+    sd_fr = torch.std(firing_rates) / scaling_factor
+
+    fr_normalized = (firing_rates - threshold) / sd_fr
+    fr_sigmoid = torch.sigmoid(fr_normalized)
+    return fr_sigmoid
 
 def huber_loss_firing_rates(pred, true, odefunc):
     '''
@@ -100,4 +164,3 @@ def mse_halfway_point(pred, true, odefunc):
     fr_pred = odefunc.compute_firing_rate_torch(mem_pred - adap_pred)
     fr_true = odefunc.compute_firing_rate_torch(mem_true - adap_true)
     return torch.mean(abs(fr_pred - fr_true))
-    # return torch.mean(abs(pred[:, halfpoint, 0, [0, 8]] - true[:, halfpoint, 0, [0, 8]]))

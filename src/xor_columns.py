@@ -7,20 +7,6 @@ from torchdiffeq import odeint as torch_odeint
 from src.coupled_columns import ColumnODEFunc
 
 
-'''
-Possible ff weights to solve XOR solution: 
-rand_weights_1 = torch.tensor([0.0000, 0.0000, 0.0043, 0.0027, 0.0000, 0.0000, 0.0000, 0.0000,
-                               0.0000, 0.0000, 0.0130, 0.0082, 0.0000, 0.0000, 0.0000, 0.0000])
-rand_weights_2 = torch.tensor([0.0000, 0.0000, 0.0043, 0.0027, 0.0000, 0.0000, 0.0000, 0.0000,
-                               0.0000, 0.0000, 0.0130, 0.0082, 0.0000, 0.0000, 0.0000, 0.0000])
-rand_weights_C = torch.tensor([0.0000, 0.0000, 0.0082, 0.0130, 0.0000, 0.0000, 0.0000, 0.0000,
-                               0.0000, 0.0000, 0.0130, 0.0082, 0.0000, 0.0000, 0.0000, 0.0000])
-Column A receives the same input, but less strong than column B, hence column A represents the AND 
-and column B the OR. If both column have high firing rates, column As activity will inhibit column C, 
-thus resulting in low firing rates. However, if only column B is activated, column C will not be 
-inhibited and show high firing rates as a result. 
-'''
-
 
 class ColumnsXOR(ColumnODEFunc):
     def __init__(self, column_parameters: dict, area: str):

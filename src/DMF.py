@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
 
 import warnings
 
@@ -58,6 +59,7 @@ def get_params(J_local=87.8e-3, J_lateral=87.8e-3, area='MT'):
         N = np.array([36337, 10249, 12503, 3126, 12624, 2772, 15160, 3104])  # FST
 
     K_bg = np.tile([2510, 2510, 2510, 2510, 2510, 2510, 2510, 2510], 2)
+    #K_bg = np.tile([1600, 1500, 2100, 1900, 2000, 1900, 2900, 2100], 2)
 
     N = np.tile(N, 2)
     N = N / 2  # divide area in two
@@ -195,7 +197,7 @@ def update(state, params, stim, dt=1e-4):
     state['I'] += dt * stim  # external input
     state['N'] += (- state['N'] / params['tau_s'] + params['sigma'] * np.sqrt(2 / params['tau_s']) * np.random.randn(
         params['M'])) * dt
-    state['I'] += state['N']
+    # state['I'] += state['N']
 
     state['A'] += dt * ((-state['A'] + state['R'] * params['kappa']) / params['tau_a'])  # adaptation
     state['H'] += dt * ((-state['H'] + params['R'] * state['I']) / params['tau_m'])  # membrane potential
@@ -247,6 +249,10 @@ if __name__ == '__main__':
     # Array for saving firing rate
     R = np.zeros((M, T*2))
 
+    # weights = params['W']
+    # plt.imshow(weights, cmap="viridis", interpolation="nearest")
+    # plt.show()
+
     # Run simulation
     for t in range(T):
         state = update(state, params, stim)
@@ -259,8 +265,8 @@ if __name__ == '__main__':
         state = update(state, params, stim)
         R[:, T+t] = state['R']
 
-    print(np.mean(R, axis=1))
-
-    plt.plot(R[2,:])
-    plt.plot(R[10, :])
-    plt.show()
+    for i in range(8):
+        print(i)
+        plt.plot(R[i,:])
+        plt.plot(R[i+8, :])
+        plt.show()
