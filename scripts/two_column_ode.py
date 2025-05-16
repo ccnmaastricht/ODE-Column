@@ -5,7 +5,7 @@ import pickle
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.coupled_columns import ColumnLayer, ColumnLayerWTA
+from src.coupled_columns import ColumnArea, ColumnAreaWTA
 from src.utils import *
 
 
@@ -42,7 +42,7 @@ def make_ds_dmf(ds_file, nr_samples):
             ds = pickle.load(f)
     else:
 
-        network, initial_state, time_vec = init_network(ColumnLayer)
+        network, initial_state, time_vec = init_network(ColumnArea)
 
         # Make ds dict with two tensors states and stims
         ds = {
@@ -97,10 +97,10 @@ def visualize_results(pred, true, stim, odefunc, train_loss, test_loss, weights)
     fig.legend(loc="upper left")
 
     # Plot firing rate
-    col1_true_fr = odefunc.compute_firing_rate_torch(true[:, 0, 0] - true[:, 1, 0])
-    col2_true_fr = odefunc.compute_firing_rate_torch(true[:, 0, 8] - true[:, 1, 8])
-    col1_pred_fr = odefunc.compute_firing_rate_torch(pred[:, 0, 0] - pred[:, 1, 0])
-    col2_pred_fr = odefunc.compute_firing_rate_torch(pred[:, 0, 8] - pred[:, 1, 8])
+    col1_true_fr = compute_firing_rate_torch(true[:, 0, 0] - true[:, 1, 0])
+    col2_true_fr = compute_firing_rate_torch(true[:, 0, 8] - true[:, 1, 8])
+    col1_pred_fr = compute_firing_rate_torch(pred[:, 0, 0] - pred[:, 1, 0])
+    col2_pred_fr = compute_firing_rate_torch(pred[:, 0, 8] - pred[:, 1, 8])
 
     axes[1, 0].plot(col1_true_fr, label='true col 1')
     axes[1, 0].plot(col2_true_fr, label='true col 2')
@@ -133,7 +133,7 @@ def train_ode_two_columns(nr_samples, batch_size, fn):
     train_loader, test_states, test_stims = get_data(nr_samples, batch_size, fn)
 
     # Initialize network, initial state and time vector
-    network, initial_state, time_vec = init_network(ColumnLayerWTA)
+    network, initial_state, time_vec = init_network(ColumnAreaWTA)
 
     # Initialize the optimizer and add connection weights as learnable parameter
     optimizer = torch.optim.RMSprop([network.recurrent_weights], lr=1e-2, alpha=0.9)

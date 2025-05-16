@@ -6,11 +6,16 @@ import torch
 from dataclasses import dataclass
 
 
-@dataclass
-class GainFunctionParams:
-    gain: float
-    threshold: float
-    noise_factor: float
+
+
+def compute_firing_rate_torch(x):
+    '''
+    Compute the firing rates torch-friendly.
+    '''
+    a, b, d = 48.0, 981.0, 0.0089  # gain, threshold, noise factor
+    x_nom = a * x - b
+    x_activ = x_nom / (1 - torch.exp(-d * x_nom))
+    return x_activ
 
 
 def parse_args() -> argparse.Namespace:
@@ -138,7 +143,7 @@ def huber_loss_firing_rates(pred, true, odefunc):
     '''
     # Compute firing rates for pred L2/3e
     mem_pred, adap_pred = pred[:, :, 0, [0, 8]], pred[:, :, 1, [0, 8]]
-    fr_pred = odefunc.compute_firing_rate_torch(mem_pred - adap_pred)
+    fr_pred = compute_firing_rate_torch(mem_pred - adap_pred)
 
     # Compute loss between ode prediction and WangWong simulated data
     hub_loss = torch.nn.SmoothL1Loss(beta=1.0)
@@ -161,6 +166,6 @@ def mse_halfway_point(pred, true, odefunc):
     halfpoint = int(pred.shape[1] / 2)  # int(pred.shape[1] - 1)
     mem_pred, adap_pred = pred[:, halfpoint, 0, [0, 8]], pred[:, halfpoint, 1, [0, 8]]
     mem_true, adap_true = true[:, halfpoint, 0, [0, 8]], true[:, halfpoint, 1, [0, 8]]
-    fr_pred = odefunc.compute_firing_rate_torch(mem_pred - adap_pred)
-    fr_true = odefunc.compute_firing_rate_torch(mem_true - adap_true)
+    fr_pred = compute_firing_rate_torch(mem_pred - adap_pred)
+    fr_true = compute_firing_rate_torch(mem_true - adap_true)
     return torch.mean(abs(fr_pred - fr_true))

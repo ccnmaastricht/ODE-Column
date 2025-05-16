@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from src.xor_columns import ColumnsXOR
-from src.utils import load_config, create_feedforward_input, min_max, fr_to_binary
+from src.utils import *
 
 
 
@@ -88,7 +88,7 @@ def run_four_xor_samples(odefunc, initial_state, time_vec, time_steps, batch_siz
             batch_output[itr, :, :, :] = ode_output
 
     # Compute firing rates
-    firing_rates = odefunc.compute_firing_rate_torch(batch_output[:, :, 0, :] - batch_output[:, :, 1, :])
+    firing_rates = compute_firing_rate_torch(batch_output[:, :, 0, :] - batch_output[:, :, 1, :])
 
     # Use final firing rate to compute model output
     final_fr_C = firing_rates[:, -1, 16]  # final firing rates column C

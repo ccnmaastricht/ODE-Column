@@ -5,7 +5,7 @@ import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 import numpy as np
 
-from src.utils import load_config
+from src.utils import *
 from wta_training import get_stim
 
 
@@ -49,7 +49,7 @@ def compute_visuomotor_index(model, input_state, time_vec):
 
             # Compute firing rates
             mem, adap = output[:, 0, :], output[:, 1, :]
-            fr = model.compute_firing_rate_torch(mem - adap)
+            fr = compute_firing_rate_torch(mem - adap)
 
             # Find the threshold excedence point
             thresh_idx = find_index(fr, threshold, winner)
@@ -125,7 +125,7 @@ if __name__ == '__main__':
 
             # Compute firing rates
             mem, adap = output[:, 0, :], output[:, 1, :]
-            fr = model.compute_firing_rate_torch(mem - adap)
+            fr = compute_firing_rate_torch(mem - adap)
 
             fr_results[0, i, :, :] = fr[400:1000, [0, 8]]  # layer 2/3
             fr_results[1, i, :, :] = fr[400:1000, [2, 10]]  # layer 4

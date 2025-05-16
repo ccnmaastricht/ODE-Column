@@ -112,7 +112,7 @@ class ColumnsXOR(ColumnODEFunc):
         firing_rate_C = firing_rate * 10.  # amp up input from A, B to C
 
         # Compute feedforward current for columns A and B, receiving a weighted sum of both inputs
-        ff_current_AB = (ff_rate[0] * self.ff_weights_1) + (ff_rate[1] * self.ff_weights_2)  ################## ff_weights_2 ###################
+        ff_current_AB = (ff_rate[0] * self.ff_weights_1) + (ff_rate[1] * self.ff_weights_2)
         # Input to column C are L2/3 firing rates of columns A, B
         ff_current_C = (firing_rate_C[0] * self.ff_weights_AC) + (firing_rate_C[8] * self.ff_weights_BC)
         ff_current_ABC = torch.cat((ff_current_AB, ff_current_C), dim=0)

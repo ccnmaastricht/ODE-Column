@@ -164,7 +164,6 @@ def make_hopf_ds(save=True):
 if __name__ == '__main__':
 
     # set params for hopf bifurcation
-    # ds_file          = '../pickled_ds/ds_uc_5000_omg.pkl'
     ds_file          = '../data/ds_bifurcation.pkl'
     nr_samples       = 5000
     batch_size       = 32

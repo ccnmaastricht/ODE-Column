@@ -8,7 +8,7 @@ from torch.utils.data import TensorDataset, DataLoader
 
 from src.utils import *
 from src.ww_model import DM
-from src.coupled_columns import ColumnLayerWTA
+from src.coupled_columns import ColumnAreaWTA
 
 
 
@@ -23,7 +23,7 @@ def visualize_all_layers(pred, true, stim, odefunc, train_loss, test_loss, weigh
     fig.text(0.6, 0.03, f"Training loss: {train_loss:.2f}", ha='center', fontsize=10, fontweight='bold')
 
     # Plot firing rates
-    fr_rates = odefunc.compute_firing_rate_torch(pred[:, 0, :] - pred[:, 1, :])
+    fr_rates = compute_firing_rate_torch(pred[:, 0, :] - pred[:, 1, :])
 
     for i in range(2):
         for j in range(2):
@@ -53,15 +53,27 @@ def visualize_results(pred, true, stim, odefunc, train_loss, test_loss, weights)
     fig.text(0.6, 0.03, f"Training loss: {train_loss:.2f}", ha='center', fontsize=10, fontweight='bold')
 
     # Plot firing rate
-    col1_pred_fr = odefunc.compute_firing_rate_torch(pred[:, 0, 0] - pred[:, 1, 0])
-    col2_pred_fr = odefunc.compute_firing_rate_torch(pred[:, 0, 8] - pred[:, 1, 8])
+    col1_pred_fr = compute_firing_rate_torch(pred[:, 0, 0] - pred[:, 1, 0])
+    col2_pred_fr = compute_firing_rate_torch(pred[:, 0, 8] - pred[:, 1, 8])
+
+    # col1_pred_fr_all = compute_firing_rate_torch(pred[:, 0, :8] - pred[:, 1, :8])
+    # col2_pred_fr_all = compute_firing_rate_torch(pred[:, 0, 8:] - pred[:, 1, 8:])
+    # col1_pred_fr = col1_pred_fr_all[:, 0] * 5 + col1_pred_fr_all[:, 4] * 0.5  # add layer 2/3 and 5
+    # col2_pred_fr = col2_pred_fr_all[:, 0] * 5 + col2_pred_fr_all[:, 4] * 0.5  # add layer 2/3 and 5
+
     col1_true_fr = true[:, 0]
     col2_true_fr = true[:, 1]
 
-    axes[0].plot(col1_true_fr, label='true col 1')
-    axes[0].plot(col2_true_fr, label='true col 2')
-    axes[0].plot(col1_pred_fr, '--', label='pred col 1')
-    axes[0].plot(col2_pred_fr, '--', label='pred col 2')
+    axes[0].plot(col1_true_fr, '--', label='true col 1')
+    axes[0].plot(col2_true_fr, '--', label='true col 2')
+    axes[0].plot(col1_pred_fr, label='pred col 1')
+    axes[0].plot(col2_pred_fr, label='pred col 2')
+
+    # axes[0].plot(col1_pred_fr_all[:, 0]*5, '--', label='true col 1, L2/3')
+    # axes[0].plot(col1_pred_fr_all[:, 4], '--', label='true col 1, L5')
+    # axes[0].plot(col2_pred_fr_all[:, 0]*5, '--', label='true col 2, L2/3')
+    # axes[0].plot(col2_pred_fr_all[:, 4], '--', label='true col 2, L5')
+
     axes[0].set_title("Firing rates in layer 2/3")
 
     # Plot current weights
@@ -92,7 +104,7 @@ def make_ds_wwp(ds_file, nr_samples, time_steps):
         for i in range(nr_samples):
 
             # Random input between 15 and 40Hz, which random (but small) difference between them
-            muA = np.random.uniform(15.0, 40.0)
+            muA = np.random.uniform(30.0, 40.0)
             diff_mag = muA / np.random.uniform(7.5, 15.0)
             muB = muA + np.random.choice([diff_mag, diff_mag*-1.0])
 
@@ -149,7 +161,7 @@ def train_wta_ode(nr_samples, batch_size, fn):
     data_loader = get_data(nr_samples, batch_size, time_steps, fn)
 
     # Initialize network, initial state and time vector
-    network, initial_state, time_vec = init_network(ColumnLayerWTA, time_steps)
+    network, initial_state, time_vec = init_network(ColumnAreaWTA, time_steps)
 
     # Initialize the optimizer and add connection weights as learnable parameter
     optimizer = torch.optim.RMSprop([network.recurrent_weights], lr=1e-2, alpha=0.9)
@@ -206,7 +218,7 @@ if __name__ == '__main__':
     stim_phase = 0.05
     time_steps = int((stim_phase * 3) / dt)  # add pre- and post-stimulus phase
 
-    network = train_wta_ode(nr_samples, batch_size, '../data/ds_wwp.pkl')
+    network = train_wta_ode(nr_samples, batch_size, '../data/ds_wta_30.pkl')
 
     # with open('../ww_trained_model.pkl', 'wb') as f:
     #     pickle.dump(model, f)
