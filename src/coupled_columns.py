@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 
 from src.utils import *
+from src.xor_columns import ColumnsXOR  # to compare to
 
 
 class ColumnArea:
@@ -286,6 +287,7 @@ class ColumnNetwork():
             area = ColumnArea(column_parameters, area_name, num_columns)
             self.areas[area_idx] = area
 
+        self.network_as_area = ColumnArea(column_parameters, 'mt', sum(network_dict['nr_columns_per_area']))
         self.nr_input_units = network_dict['nr_input_units']
         self.nr_columns_per_area = network_dict['nr_columns_per_area']
 
@@ -339,76 +341,137 @@ class ColumnNetwork():
 
             for i in range(nr_ff_weights):
                 rand_weights = abs(torch.normal(mean=original_weights, std=std_W))
-                ff_weights = nn.Parameter(rand_weights, requires_grad=True)
+                rand_weights_masked = rand_weights * torch.tile(self.ff_target_mask, (area.num_columns,))
+                ff_weights = nn.Parameter(rand_weights_masked, requires_grad=True)
                 feedforward_weights[area_idx].append(ff_weights)
 
         self.feedforward_weights = feedforward_weights
 
+    def partition_firing_rates(self, firing_rate):
+        '''
+        Organizes the firing rates into a dict of separate areas.
+        This allows easy access to previous area's firing rates.
+        '''
+        fr_per_area = {}
+        idx = 0
+        for area_idx, area in self.areas.items():
+            fr_area = firing_rate[idx : idx + area.num_populations]
+            fr_area_reshape = fr_area.reshape(area.num_columns, 8)
+            fr_per_area[area_idx] = fr_area_reshape
+            idx = idx + area.num_populations
+        return fr_per_area
+
     def dynamics_ode(self, t, state, stim, time_vec):
-
-        # stim should be shaped like [first_area.num_populations, num_inputs]
-
+        '''
+        State dynamics updating the membrane potential and adaptation;
+        ODE should learn these dynamics and update the weights accordingly.
+        '''
         # Get current stimulus (external ff rate) based on current time t and the time vector time_vec
         ext_ff_rate = torch_interp(t, time_vec, stim)
         ext_ff_rate = ext_ff_rate * 20.  # input in 1Hz range, so scale up
 
+        # Compute firing rate from membrane potential and adaptation
         membrane_potential, adaptation = state[0], state[1]
-
         firing_rate = compute_firing_rate_torch(membrane_potential - adaptation)
 
-        # -------
-        # separately for each area:
-            # if 0: take the ext ff rate
-            # if not 0: partition the firing rate to get previous area's fr
-            # take the relevant ff weights
-            # multiply input/fr with ff_weights
-            # concatenate the feedforward current and relu it to make sure it is positive
+        # Partition firing rate per area
+        fr_per_area = self.partition_firing_rates(firing_rate)
+
+        # Compute the next state separately for each area
+        total_current = torch.Tensor()
 
         for area_idx, area in self.areas.items():
 
-            if area_idx == 0:   # first area
-                # assuming stim is shaped like above
-                for ext_ff_idx in range(len(ext_ff_rate)):
+            # Compute feedforward current of each area, based on
+            # area=0: external input or area>0: the previous area's firing rate
+            ff_current_area = torch.zeros(area.num_populations)
+
+            for ff_idx in range(len(self.feedforward_weights[area_idx])):
+                if area_idx == 0:   # first area gets external input
                     # multiply each input with each ff weights
-                    result = ext_ff_rate[ext_ff_idx] * self.feedforward_weights[area_idx][ext_ff_idx]
-            else:
-                prev_area_size = self.areas[area_idx-1].num_columns
-                # partition the correct firing rates
-                # result = partitioned_firing_rates.reshaped_to_8_by_num_columns * self.feedforward_weights[area_idx]
+                    ff_current_area += ext_ff_rate[ff_idx] * self.feedforward_weights[area_idx][ff_idx]
 
+                elif area_idx > 0:   # subsequent areas receive previous area's firing rate
+                    prev_area_fr = fr_per_area[area_idx-1][ff_idx] * self.ff_source_mask
+                    prev_area_fr_sum = torch.sum(prev_area_fr)  # if more source layers, sum output
+                    prev_area_fr_sum = prev_area_fr_sum * 10.  # amp up input
+                    ff_current_area += prev_area_fr_sum * self.feedforward_weights[area_idx][ff_idx]
 
-        firing_rate_C = firing_rate * 10.  # amp up input from A, B to C
+            feedforward_current = torch.relu(ff_current_area)  # make sure ff_currents are never negative
 
-        # Compute feedforward current for columns A and B, receiving a weighted sum of both inputs
-        ff_current_AB = (ext_ff_rate[0] * self.ff_weights_1) + (ext_ff_rate[1] * self.ff_weights_2)
-        # Input to column C are L2/3 firing rates of columns A, B
-        ff_current_C = (firing_rate_C[0] * self.ff_weights_AC) + (firing_rate_C[8] * self.ff_weights_BC)
-        ff_current_ABC = torch.cat((ff_current_AB, ff_current_C), dim=0)
-        feedforward_current = torch.relu(ff_current_ABC)  # make sure ff_currents are never negative
+            # Background and recurrent current
+            background_current = area.background_weights * area.background_drive    # background input
+            recurrent_current = torch.matmul(area.recurrent_weights, fr_per_area[area_idx].flatten())   # recurrent input
 
-        # -------
-        background_current = self.background_weights * self.background_drive    # background input
-        recurrent_current = torch.matmul(self.recurrent_weights, firing_rate)   # recurrent input
+            # Total current of this area
+            # Notice that ff is not scaled down by synapse time constant bc ff weights are already scaled down for training
+            total_current_area = feedforward_current + (background_current + recurrent_current) * area.synapse_time_constant
+            total_current = torch.cat((total_current, total_current_area), dim=0)
 
-        total_current = (feedforward_current + background_current + recurrent_current) * self.synapse_time_constant
-
+        # Compute new membrane potential and adaptation
         delta_membrane_potential = (-membrane_potential +
-            total_current * self.resistance) / self.membrane_time_constant
-
-        delta_adaptation = (-adaptation + self.adaptation_strength *
-                            firing_rate) / self.adapt_time_constant
+            total_current * self.network_as_area.resistance) / self.network_as_area.membrane_time_constant
+        delta_adaptation = (-adaptation + self.network_as_area.adaptation_strength *
+                            firing_rate) / self.network_as_area.adapt_time_constant
 
         return torch.stack([delta_membrane_potential, delta_adaptation])
 
+    def run_ode_network(self, state, time_vec, stim):
+        return odeint(lambda t, y: self.dynamics_ode(t, y, stim, time_vec), state, time_vec)
 
 
-# Testing network
 
-col_params = load_config('../config/model.toml')
-network_input = {'nr_areas': 2, 'areas': ['mt', 'mt'], 'nr_columns_per_area': [2,1], 'nr_input_units': 2}
+### Testing network
 
-print(network_input)
+if __name__ == '__main__':
 
-network = ColumnNetwork(col_params, network_input)
+    # Init network
+    col_params = load_config('../config/model.toml')
+    sim_params = load_config('../config/simulation.toml')
+
+    network_input = {'nr_areas': 2, 'areas': ['mt', 'mt'], 'nr_columns_per_area': [2,1], 'nr_input_units': 2}
+    num_columns = sum(network_input['nr_columns_per_area'])
+    print(network_input)
+
+    network = ColumnNetwork(col_params, network_input)
+
+    # Initial state
+    membrane = torch.tensor(sim_params['initial_conditions']['membrane_potential'])
+    adaptation = torch.tensor(sim_params['initial_conditions']['adaptation'])
+    mem_adap = torch.stack([membrane, adaptation])
+    initial_state = torch.tile(mem_adap, (num_columns,))
+
+    # Time vector
+    time_steps = int(sim_params['protocol']['stimulus_duration'] * 2 / sim_params['time_step'])
+    time_vec = torch.linspace(0., time_steps * sim_params['time_step'], time_steps)
+
+    # Stimulus
+    stim = create_feedforward_input(network_input['nr_input_units']*8, 0., 1.)
+    empty_stim = torch.zeros(1, network_input['nr_input_units']*8)
+
+    phase_length = int(len(time_vec) / 2)
+    empty_stim_phase = empty_stim.expand(phase_length, -1)
+    stim_phase = stim.expand(phase_length, -1)
+
+    whole_stim_phase = torch.cat((stim_phase, stim_phase), dim=0)
+
+    # Double the stim to input it to both columns
+    mirror_stim_phase = torch.cat((whole_stim_phase[:, 8:], whole_stim_phase[:, :8]), dim=1)
+    double_stim = torch.stack((whole_stim_phase, mirror_stim_phase), dim=1)  # (time steps, 2, num populations)
 
 
+    version = 'old'
+
+    xor_network = ColumnsXOR(col_params, 'mt')
+
+    results = torch.Tensor(1000, 2, 24)
+    for i, t in enumerate(time_vec):
+        if version == 'new':
+            next_state = network.dynamics_ode(t, initial_state, double_stim, time_vec)
+        else:
+            next_state = xor_network.dynamics_xor(t, initial_state, double_stim, time_vec)
+        initial_state = next_state
+        results[i,:,:] = next_state
+
+    plt.plot(results[:, 0, 0].detach().numpy())
+    plt.show()
