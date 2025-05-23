@@ -277,8 +277,11 @@ class ColumnNetwork():
     '''
 
     def __init__(self, column_parameters, network_dict):
-        self.areas = {}
 
+        self.noise_type = "diagonal"  # sde params
+        self.sde_type = "ito"
+
+        self.areas = {}  # init the areas of the network
         for area_idx in range(network_dict['nr_areas']):
 
             area_name = network_dict['areas'][area_idx]
@@ -361,17 +364,33 @@ class ColumnNetwork():
             idx = idx + area.num_populations
         return fr_per_area
 
-    def dynamics_ode(self, t, state, stim, time_vec):
+    def set_time_vec(self, time_vec):
+        '''
+        Set the time_vec as a mutable attribute. This is necessary because
+        torchsde does not allow any extra parameters other than t, y0.
+        '''
+        self.time_vec = time_vec
+
+    def set_stim(self, stim):
+        '''
+        Set the stimulus as a mutable attribute. This is necessary because
+        torchsde does not allow any extra parameters other than t, y0.
+        '''
+        self.stim = stim
+
+    def f(self, t, state):
         '''
         State dynamics updating the membrane potential and adaptation;
         ODE should learn these dynamics and update the weights accordingly.
         '''
         # Get current stimulus (external ff rate) based on current time t and the time vector time_vec
-        ext_ff_rate = torch_interp(t, time_vec, stim)
+        ext_ff_rate = torch_interp(t, self.time_vec, self.stim)
         ext_ff_rate = ext_ff_rate * 20.  # input in 1Hz range, so scale up
 
         # Compute firing rate from membrane potential and adaptation
-        membrane_potential, adaptation = state[0], state[1]
+        mem_adap_split = int(len(state[0])/2)
+        state = state.squeeze(0)  # lose extra dim
+        membrane_potential, adaptation = state[:mem_adap_split], state[mem_adap_split:]
         firing_rate = compute_firing_rate_torch(membrane_potential - adaptation)
 
         # Partition firing rate per area
@@ -414,10 +433,31 @@ class ColumnNetwork():
         delta_adaptation = (-adaptation + self.network_as_area.adaptation_strength *
                             firing_rate) / self.network_as_area.adapt_time_constant
 
-        return torch.stack([delta_membrane_potential, delta_adaptation])
+        state = torch.concat((delta_membrane_potential, delta_adaptation))
+        return state.unsqueeze(0)
 
-    def run_ode_network(self, state, time_vec, stim):
-        return odeint(lambda t, y: self.dynamics_ode(t, y, stim, time_vec), state, time_vec)
+    # def g(self, t, y):
+    #     # Simple independent noise
+    #     noise_std = 0.5  # tweak this!
+    #     return noise_std * torch.ones_like(y)
+
+    # def g(self, t, y):
+    #     # Noise proportional to the magnitude of y
+    #     noise_std = 0.1
+    #     return noise_std * torch.abs(y)
+
+    def g(self, t, y):
+        # Only membrane gets noise, adaptation is deterministic
+        noise_std = 1.0
+        g = torch.zeros_like(y)
+        g[:, :24] = noise_std  # only membrane potentials (first 24 units)
+        return g
+
+    def run_ode_network(self, state, time_vec):
+        '''
+        Runs the network with torchdiffeq's odeint, without noise.
+        '''
+        return odeint(self.f, state, time_vec)
 
 
 
@@ -458,6 +498,9 @@ if __name__ == '__main__':
     # Double the stim to input it to both columns
     mirror_stim_phase = torch.cat((whole_stim_phase[:, 8:], whole_stim_phase[:, :8]), dim=1)
     double_stim = torch.stack((whole_stim_phase, mirror_stim_phase), dim=1)  # (time steps, 2, num populations)
+
+
+    result = network.g(time_vec[0], initial_state)
 
 
     version = 'old'

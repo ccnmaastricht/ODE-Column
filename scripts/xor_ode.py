@@ -7,6 +7,7 @@ import torch
 from src.xor_columns import ColumnsXOR
 from src.coupled_columns import ColumnNetwork
 from src.utils import *
+from torchsde import sdeint
 
 
 
@@ -93,7 +94,7 @@ def run_four_xor_samples(network, initial_state, time_vec, time_steps, batch_siz
     '''
 
     # Storing results
-    batch_output = torch.Tensor(batch_size, time_steps, 2, 24)
+    batch_output = torch.Tensor(batch_size, time_steps, 1, 48)
     stim_batch = torch.Tensor(batch_size, 16)
 
     # Run neural ODE on four samples
@@ -105,11 +106,16 @@ def run_four_xor_samples(network, initial_state, time_vec, time_steps, batch_siz
             stim_batch[itr, :] = stim
             stim_ode = prep_stim_ode(stim, time_vec)
 
-            ode_output = network.run_ode_network(initial_state, time_vec, stim_ode)
+            network.stim = stim_ode  # new!
+
+            # ode_output = network.run_ode_network(initial_state, time_vec)  # torchdiffeq
+            ode_output = sdeint(network, initial_state, time_vec)
+
             batch_output[itr, :, :, :] = ode_output
 
     # Compute firing rates
-    firing_rates = compute_firing_rate_torch(batch_output[:, :, 0, :] - batch_output[:, :, 1, :])
+    firing_rates = compute_firing_rate_torch(batch_output[:, :, :, :24] - batch_output[:, :, :, 24:])
+    firing_rates = firing_rates.squeeze(dim=2)
 
     # Use final firing rate to compute model output
     final_fr_C = firing_rates[:, -1, 16]  # final firing rates column C
@@ -140,9 +146,12 @@ def train_xor_ode(nr_samples, nr_test_samples, batch_size):
 
     # Initial state is always the same
     membrane = torch.tensor(sim_params['initial_conditions']['membrane_potential'])
+    membrane = torch.tile(membrane, (3,))  # extent to three columns
     adaptation = torch.tensor(sim_params['initial_conditions']['adaptation'])
-    initial_state = torch.stack((membrane, adaptation))
-    initial_state = torch.tile(initial_state, (3,))  # extent to three columns
+    adaptation = torch.tile(adaptation, (3,))
+
+    initial_state = torch.concat((membrane, adaptation))
+    initial_state = initial_state.unsqueeze(0)  # shape (1,48) for sde
 
     # Initialize the optimizer and add weights as learnable parameters
     optimizer = torch.optim.RMSprop([
@@ -157,6 +166,8 @@ def train_xor_ode(nr_samples, nr_test_samples, batch_size):
     nr_batches = int(nr_samples/batch_size)
     time_steps = int(sim_params['protocol']['stimulus_duration'] * 2 / sim_params['time_step'])
     time_vec = torch.linspace(0., time_steps * sim_params['time_step'], time_steps)
+
+    network.time_vec = time_vec  # new!
 
     # Store results
     accuracy_sigmoid = []
