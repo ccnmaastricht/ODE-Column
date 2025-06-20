@@ -1,5 +1,5 @@
 import numpy as np
-from torchdiffeq import odeint
+from torchdiffeq import odeint, odeint_adjoint
 from scipy.linalg import block_diag
 import matplotlib.pyplot as plt
 
@@ -10,9 +10,10 @@ from src.utils import *
 from src.xor_columns import ColumnsXOR  # to compare to
 
 
-class ColumnArea:
+class ColumnArea(torch.nn.Module):
 
     def __init__(self, column_parameters, area, num_columns):
+        super().__init__()
 
         self.num_columns = num_columns
         self.area = area.lower()
@@ -47,7 +48,7 @@ class ColumnArea:
         """
         self.population_sizes = np.array(
             column_parameters['population_size'][self.area])
-        self.population_sizes = np.tile(self.population_sizes, self.num_columns) / 2 ################# self.num_columns ##################
+        self.population_sizes = np.tile(self.population_sizes, self.num_columns) / self.num_columns
 
         self.num_populations = len(self.population_sizes)
         self.adaptation_strength = torch.tile(self.adaptation_strength, (self.num_columns,))
@@ -267,7 +268,7 @@ class ColumnAreaWTA(ColumnArea):
         return torch.stack([delta_membrane_potential, delta_adaptation])
 
 
-class ColumnNetwork():
+class ColumnNetwork(torch.nn.Module):
 
     '''
     Concatenates a number of areas (each consisting of a number
@@ -277,18 +278,12 @@ class ColumnNetwork():
     '''
 
     def __init__(self, column_parameters, network_dict):
+        super().__init__()
 
         self.noise_type = "diagonal"  # sde params
         self.sde_type = "ito"
 
-        self.areas = {}  # init the areas of the network
-        for area_idx in range(network_dict['nr_areas']):
-
-            area_name = network_dict['areas'][area_idx]
-            num_columns = network_dict['nr_columns_per_area'][area_idx]
-
-            area = ColumnArea(column_parameters, area_name, num_columns)
-            self.areas[area_idx] = area
+        self._initialize_areas(column_parameters, network_dict)
 
         self.network_as_area = ColumnArea(column_parameters, 'mt', sum(network_dict['nr_columns_per_area']))
         self.nr_input_units = network_dict['nr_input_units']
@@ -297,6 +292,19 @@ class ColumnNetwork():
         self._set_external_connections_to_zero()
         self._initialize_feedforward_masks()
         self._initialize_feedforward_weights()
+
+        # self.membrane = torch.tile([-1.5554, 8.9735, 12.0712, 12.5040, -5.2554, 10.4650, -30.8225, 12.6189], (3,))
+        # self.adaptation = torch.tile([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], (3,))
+
+    def _initialize_areas(self, column_parameters, network_dict):
+        self.areas = torch.nn.ModuleDict({})
+        for area_idx in range(network_dict['nr_areas']):
+
+            area_name = network_dict['areas'][area_idx]
+            num_columns = network_dict['nr_columns_per_area'][area_idx]
+
+            area = ColumnArea(column_parameters, area_name, num_columns)
+            self.areas[str(area_idx)] = area
 
     def _set_external_connections_to_zero(self):
         '''
@@ -312,9 +320,10 @@ class ColumnNetwork():
         Specify from which population the feedforward flow comes
         from (source) and which population it targets (target).
         '''
-        # Source of ff is L2/3e
+        # Source of ff is L2/3e (and L5e)
         ff_source_mask = torch.zeros(8)
         ff_source_mask[0] = 1.0
+        # ff_source_mask[0], ff_source_mask[4] = 1.0, 0.2
         self.ff_source_mask = ff_source_mask
 
         # Target of ff is L4e and L4i
@@ -326,21 +335,22 @@ class ColumnNetwork():
         '''
         Initialize the feedforward weights as learnable weights.
         '''
-        feedforward_weights = {}
+        feedforward_weights = torch.nn.ModuleDict({})
 
         for area_idx, area in self.areas.items():
 
             if area_idx not in feedforward_weights:
-                feedforward_weights[area_idx] = []
+                feedforward_weights[area_idx] = nn.ParameterList()
 
-            if area_idx == 0:   # if first area, check how many external inputs it receives
+            if area_idx == '0':   # if first area, check how many external inputs it receives
                 nr_ff_weights = self.nr_input_units
             else:               # for subsequent areas, check how many inputs from previous area
-                nr_ff_weights = self.areas[area_idx-1].num_columns
+                idx_prev_area = str(int(area_idx)-1)
+                nr_ff_weights = self.areas[idx_prev_area].num_columns
 
             # Weight initialization should not be too small, otherwise no ff flow and no training possible
             original_weights = area.feedforward_weights.clone().detach() * area.synapse_time_constant
-            std_W = 3. * area.synapse_time_constant
+            std_W = area.synapse_time_constant
 
             for i in range(nr_ff_weights):
                 rand_weights = abs(torch.normal(mean=original_weights, std=std_W))
@@ -349,20 +359,6 @@ class ColumnNetwork():
                 feedforward_weights[area_idx].append(ff_weights)
 
         self.feedforward_weights = feedforward_weights
-
-    def partition_firing_rates(self, firing_rate):
-        '''
-        Organizes the firing rates into a dict of separate areas.
-        This allows easy access to previous area's firing rates.
-        '''
-        fr_per_area = {}
-        idx = 0
-        for area_idx, area in self.areas.items():
-            fr_area = firing_rate[idx : idx + area.num_populations]
-            fr_area_reshape = fr_area.reshape(area.num_columns, 8)
-            fr_per_area[area_idx] = fr_area_reshape
-            idx = idx + area.num_populations
-        return fr_per_area
 
     def set_time_vec(self, time_vec):
         '''
@@ -378,25 +374,26 @@ class ColumnNetwork():
         '''
         self.stim = stim
 
-    def f(self, t, state):
+    def partition_firing_rates(self, firing_rate):
         '''
-        State dynamics updating the membrane potential and adaptation;
-        ODE should learn these dynamics and update the weights accordingly.
+        Organizes the firing rates into a dict of separate areas.
+        This allows easy access to previous area's firing rates.
         '''
-        # Get current stimulus (external ff rate) based on current time t and the time vector time_vec
-        ext_ff_rate = torch_interp(t, self.time_vec, self.stim)
-        ext_ff_rate = ext_ff_rate * 20.  # input in 1Hz range, so scale up
+        fr_per_area = {}
+        idx = 0
+        for area_idx, area in self.areas.items():
+            fr_area = firing_rate[idx : idx + area.num_populations]
+            fr_area_reshape = fr_area.reshape(area.num_columns, 8)
+            fr_per_area[area_idx] = fr_area_reshape
+            idx = idx + area.num_populations
+        return fr_per_area
 
-        # Compute firing rate from membrane potential and adaptation
-        mem_adap_split = int(len(state[0])/2)
-        state = state.squeeze(0)  # lose extra dim
-        membrane_potential, adaptation = state[:mem_adap_split], state[mem_adap_split:]
-        firing_rate = compute_firing_rate_torch(membrane_potential - adaptation)
-
-        # Partition firing rate per area
-        fr_per_area = self.partition_firing_rates(firing_rate)
-
-        # Compute the next state separately for each area
+    def compute_currents(self, ext_ff_rate, fr_per_area):
+        '''
+        Compute the current for each area separately. The total current
+        consists of feedforward current (stimulus-driven and/or from other
+        brain areas), background current and recurrent current.
+        '''
         total_current = torch.Tensor()
 
         for area_idx, area in self.areas.items():
@@ -405,16 +402,17 @@ class ColumnNetwork():
             # area=0: external input or area>0: the previous area's firing rate
             ff_current_area = torch.zeros(area.num_populations)
 
-            for ff_idx in range(len(self.feedforward_weights[area_idx])):
-                if area_idx == 0:   # first area gets external input
-                    # multiply each input with each ff weights
-                    ff_current_area += ext_ff_rate[ff_idx] * self.feedforward_weights[area_idx][ff_idx]
+            for ff_idx, ff_weight in enumerate(self.feedforward_weights[area_idx]):
+                if area_idx == '0':  # first area gets external input
+                    # multiply each input with each corresponding ff weights
+                    ff_current_area += ext_ff_rate[ff_idx] * ff_weight
 
-                elif area_idx > 0:   # subsequent areas receive previous area's firing rate
-                    prev_area_fr = fr_per_area[area_idx-1][ff_idx] * self.ff_source_mask
-                    prev_area_fr_sum = torch.sum(prev_area_fr)  # if more source layers, sum output
-                    prev_area_fr_sum = prev_area_fr_sum * 10.  # amp up input
-                    ff_current_area += prev_area_fr_sum * self.feedforward_weights[area_idx][ff_idx]
+                elif area_idx > '0':  # subsequent areas receive previous area's firing rate
+                    idx_prev_area = str(int(area_idx) - 1)
+                    prev_area_fr = fr_per_area[idx_prev_area][ff_idx] * self.ff_source_mask
+                    prev_area_fr_sum = torch.sum(prev_area_fr)
+                    prev_area_fr_sum = prev_area_fr_sum * 10.
+                    ff_current_area += prev_area_fr_sum * ff_weight
 
             feedforward_current = torch.relu(ff_current_area)  # make sure ff_currents are never negative
 
@@ -425,39 +423,59 @@ class ColumnNetwork():
             # Total current of this area
             # Notice that ff is not scaled down by synapse time constant bc ff weights are already scaled down for training
             total_current_area = feedforward_current + (background_current + recurrent_current) * area.synapse_time_constant
-            total_current = torch.cat((total_current, total_current_area), dim=0)
 
-        # Compute new membrane potential and adaptation
+            total_current = torch.cat((total_current, total_current_area), dim=0)
+        return total_current
+
+    def forward(self, t, state):
+        '''
+        State dynamics updating the membrane potential and adaptation;
+        ODE should learn these dynamics and update the weights accordingly.
+        '''
+
+        # Prepare the state (membrane, adaptation, firing rate)
+        state = state.squeeze(0)  # lose extra dim
+        mem_adap_split = len(state) // 3
+        adap_rate_split = len(state) // 3 * 2
+        membrane_potential, adaptation = state[:mem_adap_split], state[mem_adap_split:adap_rate_split]
+        firing_rate = compute_firing_rate_torch(membrane_potential - adaptation)
+
+        # Partition firing rate per area
+        fr_per_area = self.partition_firing_rates(firing_rate)
+
+        # Get current stimulus (external ff rate) based on current time t and the time vector time_vec
+        ext_ff_rate = torch_interp(t, self.time_vec, self.stim)
+        ext_ff_rate = ext_ff_rate * 20.  # input in 1Hz range, so scale up
+
+        # Compute input current
+        total_current = self.compute_currents(ext_ff_rate, fr_per_area)
+
+        # Compute derivative membrane potential and adaptation
         delta_membrane_potential = (-membrane_potential +
             total_current * self.network_as_area.resistance) / self.network_as_area.membrane_time_constant
         delta_adaptation = (-adaptation + self.network_as_area.adaptation_strength *
                             firing_rate) / self.network_as_area.adapt_time_constant
 
-        state = torch.concat((delta_membrane_potential, delta_adaptation))
+        # Compute derivative firing rate
+        prev_firing_rate = state[adap_rate_split:]
+        delta_firing_rate = (-prev_firing_rate + firing_rate) / self.network_as_area.synapse_time_constant
+
+        state = torch.concat((delta_membrane_potential, delta_adaptation, delta_firing_rate))
         return state.unsqueeze(0)
 
-    # def g(self, t, y):
-    #     # Simple independent noise
-    #     noise_std = 0.5  # tweak this!
-    #     return noise_std * torch.ones_like(y)
-
-    # def g(self, t, y):
-    #     # Noise proportional to the magnitude of y
-    #     noise_std = 0.1
-    #     return noise_std * torch.abs(y)
-
-    def g(self, t, y):
+    def diffusion(self, t, y):
         # Only membrane gets noise, adaptation is deterministic
-        noise_std = 1.0
+        noise_std = 3.0
         g = torch.zeros_like(y)
-        g[:, :24] = noise_std  # only membrane potentials (first 24 units)
+        split = (len(y[0]) // 3) * 2
+        g[:, split:] = noise_std  # only firing rates (last 24 units)
         return g
 
     def run_ode_network(self, state, time_vec):
         '''
         Runs the network with torchdiffeq's odeint, without noise.
         '''
-        return odeint(self.f, state, time_vec)
+        return odeint_adjoint(self.f, state, time_vec)
 
 
 

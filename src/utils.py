@@ -123,7 +123,7 @@ def min_max(firing_rates):
     min_val = torch.min(firing_rates)
     return (firing_rates - min_val) / (max_val - min_val)
 
-def fr_to_binary(firing_rates, scaling_factor=3.0):
+def fr_to_binary(firing_rates, scaling_factor=1.0):
     '''
     Function to binary classify final firing rates. Loosely
     z-scores the input and passes it to a sigmoid function to
