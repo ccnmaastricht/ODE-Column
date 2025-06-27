@@ -12,7 +12,7 @@ from src.coupled_columns import ColumnAreaWTA
 
 
 
-def visualize_all_layers(pred, true, stim, odefunc, train_loss, test_loss, weights):
+def visualize_all_layers(pred, true, stim, network, train_loss, test_loss, weights):
     if not os.path.exists('../results/png'):
         os.makedirs('../results/png')
     fig, axes = plt.subplots(2, 2, figsize=(10, 10))
@@ -42,7 +42,7 @@ def visualize_all_layers(pred, true, stim, odefunc, train_loss, test_loss, weigh
     plt.savefig('../results/png/{:02d}'.format(len(weights)))
     plt.close(fig)
 
-def visualize_results(pred, true, stim, odefunc, train_loss, test_loss, weights):
+def visualize_results(pred, true, stim, network, train_loss, test_loss, weights):
     if not os.path.exists('../results/png'):
         os.makedirs('../results/png')
     fig, axes = plt.subplots(1, 2, figsize=(9, 5))
@@ -53,8 +53,10 @@ def visualize_results(pred, true, stim, odefunc, train_loss, test_loss, weights)
     fig.text(0.6, 0.03, f"Training loss: {train_loss:.2f}", ha='center', fontsize=10, fontweight='bold')
 
     # Plot firing rate
-    col1_pred_fr = compute_firing_rate_torch(pred[:, 0, 0] - pred[:, 1, 0])
-    col2_pred_fr = compute_firing_rate_torch(pred[:, 0, 8] - pred[:, 1, 8])
+    col1_pred_fr_all = compute_firing_rate_torch(pred[:, 0, :8] - pred[:, 1, :8])
+    col2_pred_fr_all = compute_firing_rate_torch(pred[:, 0, 8:] - pred[:, 1, 8:])
+    col1_pred_fr = torch.sum(col1_pred_fr_all * network.output_weights, dim=-1)
+    col2_pred_fr = torch.sum(col2_pred_fr_all * network.output_weights, dim=-1)
 
     # col1_pred_fr_all = compute_firing_rate_torch(pred[:, 0, :8] - pred[:, 1, :8])
     # col2_pred_fr_all = compute_firing_rate_torch(pred[:, 0, 8:] - pred[:, 1, 8:])
@@ -124,7 +126,7 @@ def make_ds_wwp(ds_file, nr_samples, time_steps):
 def get_data(nr_samples, batch_size, time_steps, fn):
     states, stims = make_ds_wwp(fn, nr_samples+10, time_steps)
 
-    states = states / 15.  # scale down wang-wong firing rates to match with L23
+    states = states #  / 15.  # scale down wang-wong firing rates to match with L23
 
     ds = TensorDataset(states, stims)
     data_loader = DataLoader(ds, batch_size=batch_size, shuffle=True)
@@ -164,7 +166,7 @@ def train_wta_ode(nr_samples, batch_size, fn):
     network, initial_state, time_vec = init_network(ColumnAreaWTA, time_steps)
 
     # Initialize the optimizer and add connection weights as learnable parameter
-    optimizer = torch.optim.RMSprop([network.recurrent_weights], lr=1e-2, alpha=0.9)
+    optimizer = torch.optim.RMSprop([network.output_weights], lr=1e-2, alpha=0.9) #### lr=1e-2 !!!!!!!!!
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99)  # higher gamma = slower decay
 
     # Store weights
@@ -182,13 +184,23 @@ def train_wta_ode(nr_samples, batch_size, fn):
             ode_output = network.run_ode(initial_state, stim, time_vec)
             pred_states[batch_iter, :, :, :] = ode_output
 
-        loss = huber_loss_firing_rates(pred_states, true_states[:-1], network)
+        # Compute firing rate and loss between pred and true
+        loss = huber_loss_wta(pred_states, true_states[:-1], network)
         loss.backward()
 
-        with torch.no_grad():  # only update lateral and self-excitation weights
-            network.recurrent_weights.grad *= network.lat_in_mask
+        # with torch.no_grad():  # only update lateral and self-excitation weights
+        #     network.recurrent_weights.grad *= network.lat_in_mask
+
+        with torch.no_grad():  # allow no other weight updates than L23e and L5
+            network.output_weights.grad *= torch.tensor([1., 0., 0., 0., 1., 0., 0., 0.])
+
+        print(network.output_weights)
+
         optimizer.step()
         scheduler.step()  # adjust learning rate
+
+        with torch.no_grad():
+            network.output_weights.clamp_(0.0, 1.0)  # clamp weights for realism
 
         # Print loss, save current weights in array
         print('Iter {:02d} | Total Loss {:.5f}'.format(iter + 1, loss.item()))
@@ -201,7 +213,7 @@ def train_wta_ode(nr_samples, batch_size, fn):
             test_state = true_states[-1, :, :]
 
             pred_state = network.run_ode(initial_state, stim, time_vec)
-            test_loss = huber_loss_firing_rates(pred_state.unsqueeze(0), test_state.unsqueeze(0), network)
+            test_loss = huber_loss_wta(pred_state.unsqueeze(0), test_state.unsqueeze(0), network)
 
             # Visualize final test sample
             visualize_results(pred_state, test_state, stim[500], network, loss.item(), test_loss, weights)
@@ -220,6 +232,6 @@ if __name__ == '__main__':
 
     network = train_wta_ode(nr_samples, batch_size, '../data/ds_wta_30.pkl')
 
-    # with open('../ww_trained_model.pkl', 'wb') as f:
-    #     pickle.dump(model, f)
+    # with open('../ww_trained_model_L5.pkl', 'wb') as f:
+    #     pickle.dump(network, f)
 

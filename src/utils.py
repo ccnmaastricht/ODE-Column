@@ -136,18 +136,22 @@ def fr_to_binary(firing_rates, scaling_factor=1.0):
     fr_sigmoid = torch.sigmoid(fr_normalized)
     return fr_sigmoid
 
-def huber_loss_firing_rates(pred, true, odefunc):
+def huber_loss_wta(pred_states, true, network):
     '''
     Computes Huber loss, a loss function suited for trajectories.
-    Uses the L2/3e firing rate of the model prediction and target.
     '''
-    # Compute firing rates for pred L2/3e
-    mem_pred, adap_pred = pred[:, :, 0, [0, 8]], pred[:, :, 1, [0, 8]]
+
+    mem_pred, adap_pred = pred_states[:, :, 0, :], pred_states[:, :, 1, :]
     fr_pred = compute_firing_rate_torch(mem_pred - adap_pred)
+    fr_pred_A = fr_pred[:, :, :8]
+    fr_pred_B = fr_pred[:, :, 8:]
+    fr_pred_A_sum = torch.sum(fr_pred_A * network.output_weights, dim=2)
+    fr_pred_B_sum = torch.sum(fr_pred_B * network.output_weights, dim=2)
+    fr_pred_sum = torch.stack([fr_pred_A_sum, fr_pred_B_sum], dim=2)
 
     # Compute loss between ode prediction and WangWong simulated data
     hub_loss = torch.nn.SmoothL1Loss(beta=1.0)
-    return hub_loss(fr_pred, true)
+    return hub_loss(fr_pred_sum, true)
 
 def huber_loss_membrane(y_pred, y_true):
     '''

@@ -48,7 +48,7 @@ class ColumnArea(torch.nn.Module):
         """
         self.population_sizes = np.array(
             column_parameters['population_size'][self.area])
-        self.population_sizes = np.tile(self.population_sizes, self.num_columns) / self.num_columns
+        self.population_sizes = np.tile(self.population_sizes, self.num_columns) # / self.num_columns ######## keep population sizes as they are
 
         self.num_populations = len(self.population_sizes)
         self.adaptation_strength = torch.tile(self.adaptation_strength, (self.num_columns,))
@@ -208,6 +208,8 @@ class ColumnAreaWTA(ColumnArea):
         self.scaling_factor = self.synapse_time_constant
         self._initialize_lat_in_weights()
 
+        self._initialize_output_weights() # combination of output layers L23 and L5
+
     def _make_ext_mask(self):
         '''
         Mask to select all external connections
@@ -233,16 +235,21 @@ class ColumnAreaWTA(ColumnArea):
         connections are learnable.
         '''
         original_weights = self.recurrent_weights * self.scaling_factor
-        mean_W = original_weights.mean() / 100.
-        std_W = original_weights.std() / 100.
-        lateral_weights = torch.normal(mean=mean_W.item(), std=std_W.item(), size=self.ext_mask.shape)
-        lateral_weights *= self.ext_mask  # set inner connectivity to zero
-        lateral_weights *= self.lat_in_mask  # only layer 2/3 connections
+        # mean_W = original_weights.mean() / 100.
+        # std_W = original_weights.std() / 100.
+        # lateral_weights = torch.normal(mean=mean_W.item(), std=std_W.item(), size=self.ext_mask.shape)
+        # lateral_weights *= self.ext_mask  # set inner connectivity to zero
+        # lateral_weights *= self.lat_in_mask  # only layer 2/3 connections
+        #
+        # inner_weights = original_weights
+        # inner_weights *= 1 - self.ext_mask
+        # self.recurrent_weights = nn.Parameter(inner_weights + lateral_weights, requires_grad=True)
+        self.recurrent_weights = original_weights
 
-        inner_weights = original_weights
-        inner_weights *= 1 - self.ext_mask
-        self.recurrent_weights = nn.Parameter(inner_weights + lateral_weights, requires_grad=True)
-        # self.recurrent_weights = nn.Parameter(original_weights, requires_grad=True)
+    def _initialize_output_weights(self):
+        output_weights = torch.tensor([1.0000, 0.0000, 0.0000, 0.0000,
+                                       0.2000, 0.0000, 0.0000, 0.0000])
+        self.output_weights = nn.Parameter(output_weights, requires_grad=True)
 
     def dynamics_ode(self, t, state, stim, time_vec):
 
@@ -251,7 +258,7 @@ class ColumnAreaWTA(ColumnArea):
 
         membrane_potential, adaptation = state[0], state[1]
 
-        firing_rate = self.compute_firing_rate_torch(membrane_potential - adaptation)
+        firing_rate = compute_firing_rate_torch(membrane_potential - adaptation)
 
         feedforward_current = self.feedforward_weights * feedforward_rate       # stimulus feedforward input
         background_current = self.background_weights * self.background_drive    # background input
@@ -322,8 +329,8 @@ class ColumnNetwork(torch.nn.Module):
         '''
         # Source of ff is L2/3e (and L5e)
         ff_source_mask = torch.zeros(8)
-        ff_source_mask[0] = 1.0
-        # ff_source_mask[0], ff_source_mask[4] = 1.0, 0.2
+        # ff_source_mask[0] = 1.0
+        ff_source_mask[0], ff_source_mask[4] = 1.0, 0.1
         self.ff_source_mask = ff_source_mask
 
         # Target of ff is L4e and L4i
@@ -335,12 +342,12 @@ class ColumnNetwork(torch.nn.Module):
         '''
         Initialize the feedforward weights as learnable weights.
         '''
-        feedforward_weights = torch.nn.ModuleDict({})
+        feedforward_weights = nn.ModuleDict({})
 
         for area_idx, area in self.areas.items():
 
-            if area_idx not in feedforward_weights:
-                feedforward_weights[area_idx] = nn.ParameterList()
+            # if area_idx not in feedforward_weights:
+            feedforward_weights[area_idx] = nn.ParameterList()
 
             if area_idx == '0':   # if first area, check how many external inputs it receives
                 nr_ff_weights = self.nr_input_units
@@ -357,7 +364,6 @@ class ColumnNetwork(torch.nn.Module):
                 rand_weights_masked = rand_weights * torch.tile(self.ff_target_mask, (area.num_columns,))
                 ff_weights = nn.Parameter(rand_weights_masked, requires_grad=True)
                 feedforward_weights[area_idx].append(ff_weights)
-
         self.feedforward_weights = feedforward_weights
 
     def set_time_vec(self, time_vec):
@@ -411,7 +417,7 @@ class ColumnNetwork(torch.nn.Module):
                     idx_prev_area = str(int(area_idx) - 1)
                     prev_area_fr = fr_per_area[idx_prev_area][ff_idx] * self.ff_source_mask
                     prev_area_fr_sum = torch.sum(prev_area_fr)
-                    prev_area_fr_sum = prev_area_fr_sum * 10.
+                    # prev_area_fr_sum = prev_area_fr_sum * 10.
                     ff_current_area += prev_area_fr_sum * ff_weight
 
             feedforward_current = torch.relu(ff_current_area)  # make sure ff_currents are never negative
@@ -461,6 +467,15 @@ class ColumnNetwork(torch.nn.Module):
         delta_firing_rate = (-prev_firing_rate + firing_rate) / self.network_as_area.synapse_time_constant
 
         state = torch.concat((delta_membrane_potential, delta_adaptation, delta_firing_rate))
+
+        # if torch.any(torch.abs(state) > 1e5):  # You can start with 1e3 as a sanity threshold
+        #     # print(f"[t={t.item():.3f}] 🚨 Large derivative detected! Max: {state.abs().max().item():.2e}")
+        #     # print(f"[t={t.item():.3f}] max(mem_pot): {delta_membrane_potential.abs().max().item():.2e}")
+        #     # print(f"[t={t.item():.3f}] max(adaptation): {delta_adaptation.abs().max().item():.2e}")
+        #     # print(f"[t={t.item():.3f}] max(firing_rate): {delta_firing_rate.abs().max().item():.2e}")
+
+        state = torch.clamp(state, -1e4, 1e4)
+
         return state.unsqueeze(0)
 
     def diffusion(self, t, y):
@@ -468,7 +483,7 @@ class ColumnNetwork(torch.nn.Module):
         noise_std = 3.0
         g = torch.zeros_like(y)
         split = (len(y[0]) // 3) * 2
-        g[:, split:] = noise_std  # only firing rates (last 24 units)
+        g[:, split:] = noise_std  # only firing rates (after split)
         return g
 
     def run_ode_network(self, state, time_vec):
