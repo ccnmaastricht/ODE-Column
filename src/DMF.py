@@ -93,16 +93,6 @@ def get_params(J_local=87.8e-3, J_lateral=87.8e-3, area='MT'):
          [0.0156, 0.0066, 0.0211, 0.0166, 0.0572, 0.0197, 0.0396, 0.2252],
          [0.0364, 0.0010, 0.0034, 0.0005, 0.0277, 0.0080, 0.0658, 0.1443]])
 
-    # P_circuit = np.array(
-    #     [[0.1184, 0.1552, 0.0846, 0.0629, 0.0323, 0.0000, 0.0076, 0.0000],
-    #      [0.0077, 0.0059, 0.0519, 0.1453, 0.0067, 0.0003, 0.0453, 0.0000],
-    #      [0.1017, 0.0622, 0.0411, 0.0057, 0.0758, 0.3765, 0.0204, 0.0000],
-    #      [0.0156, 0.0066, 0.0211, 0.0166, 0.0572, 0.0197, 0.0401, 0.2252],
-    #      [0.1008, 0.1371, 0.0363, 0.0515, 0.0755, 0.0000, 0.0042, 0.0000],
-    #      [0.0691, 0.0029, 0.1093, 0.1597, 0.0033, 0.0000, 0.1057, 0.0000],
-    #      [0.0436, 0.0269, 0.0209, 0.0022, 0.0566, 0.3158, 0.0086, 0.0000],
-    #      [0.0364, 0.0010, 0.0034, 0.0005, 0.0277, 0.0080, 0.0658, 0.1443]])
-
     P_circuit[0, 2] *= 2
     P = np.zeros((16, 16))
     P[:8, :8] = P_circuit
@@ -225,7 +215,7 @@ def update(state, params, stim, dt=1e-4):
 if __name__ == '__main__':
 
     # Initialize the parameters
-    params = get_params(J_local=0.13, J_lateral=0.23, area='MT')
+    params = get_params(J_local=0.0878, J_lateral=0.0, area='MT')
 
     # Intialize the starting state (all zeros?)
     state = {}
@@ -235,24 +225,6 @@ if __name__ == '__main__':
     state['H'] = np.zeros(M)  # membrane potential
     state['R'] = np.zeros(M)  # rate
     state['N'] = np.zeros(M)  # noise
-
-    # Initialize the stimulation
-    stim = np.zeros(M)
-
-    # stim = set_vis(stim, column='H', nu=16.0, params=params)  # horizontal column
-    # stim = set_vis(stim, column='V', nu=16.0, params=params)  # vertical column
-
-    # stim = set_stimulation(stim, column='H', layer='L23', nu=20, params=params)
-    # stim = set_stimulation(stim, column='V', layer='L23', nu=20, params=params)
-    #
-    # stim = set_stimulation(stim, column='H', layer='L4', nu=20, params=params)
-    # stim = set_stimulation(stim, column='V', layer='L4', nu=20, params=params)
-    #
-    # stim = set_stimulation(stim, column='H', layer='L5', nu=20, params=params)
-    # stim = set_stimulation(stim, column='V', layer='L5', nu=20, params=params)
-    #
-    # stim = set_stimulation(stim, column='H', layer='L6', nu=20, params=params)
-    # stim = set_stimulation(stim, column='V', layer='L6', nu=20, params=params)
 
     # Total time steps
     T = 500
@@ -264,13 +236,16 @@ if __name__ == '__main__':
     # plt.imshow(weights, cmap="viridis", interpolation="nearest")
     # plt.show()
 
+    # Initialize the stimulation
+    stim = np.zeros(M)
+
     # Run simulation
     for t in range(T):
         state = update(state, params, stim)
         R[:, t] = state['R']
 
-    stim[:8] = 22.
-    stim[8:] = 18.
+    # stim[:8] = 22.
+    # stim[8:] = 18.
 
     for t in range(T):
         state = update(state, params, stim)

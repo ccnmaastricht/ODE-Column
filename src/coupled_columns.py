@@ -330,7 +330,7 @@ class ColumnNetwork(torch.nn.Module):
         # Source of ff is L2/3e (and L5e)
         ff_source_mask = torch.zeros(8)
         # ff_source_mask[0] = 1.0
-        ff_source_mask[0], ff_source_mask[4] = 1.0, 0.1
+        ff_source_mask[0], ff_source_mask[4] = 1.0, 0.2
         self.ff_source_mask = ff_source_mask
 
         # Target of ff is L4e and L4i
@@ -394,7 +394,7 @@ class ColumnNetwork(torch.nn.Module):
             idx = idx + area.num_populations
         return fr_per_area
 
-    def compute_currents(self, ext_ff_rate, fr_per_area):
+    def compute_currents(self, ext_ff_rate, fr_per_area, t):
         '''
         Compute the current for each area separately. The total current
         consists of feedforward current (stimulus-driven and/or from other
@@ -423,7 +423,7 @@ class ColumnNetwork(torch.nn.Module):
             feedforward_current = torch.relu(ff_current_area)  # make sure ff_currents are never negative
 
             # Background and recurrent current
-            background_current = area.background_weights * area.background_drive    # background input
+            background_current = area.background_weights * area.background_drive
             recurrent_current = torch.matmul(area.recurrent_weights, fr_per_area[area_idx].flatten())   # recurrent input
 
             # Total current of this area
@@ -444,6 +444,7 @@ class ColumnNetwork(torch.nn.Module):
         mem_adap_split = len(state) // 3
         adap_rate_split = len(state) // 3 * 2
         membrane_potential, adaptation = state[:mem_adap_split], state[mem_adap_split:adap_rate_split]
+
         firing_rate = compute_firing_rate_torch(membrane_potential - adaptation)
 
         # Partition firing rate per area
@@ -454,7 +455,7 @@ class ColumnNetwork(torch.nn.Module):
         ext_ff_rate = ext_ff_rate * 20.  # input in 1Hz range, so scale up
 
         # Compute input current
-        total_current = self.compute_currents(ext_ff_rate, fr_per_area)
+        total_current = self.compute_currents(ext_ff_rate, fr_per_area, t)
 
         # Compute derivative membrane potential and adaptation
         delta_membrane_potential = (-membrane_potential +
@@ -468,13 +469,18 @@ class ColumnNetwork(torch.nn.Module):
 
         state = torch.concat((delta_membrane_potential, delta_adaptation, delta_firing_rate))
 
-        # if torch.any(torch.abs(state) > 1e5):  # You can start with 1e3 as a sanity threshold
-        #     # print(f"[t={t.item():.3f}] 🚨 Large derivative detected! Max: {state.abs().max().item():.2e}")
-        #     # print(f"[t={t.item():.3f}] max(mem_pot): {delta_membrane_potential.abs().max().item():.2e}")
-        #     # print(f"[t={t.item():.3f}] max(adaptation): {delta_adaptation.abs().max().item():.2e}")
-        #     # print(f"[t={t.item():.3f}] max(firing_rate): {delta_firing_rate.abs().max().item():.2e}")
+        # if torch.any(torch.abs(state) > 1e3):  # You can start with 1e3 as a sanity threshold
+        #     print(f"[t={t.item():.3f}] 🚨 Large derivative detected! Max: {state.abs().max().item():.2e}")
+        #     print(f"[t={t.item():.3f}] max(mem_pot): {delta_membrane_potential.abs().max().item():.2e}")
+        #     print(f"[t={t.item():.3f}] max(adaptation): {delta_adaptation.abs().max().item():.2e}")
+        #     print(f"[t={t.item():.3f}] max(firing_rate): {delta_firing_rate.abs().max().item():.2e}")
 
-        state = torch.clamp(state, -1e4, 1e4)
+        # state = torch.clamp(state, -1e4, 1e4)
+
+        # if torch.any(membrane_potential > 120) or torch.any(membrane_potential < -120):
+        # print(t)
+        # pprint(membrane_potential[0])
+        # blep = 0
 
         return state.unsqueeze(0)
 
@@ -492,62 +498,3 @@ class ColumnNetwork(torch.nn.Module):
         '''
         return odeint_adjoint(self.f, state, time_vec)
 
-
-
-### Testing network
-
-if __name__ == '__main__':
-
-    # Init network
-    col_params = load_config('../config/model.toml')
-    sim_params = load_config('../config/simulation.toml')
-
-    network_input = {'nr_areas': 2, 'areas': ['mt', 'mt'], 'nr_columns_per_area': [2,1], 'nr_input_units': 2}
-    num_columns = sum(network_input['nr_columns_per_area'])
-    print(network_input)
-
-    network = ColumnNetwork(col_params, network_input)
-
-    # Initial state
-    membrane = torch.tensor(sim_params['initial_conditions']['membrane_potential'])
-    adaptation = torch.tensor(sim_params['initial_conditions']['adaptation'])
-    mem_adap = torch.stack([membrane, adaptation])
-    initial_state = torch.tile(mem_adap, (num_columns,))
-
-    # Time vector
-    time_steps = int(sim_params['protocol']['stimulus_duration'] * 2 / sim_params['time_step'])
-    time_vec = torch.linspace(0., time_steps * sim_params['time_step'], time_steps)
-
-    # Stimulus
-    stim = create_feedforward_input(network_input['nr_input_units']*8, 0., 1.)
-    empty_stim = torch.zeros(1, network_input['nr_input_units']*8)
-
-    phase_length = int(len(time_vec) / 2)
-    empty_stim_phase = empty_stim.expand(phase_length, -1)
-    stim_phase = stim.expand(phase_length, -1)
-
-    whole_stim_phase = torch.cat((stim_phase, stim_phase), dim=0)
-
-    # Double the stim to input it to both columns
-    mirror_stim_phase = torch.cat((whole_stim_phase[:, 8:], whole_stim_phase[:, :8]), dim=1)
-    double_stim = torch.stack((whole_stim_phase, mirror_stim_phase), dim=1)  # (time steps, 2, num populations)
-
-
-    result = network.g(time_vec[0], initial_state)
-
-
-    version = 'old'
-
-    xor_network = ColumnsXOR(col_params, 'mt')
-
-    results = torch.Tensor(1000, 2, 24)
-    for i, t in enumerate(time_vec):
-        if version == 'new':
-            next_state = network.dynamics_ode(t, initial_state, double_stim, time_vec)
-        else:
-            next_state = xor_network.dynamics_xor(t, initial_state, double_stim, time_vec)
-        initial_state = next_state
-        results[i,:,:] = next_state
-
-    plt.plot(results[:, 0, 0].detach().numpy())
-    plt.show()
