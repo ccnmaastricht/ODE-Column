@@ -163,8 +163,10 @@ def huber_loss_wta(pred_states, true, network):
     Computes Huber loss, a loss function suited for trajectories.
     '''
 
-    mem_pred, adap_pred = pred_states[:, :, 0, :], pred_states[:, :, 1, :]
-    fr_pred = compute_firing_rate_torch(mem_pred - adap_pred)
+    mem_pred, adap_pred = pred_states[:, :, 0, :16], pred_states[:, :, 0, 16:32]
+    fr_pred_classic = compute_firing_rate_torch(mem_pred - adap_pred)
+    fr_split = (pred_states.shape[3] // 3) * 2
+    fr_pred = pred_states[:, :, 0, fr_split:]
     fr_pred_A = fr_pred[:, :, :8]
     fr_pred_B = fr_pred[:, :, 8:]
     fr_pred_A_sum = torch.sum(fr_pred_A * network.output_weights, dim=2)
