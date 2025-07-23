@@ -1,7 +1,7 @@
 time_step = 1e-3
 
 [protocol]
-pre_stimulus_period = 0.5  # *10s
+pre_stimulus_period = 0.5  # *1s
 post_stimulus_period = 0.5
 stimulus_duration = 0.5
 

@@ -39,6 +39,7 @@ def prep_stim_ode(stim_raw, time_vec, num_columns):
 
     phase_length = int(len(time_vec) / 2)
     stim_phase = all_inputs.unsqueeze(0).repeat(phase_length, 1, 1)
+    # stim_phase = stim_raw.repeat(phase_length, 1)  # use this stim_phase (1x4) instead of (4x64)
 
     empty_stim_phase = torch.zeros(stim_phase.shape)
 
@@ -78,6 +79,10 @@ def train_parity_ode(nr_inputs, nr_samples, batch_size):
     optimizer = torch.optim.RMSprop(network.parameters(), lr=1e-5, alpha=0.95)
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.8)  # higher gamma = slower decay
 
+    # for name, param in network.named_parameters():
+    #     print(name)
+    #     print(param)
+
     nr_batches = int(nr_samples/batch_size)
 
     for batch_itr in range(nr_batches):
@@ -89,68 +94,64 @@ def train_parity_ode(nr_inputs, nr_samples, batch_size):
         # Storing results
         batch_output = torch.Tensor(batch_size, time_steps, 1, num_columns*8*3)  # last *3 bc mem, adap and fr
 
-        conn_weights = network.areas['0'].recurrent_weights
-        ff_weights = network.feedforward_weights
-
         # Run neural ODE on train samples
         for itr, train_stim in enumerate(train_set):
 
             print(itr)
 
-            # train_stim = torch.tensor([1., 1., 1., 1.])
+            # train_stim = torch.tensor([1., 1., 1., 0.])
 
             stim_ode = prep_stim_ode(train_stim, time_vec, network.areas['0'].num_columns)
             network.stim = stim_ode
 
-            # ode_output = odeint(network, initial_state, time_vec)
-            ode_output = sdeint(network, initial_state, time_vec, names={'drift': 'forward', 'diffusion': 'diffusion'}, adaptive=True)
+            ode_output = odeint(network, initial_state, time_vec)
+            # ode_output = sdeint(network, initial_state, time_vec, names={'drift': 'forward', 'diffusion': 'diffusion'}, adaptive=True)
 
             # print(train_stim)
             # for i in range(104):
             #     print(i)
             #     # plt.plot(ode_output[:, :, -8].detach().numpy())
-            #     plt.plot(ode_output[:, :, 0+i].detach().numpy())
-            #     plt.plot(ode_output[:, :, 208+i].detach().numpy())
+            #     plt.plot(ode_output[:, :, 64+0+i].detach().numpy())
+            #     plt.plot(ode_output[:, :, 64+208+i].detach().numpy())
             #     plt.show()
 
             batch_output[itr, :, :, :] = ode_output
 
         # Compute loss and update weights
         final_fr = batch_output[:, -1, 0, -8:]  # final firing rate of output column
-        final_fr_summed = torch.sum(final_fr * network.ff_source_mask, dim=-1)
+        final_fr_summed = torch.sum(final_fr * network.output_weights, dim=-1)
 
         parity_targets = (train_set.sum(dim=1) % 2 == 0).float()
-        parity_targets = parity_targets * 30.
+        parity_targets = parity_targets * 10.
 
+        pprint(train_set)
         pprint(final_fr_summed)
         pprint(parity_targets)
 
         loss = torch.mean(abs(final_fr_summed - parity_targets))
-        # loss.backward()
+        loss.backward()
 
-        with torch.autograd.set_detect_anomaly(True):
-            loss.backward()
+        # with torch.autograd.set_detect_anomaly(True):
+        #     loss.backward()
 
         print('Iter {:02d} | Total Loss {:.5f}'.format(batch_itr + 1, loss.item()))
 
         for name, param in network.named_parameters():
-            if torch.isnan(param.grad).any():
+            if param.requires_grad and torch.isnan(param.grad).any():
                 print(f"NaN gradient in {name}")
-            if torch.norm(param.grad) > 1e4:
+            if param.requires_grad and torch.norm(param.grad) > 1e4:
                 print(f"Large gradient in {name}: {torch.norm(param.grad)}")
 
         optimizer.step()
         scheduler.step()
 
-        # pprint(final_fr_summed)
-        # pprint(train_set)
-        #
-        # for i in range(8):
-        #     final_column = torch.sum(batch_output[i, :, 0, -8:] * network.ff_source_mask, dim=-1)
-        #     plt.plot(final_column.detach().numpy())
-        #     plt.plot(batch_output[i, :, 0, -8].detach().numpy())
-        #     plt.plot(batch_output[i, :, 0, -4].detach().numpy())
-        #     plt.show()
+        with torch.no_grad():
+            for i in range(batch_size):
+                final_column = torch.sum(batch_output[i, :, 0, -8:] * network.output_weights, dim=-1)
+                plt.plot(final_column.detach().numpy())
+                plt.plot(batch_output[i, :, 0, -8].detach().numpy())
+                plt.plot(batch_output[i, :, 0, -4].detach().numpy())
+                plt.show()
 
 
 

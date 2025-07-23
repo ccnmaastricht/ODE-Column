@@ -152,7 +152,7 @@ def running_mean(x, N, outliers=False):
     cumsum = np.cumsum(np.insert(x, 0, 0))
     return (cumsum[N:] - cumsum[:-N]) / float(N)
 
-def dominance_time(A1, A2, dt=1e-4, cutoff=.1):
+def dominance_time(A1, A2, dt=1e-4, cutoff=.1, thresh=0.0001, sliding_window=10000):
     """
     Args:
     A1 (array):         activity of column 1; shape=(num_populations, num_time_steps)
@@ -164,33 +164,36 @@ def dominance_time(A1, A2, dt=1e-4, cutoff=.1):
     DT (array):         dominance intervals
     """
     # get switching points
-    A1_smooth = running_mean(A1, N=10000)
-    A2_smooth = running_mean(A2, N=10000)
+    A1_smooth = running_mean(A1, N=sliding_window)
+    A2_smooth = running_mean(A2, N=sliding_window)
     A_diff = A1_smooth - A2_smooth
-    ind = np.where(abs(A_diff) <= 0.0001)[0]
-    switch = ind * dt	# in seconds
-    switch = np.round(switch, 2)
-    switch = np.unique(switch)
 
-    # get switching intervals
-    if len(switch) > 1:
-        DT = np.empty(len(switch) - 1)
-        for k in range(len(switch) - 1):
-            DT_ = switch[k + 1] - switch[k]
-            if DT_ >= cutoff:  # check if dominance duration larger than cutoff
-                DT[k] = DT_ # in seconds
-            else:
-                DT[k] = np.nan
-        not_nan_ind = ~ np.isnan(DT)
-        DT = DT[not_nan_ind]
-        if len(DT) >= 1:
-            return DT
-        else:
-            return np.array([len(A1)*dt])
-    else:
-        return np.array([len(A1)*dt])  # WTA
+    sign_diff = np.sign(A_diff)
+    switch_inds = np.where(np.diff(sign_diff) != 0)[0]
+    switch_times = switch_inds * dt
 
-def alternation_rate(A1, A2, dt=1e-4, cutoff=.1):
+    # print(switch_times)
+    #
+    # plt.plot(A1_smooth)
+    # plt.plot(A2_smooth)
+    # plt.show()
+
+    DT_signed = []
+    for i in range(len(switch_times) - 1):
+        start = switch_inds[i]
+        end = switch_inds[i + 1]
+        dur = (end - start) * dt
+        if dur >= cutoff:
+            dominant = np.sign(np.mean(A_diff[start:end]))
+            DT_signed.append(dominant * dur)
+
+    if len(DT_signed) > 0:
+        return np.array(DT_signed)
+
+    # No switches or too short
+    return np.array([np.sign(np.mean(A_diff)) * len(A1) * dt])
+
+def alternation_rate(A1, A2, dt=1e-4, cutoff=.1, sliding_window=1000):
     """
     Args:
     A1 (array):         activity of column 1; shape=(num_populations, num_time_steps)
@@ -201,10 +204,8 @@ def alternation_rate(A1, A2, dt=1e-4, cutoff=.1):
     Returns:
     AR (float):         alternation rate
     """
-    A_diff = running_mean(A1, N=1000) - running_mean(A2, N=1000)
-
+    A_diff = running_mean(A1, N=sliding_window) - running_mean(A2, N=sliding_window)
     AL = 0
-
     k = 0
     for t in range(len(A_diff)):
         if k == 0:
@@ -216,10 +217,8 @@ def alternation_rate(A1, A2, dt=1e-4, cutoff=.1):
                 AL += 1
             else:
                 k += 1
-
-    AL /= (len(A_diff) * dt)
-
-    return AL
+    AR = (AL / (len(A_diff) * dt))
+    return AR, AL
 
 
 def bistable_perception(fn, nr_iterations):
@@ -227,13 +226,7 @@ def bistable_perception(fn, nr_iterations):
     # Load network
     with open(fn, 'rb') as f:
         network = pickle.load(f)
-
     weights = network.recurrent_weights
-
-    # weights[0,0] *= 1.0
-    # weights[8,8] *= 1.0
-    # weights[1,8] *= 2.0
-    # weights[9,0] *= 2.0
 
     col_params = load_config('../config/model.toml')
     network = ColumnAreaWTA(col_params, area='mt')
@@ -318,55 +311,192 @@ def bistable_perception(fn, nr_iterations):
 
     with torch.no_grad():
 
-        # Set stim and time_vec
-        stim = torch.zeros(time_steps, 16)
-        stim[:, [2, 3]] = 20.  # input 1
-        stim[:, [10, 11]] = 20.  # input 2
-        network.stim = stim
-        network.time_vec = time_vec
+        for muA in [20.]: # [13., 14., 15., 16., 17., 18., 19., 20.]:
+            for muB in [20.]: # [10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20.]:
+                print(muA, muB)
 
-        # Run the model
-        # ode_output = odeint(network, initial_state, time_vec)
-        # bm = torchsde.BrownianInterval(
-        #     t0=time_vec[0].item(),
-        #     t1=time_vec[-1].item(),
-        #     size=initial_state.size(),
-        #     levy_area_approximation="space-time",  # Required for SRK
-        # )
-        # bm = torchsde.BrownianTree(
-        #     t0=time_vec[0].item(),
-        #     t1=time_vec[-1].item(),
-        #     w0=torch.zeros_like(initial_state))
-        # ode_output = sdeint(network, initial_state, time_vec, bm=bm, names={'drift': 'forward', 'diffusion': 'diffusion'}, method='euler')
+                # Set stim and time_vec
+                stim = torch.zeros(time_steps, 16)
+                stim[:, [2, 3]] = muA
+                stim[:, [10, 11]] = muB
+                network.stim = stim
+                network.time_vec = time_vec
 
-        # loop for nr of iterations
-        total = torch.Tensor(nr_iterations, time_steps, 16)
-        for i in range(nr_iterations):
+                # Run the model
+                # ode_output = odeint(network, initial_state, time_vec)
+                # bm = torchsde.BrownianInterval(
+                #     t0=time_vec[0].item(),
+                #     t1=time_vec[-1].item(),
+                #     size=initial_state.size(),
+                #     levy_area_approximation="space-time",  # Required for SRK
+                # )
+                # bm = torchsde.BrownianTree(
+                #     t0=time_vec[0].item(),
+                #     t1=time_vec[-1].item(),
+                #     w0=torch.zeros_like(initial_state))
+                # ode_output = sdeint(network, initial_state, time_vec, bm=bm, names={'drift': 'forward', 'diffusion': 'diffusion'}, method='euler')
+
+                # loop for nr of iterations
+                for i in range(nr_iterations):
+                    ode_output = sdeint(network, initial_state, time_vec,
+                                        names={'drift': 'forward', 'diffusion': 'diffusion'})
+                    comp_fr = compute_firing_rate_torch(ode_output[:, 0, :16] - ode_output[:, 0, 16:32])
+                    if i == 0:
+                        total = comp_fr
+                    else:
+                        total = torch.concat([total, comp_fr], dim=0)
+                    initial_state = ode_output[-1, :, :]
+
+                    # print(time.time() - curr_time)
+
+                    # Plot results
+                    m = ode_output[:, 0, :16]
+                    plt.plot(m[:, 0])
+                    plt.plot(m[:, 8])
+                    plt.show()
+
+                    a = ode_output[:, 0, 16:32]
+                    plt.plot(a[:, 0])
+                    plt.plot(a[:, 8])
+                    plt.show()
+
+                    fr = ode_output[:, 0, 32:]
+                    plt.plot(fr[:, 0])
+                    plt.plot(fr[:, 8])
+                    plt.plot(comp_fr[:, 0])
+                    plt.plot(comp_fr[:, 8])
+                    plt.show()
+
+                # Dominance duration
+                A1 = total[:, 0].detach().numpy()  # func expects np
+                A2 = total[:, 8].detach().numpy()
+                dom_time = dominance_time(A1, A2, dt=dt, thresh=0.0001, sliding_window=10000)
+                pprint(dom_time)
+                print(np.round(np.sum(dom_time), 2))
+
+                # Alternation rate
+                alt_rate, alt = alternation_rate(A1, A2, dt=dt, sliding_window=1000)
+                print(np.round(alt_rate, 2))
+
+                # Histogram
+                plt.hist(abs(dom_time), bins=100, color='r')
+                plt.show()
+
+
+def plot_dom_alt():
+
+    dominance =    [[0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 104.8],
+                    [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                    [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                    [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                    [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                    [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                    [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                    [-185.74, 48.67, -119.64, 0., 0., 0., 0., 0., 0., 0., 0.],
+                    [68.12, -226.35, -67.54, -73.43, -43.45, -36.92, -36.52, 69.51, -274.94, -56.68, -255.72],
+                    [104.4, 77.93, -5.95, 65.34, -118.87, -185.14, -43.29, 64.29, -137.95, -297.42, -251.6],
+                    [0.2, -23.68, 13.57, -271.09, -439.51, -341.42, -249.26, -161.72, -313.98, -313.5, -139.34]]
+
+    alternation =  [[0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.26],
+                    [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                    [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                    [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                    [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                    [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                    [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                    [0.35, 0.38, 0.48, 0., 0., 0., 0., 0., 0., 0., 0.],
+                    [0.41, 0.32, 0.35, 0.29, 0.27, 0.27, 0.32, 0.34, 0.24, 0.26, 0.31],
+                    [0.38, 0.41, 0.46, 0.35, 0.28, 0.3, 0.27, 0.25, 0.25, 0.36, 0.31],
+                    [0.36, 0.45, 0.3, 0.3, 0.36, 0.37, 0.31, 0.23, 0.24, 0.33, 0.49]]
+
+    heatmap = plt.imshow(dominance, cmap="viridis", interpolation="nearest", extent=[10, 20, 10, 20])
+    plt.colorbar(heatmap)
+    plt.show()
+
+    heatmap = plt.imshow(alternation, cmap="viridis", interpolation="nearest", extent=[10, 20, 10, 20])
+    plt.colorbar(heatmap)
+    plt.show()
+
+
+def wta_timecourse(fn):
+
+    # Load network
+    with open(fn, 'rb') as f:
+        _network = pickle.load(f)
+    weights = _network.recurrent_weights
+
+    col_params = load_config('../config/model.toml')
+    network = ColumnAreaWTA(col_params, area='mt')
+
+    network.recurrent_weights = weights
+
+    # Time params
+    dt = 1e-4
+    phase = 0.5  # secs
+    time_steps = int(phase/dt)
+    time_vec = torch.linspace(0., time_steps * dt, time_steps)
+    network.time_vec = time_vec
+
+    # Initial state is just zeros
+    initial_state = torch.zeros(48).unsqueeze(0)  # 48 = 8*2*3
+
+    with torch.no_grad():
+        i = 0
+
+        for stims in [[0., 0.], [0., 0.], [10., 30.], [0., 0.], [30., 10.], [0., 0.], [20., 20.], [20., 20.], [20., 20.], [20., 20.], [0., 0.]]:  #
+            muA = stims[0]
+            muB = stims[1]
+
+            # Set stim and time_vec
+            stim = torch.zeros(time_steps, 16)
+            stim[:, [2, 3]] = muA
+            stim[:, [10, 11]] = muB
+            network.stim = stim
+            network.time_vec = time_vec
+
             ode_output = sdeint(network, initial_state, time_vec,
                                 names={'drift': 'forward', 'diffusion': 'diffusion'})
-            total[i, :, :] = compute_firing_rate_torch(ode_output[:, 0, :16] - ode_output[:, 0, 16:32])
-            initial_state = ode_output[-1, :, :]
-
-        # print(time.time() - curr_time)
-
-            # Plot results
-            m = ode_output[:, 0, :16]
-            plt.plot(m[:, 0])
-            plt.plot(m[:, 8])
-            plt.show()
-
-            a = ode_output[:, 0, 16:32]
-            plt.plot(a[:, 0])
-            plt.plot(a[:, 8])
-            plt.show()
-
-            fr = ode_output[:, 0, 32:]
             comp_fr = compute_firing_rate_torch(ode_output[:, 0, :16] - ode_output[:, 0, 16:32])
-            plt.plot(fr[:, 0])
-            plt.plot(fr[:, 8])
-            plt.plot(comp_fr[:, 0])
-            plt.plot(comp_fr[:, 8])
-            plt.show()
+            # comp_fr = ode_output[:, 0, 32:]
+            if i == 0:
+                time_course = comp_fr
+                stim_time_course = stim
+            else:
+                time_course = torch.concat([time_course, comp_fr], dim=0)
+                stim_time_course = torch.concat([stim_time_course, stim], dim=0)
+            initial_state = ode_output[-1, :, :]
+            i += 1
+
+        with open('../wta_timecourse_plot.pkl', 'wb') as f:
+            pickle.dump(time_course, f)
+
+        # Set the figure size (wide, not too tall)
+        fig, (ax1, ax3, ax4) = plt.subplots(3, 1, figsize=(12, 8), sharex=True,
+                                                 gridspec_kw={'height_ratios': [2.5, 1.0, 1.0]})
+
+        ax1.plot(time_course[:, 0], label='Column A', color='deepskyblue', linewidth=2)
+        ax1.plot(time_course[:, 8], label='Column B', color='coral', linewidth=2)
+        ax1.set_title('L2/3e firing rates in columns A & B', fontsize=14)
+        ax1.set_ylabel('Firing Rate', fontsize=12)
+        ax1.legend()
+        ax1.grid(True, linestyle='--', alpha=0.5)
+
+        ax3.plot(stim_time_course[:, 2], label='Input 1', color='deepskyblue', linewidth=2)
+        ax3.set_title('Input to column A', fontsize=14)
+        ax3.set_ylabel('Hz', fontsize=12)
+        ax3.set_ylim(-5.0, 40.0)
+        ax3.grid(True, linestyle='--', alpha=0.5)
+
+        ax4.plot(stim_time_course[:, 10], label='Input 2', color='coral', linewidth=2)
+        ax4.set_title('Input to column B', fontsize=14)
+        ax4.set_xlabel('Time Step', fontsize=12)
+        ax4.set_ylabel('Hz', fontsize=12)
+        ax4.set_ylim(-5.0, 40.0)
+        ax4.grid(True, linestyle='--', alpha=0.5)
+
+        # Layout adjustment
+        plt.tight_layout()
+        plt.show()
 
 
 if __name__ == '__main__':
@@ -374,4 +504,7 @@ if __name__ == '__main__':
     fn = '../ww_trained_model_7.pkl'
 
     # coherence_results_ccn(fn)
-    bistable_perception(fn, nr_iterations=10)
+    # bistable_perception(fn, nr_iterations=100)  # nr_iters * 10 = total seconds
+    # plot_dom_alt()
+
+    wta_timecourse(fn)

@@ -48,7 +48,7 @@ class ColumnArea(torch.nn.Module):
         """
         self.population_sizes = np.array(
             column_parameters['population_size'][self.area])
-        self.population_sizes = np.tile(self.population_sizes, self.num_columns) # / self.num_columns ######## keep population sizes as they are
+        self.population_sizes = np.tile(self.population_sizes, self.num_columns) / self.num_columns ######## keep population sizes as they are
 
         self.num_populations = len(self.population_sizes)
         self.adaptation_strength = torch.tile(self.adaptation_strength, (self.num_columns,))
@@ -264,7 +264,7 @@ class ColumnAreaWTA(ColumnArea):
         # Compute current current
         feedforward_current = self.feedforward_weights * feedforward_rate       # stimulus feedforward input
         background_current = self.background_weights * self.background_drive    # background input
-        self.recurrent_weights = self.inner_weights + self.lateral_weights              # on while training, off while testinggggg
+        # self.recurrent_weights = self.inner_weights + self.lateral_weights              # on while training, off while testinggggg
         recurrent_current = torch.matmul(self.recurrent_weights, firing_rate)   # recurrent input
 
         total_current = (feedforward_current + background_current + (recurrent_current / self.scaling_factor)) * self.synapse_time_constant
@@ -284,10 +284,86 @@ class ColumnAreaWTA(ColumnArea):
     def diffusion(self, t, y):
         noise_std = 2.0
         g = torch.zeros_like(y)
-        split = (len(y[0]) // 3) * 2
-        g[:split] = noise_std  # membrane and adaptation
-        # g[split:] = noise_std * torch.sqrt(torch.relu(y))  # firing rates are clamped to be non-negative
+        split_mem = (len(y[0]) // 3)
+        split_fr = (len(y[0]) // 3) * 2
+        g[:split_mem] = noise_std  # membrane and adaptation
+        g[split_fr:] = noise_std
         return g
+
+
+# Example weights matrices
+#     def _initialize_ff_fb_weights(self):
+#         '''
+#         Initialize the feedforward/feedback weights as learnable weights.
+#         These connect areas to each other and allow information flow in both
+#         feedforward and feedback directions.
+#         '''
+#
+#         ff_weights = nn.ParameterList()
+#
+#         for area_idx, area in self.areas.items():
+#
+#             if area_idx == '0':   # first area receives input
+#                 size_source = self.nr_input_units  # nr of rows weights matrix
+#
+#                 ff_area_weights = torch.zeros((1, 8))
+#                 ff_area_weights[0, 2], ff_area_weights[0, 3] = 1.0, 1.0
+#
+#             else:  # for subsequent areas, check how many inputs from previous area
+#                 idx_prev_area = str(int(area_idx) - 1)
+#                 size_source = self.areas[idx_prev_area].num_columns  # nr of rows weights matrix
+#
+#                 ff_area_weights = torch.zeros((8, 8))
+#                 ff_area_weights[0, 2], ff_area_weights[0, 3], ff_area_weights[4, 2], ff_area_weights[4, 3] = 1.0, 1.0, 1.0, 1.0
+#
+#             size_target = area.num_columns  # nr of columns weights matrix
+#             ff_area_weights = torch.tile(ff_area_weights, (size_source, size_target))
+#             ff_weights.append(nn.Parameter(ff_area_weights))
+#
+#             # # Weight initialization should not be too small, otherwise no ff flow and no training possible
+#             # original_weights = area.feedforward_weights.clone().detach() * area.synapse_time_constant
+#             # std_W = area.synapse_time_constant
+#             #
+#             # for i in range(nr_ff_weights):
+#             #     rand_weights = abs(torch.normal(mean=original_weights, std=std_W))
+#             #     rand_weights_masked = rand_weights * torch.tile(self.input_target_mask, (area.num_columns,))
+#             #     blep = nn.Parameter(rand_weights_masked, requires_grad=True)
+#             #     ff_weights[area_idx].append(blep)
+#
+#         self.ff_weights = ff_weights
+#
+#     def compute_currents(self, ext_ff_rate, fr_per_area, t):
+#         '''
+#         Compute the current for each area separately. The total current
+#         consists of feedforward current (stimulus-driven and/or from other
+#         brain areas), background current and recurrent current.
+#         '''
+#         total_current = torch.Tensor()
+#
+#         for area_idx, area in self.areas.items():
+#
+#             # Compute feedforward current of each area, based on
+#             # area=0: external input or area>0: the previous area's firing rate
+#
+#             if area_idx == '0':
+#                 feedforward_current = torch.matmul(ext_ff_rate, self.ff_weights[int(area_idx)])
+#             elif area_idx > '0':  # subsequent areas receive previous area's firing rate
+#                 idx_prev_area = str(int(area_idx) - 1)
+#                 prev_area_fr = fr_per_area[idx_prev_area]
+#                 feedforward_current = torch.matmul(prev_area_fr, self.ff_weights[int(area_idx)])
+#             feedforward_current = torch.relu(feedforward_current)  # make sure ff_currents are never negative
+#
+#             # Background and recurrent current
+#             background_current = area.background_weights * area.background_drive
+#             recurrent_current = torch.matmul(area.recurrent_weights, fr_per_area[area_idx].flatten())   # recurrent input
+#
+#             # Total current of this area
+#             # Notice that ff is not scaled down by synapse time constant bc ff weights are already scaled down for training
+#             total_current_area = feedforward_current + (background_current + recurrent_current) * area.synapse_time_constant
+#
+#             total_current = torch.cat((total_current, total_current_area), dim=0)
+#         return total_current
+
 
 
 class ColumnNetwork(torch.nn.Module):
@@ -311,15 +387,14 @@ class ColumnNetwork(torch.nn.Module):
         self.nr_input_units = network_dict['nr_input_units']
         self.nr_columns_per_area = network_dict['nr_columns_per_area']
 
-        self._set_external_connections_to_zero()
-        self._initialize_feedforward_masks()
+        self._initialize_lateral_weights()
+        self._initialize_ff_fb_masks()
         self._initialize_feedforward_weights()
-
-        # self.membrane = torch.tile([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], (3,))
-        # self.adaptation = torch.tile([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], (3,))
+        self._initialize_feedback_weights()
+        self._initialize_output_weights()
 
     def _initialize_areas(self, column_parameters, network_dict):
-        self.areas = torch.nn.ModuleDict({})
+        self.areas = nn.ModuleDict({})
         for area_idx in range(network_dict['nr_areas']):
 
             area_name = network_dict['areas'][area_idx]
@@ -328,58 +403,141 @@ class ColumnNetwork(torch.nn.Module):
             area = ColumnArea(column_parameters, area_name, num_columns)
             self.areas[str(area_idx)] = area
 
-    def _set_external_connections_to_zero(self):
+    def _initialize_lateral_weights(self):
         '''
         Sets external recurrent weights of all areas to zero, to make sure
         all lateral connectivity is removed.
         '''
         for idx, area in self.areas.items():
             recurr_weights = area.recurrent_weights
-            area.recurrent_weights = recurr_weights * area.internal_mask
+            area.recurrent_weights = recurr_weights * area.internal_mask  # set any existing external connectivity to zero
 
-    def _initialize_feedforward_masks(self):
+            lateral_weights = torch.zeros((16, 16))
+            lateral_weights[1, 8], lateral_weights[9, 0] = 0.01, 0.01  # initialize the lateral weights
+            lateral_weights = torch.tile(lateral_weights, (area.num_columns, area.num_columns))
+            lateral_weights = lateral_weights[:area.num_populations, :area.num_populations]
+
+            std_W = area.synapse_time_constant
+            rand_weights = abs(torch.normal(mean=lateral_weights, std=std_W))
+            rand_weights *= (lateral_weights * 100.)  # *100 to use it as a 1.0 mask
+
+            area.lateral_weights = nn.Parameter(rand_weights, requires_grad=True)
+
+    def _initialize_ff_fb_masks(self):
         '''
         Specify from which population the feedforward flow comes
-        from (source) and which population it targets (target).
+        (source) and which population it targets (target).
         '''
         # Source of ff is L2/3e (and L5e)
-        ff_source_mask = torch.zeros(8)
-        # ff_source_mask[0] = 1.0
-        ff_source_mask[0], ff_source_mask[4] = 1.0, 0.2
+        ff_source_mask = torch.tensor([1., 0., 0., 0., 1., 0., 0., 0.])
         self.ff_source_mask = ff_source_mask
 
         # Target of ff is L4e and L4i
-        ff_target_mask = torch.zeros(8)
-        ff_target_mask[2], ff_target_mask[3] = 1.0, 1.0
+        ff_target_mask = torch.tensor([0., 0., 1., 1., 0., 0., 0., 0.])
         self.ff_target_mask = ff_target_mask
+
+        # Source of fb is L5e and L6e
+        fb_source_mask = torch.tensor([0., 0., 0., 0., 1., 0., 1., 0.])
+        self.fb_source_mask = fb_source_mask
+
+        # Target of fb is L2/3, L5, L6
+        fb_target_mask = torch.tensor([1., 1., 0., 0., 1., 1., 1., 1.])
+        self.fb_target_mask = fb_target_mask
 
     def _initialize_feedforward_weights(self):
         '''
-        Initialize the feedforward weights as learnable weights.
+        Initialize the feedforward weights as learnable weights. Both target
+        and source weights are initialized.
         '''
-        feedforward_weights = nn.ModuleDict({})
+        feedforward_target_weights = nn.ModuleDict({})
+        feedforward_source_weights = nn.ModuleDict({})
 
         for area_idx, area in self.areas.items():
 
-            # if area_idx not in feedforward_weights:
-            feedforward_weights[area_idx] = nn.ParameterList()
+            feedforward_target_weights[area_idx] = nn.ParameterList()
+            feedforward_source_weights[area_idx] = nn.ParameterList()
 
             if area_idx == '0':   # if first area, check how many external inputs it receives
                 nr_ff_weights = self.nr_input_units
             else:               # for subsequent areas, check how many inputs from previous area
-                idx_prev_area = str(int(area_idx)-1)
-                nr_ff_weights = self.areas[idx_prev_area].num_columns
+                key_prev_area = str(int(area_idx)-1)
+                nr_ff_weights = self.areas[key_prev_area].num_columns
 
             # Weight initialization should not be too small, otherwise no ff flow and no training possible
-            original_weights = area.feedforward_weights.clone().detach() * area.synapse_time_constant
+            original_target_weights = area.feedforward_weights.clone().detach() * area.synapse_time_constant
+            init_source_weights = torch.tensor([1.0, 0.0, 0.0, 0.0, 0.15, 0.0, 0.0, 0.0])  # no tiling, cuz will be applied to only one column of prev area
             std_W = area.synapse_time_constant
 
             for i in range(nr_ff_weights):
-                rand_weights = abs(torch.normal(mean=original_weights, std=std_W))
-                rand_weights_masked = rand_weights * torch.tile(self.ff_target_mask, (area.num_columns,))
-                ff_weights = nn.Parameter(rand_weights_masked, requires_grad=True)
-                feedforward_weights[area_idx].append(ff_weights)
-        self.feedforward_weights = feedforward_weights
+
+                rand_weights_target = abs(torch.normal(mean=original_target_weights, std=std_W))
+                rand_weights_target = rand_weights_target * torch.tile(self.ff_target_mask, (area.num_columns,))
+                ff_weights_target = nn.Parameter(rand_weights_target, requires_grad=True)
+                feedforward_target_weights[area_idx].append(ff_weights_target)
+
+                rand_weights_source = abs(torch.normal(mean=init_source_weights, std=std_W))
+                rand_weights_source = rand_weights_source * self.ff_source_mask
+                if area_idx == '0':  # the first area needs no source weights; but need to init to keep indexing
+                    ff_weights_source = nn.Parameter(rand_weights_source, requires_grad=False)
+                else:
+                    ff_weights_source = nn.Parameter(rand_weights_source, requires_grad=True)
+                feedforward_source_weights[area_idx].append(ff_weights_source)
+
+        self.feedforward_target_weights = feedforward_target_weights
+        self.feedforward_source_weights = feedforward_source_weights
+
+    def _initialize_feedback_weights(self):
+        '''
+        Initialize the feedback weights as learnable weights. Both target
+        and source weights are initialized.
+        '''
+        feedback_target_weights = nn.ModuleDict({})
+        feedback_source_weights = nn.ModuleDict({})
+
+        for area_idx, area in self.areas.items():
+
+            if int(area_idx) == (len(self.areas) - 1):  # skip last area
+                break
+
+            feedback_target_weights[area_idx] = nn.ParameterList()
+            feedback_source_weights[area_idx] = nn.ParameterList()
+
+            key_next_area = str(int(area_idx) + 1)
+            nr_fb_weights = self.areas[key_next_area].num_columns
+
+            # Disclaimer: I really don't know what I'm doing here in terms of initialization (which layers, exci/inhi or magnitude)
+            # Target weights need to be in range ~25,16 (range original feedforward weights)
+            init_target_weights = torch.tile(torch.tensor([5.0, 0.1, 0.0, 0.0, 5.0, 0.1, 5.0, 0.1]), (area.num_columns,)) * area.synapse_time_constant
+            init_source_weights = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.1, 0.0, 0.1, 0.0])  # no tiling, cuz will be applied to only one column of prev area
+            std_W = area.synapse_time_constant
+
+            for i in range(nr_fb_weights):
+                rand_weights_target = abs(torch.normal(mean=init_target_weights, std=std_W))
+                rand_weights_target = rand_weights_target * torch.tile(self.fb_target_mask, (area.num_columns,))
+                fb_weights_target = nn.Parameter(rand_weights_target, requires_grad=True)
+                feedback_target_weights[area_idx].append(fb_weights_target)
+
+                rand_weights_source = abs(torch.normal(mean=init_source_weights, std=std_W))
+                rand_weights_source = rand_weights_source * self.fb_source_mask
+                fb_weights_source = nn.Parameter(rand_weights_source, requires_grad=True)
+                feedback_source_weights[area_idx].append(fb_weights_source)
+
+        self.feedback_target_weights = feedback_target_weights
+        self.feedback_source_weights = feedback_source_weights
+
+    def _initialize_output_weights(self):
+        '''
+        Initialize learnable output weights that can be used to read out
+        the firing rates of the final column as a means of classification.
+        '''
+        key_last_area = str(len(self.areas)-1)
+        nr_pops_final_area = self.areas[key_last_area].num_populations
+        output_weights = torch.zeros(nr_pops_final_area)
+        output_weights[0], output_weights[4] = 1.0, 0.05
+
+        std_W = self.network_as_area.synapse_time_constant
+        rand_output_weights = abs(torch.normal(mean=output_weights, std=std_W))
+        self.output_weights = nn.Parameter(rand_output_weights, requires_grad=True)
 
     def set_time_vec(self, time_vec):
         '''
@@ -421,29 +579,36 @@ class ColumnNetwork(torch.nn.Module):
 
             # Compute feedforward current of each area, based on
             # area=0: external input or area>0: the previous area's firing rate
-            ff_current_area = torch.zeros(area.num_populations)
+            feedforward_current = torch.zeros(area.num_populations)
 
-            for ff_idx, ff_weight in enumerate(self.feedforward_weights[area_idx]):
+            for ff_idx, ff_target_weight in enumerate(self.feedforward_target_weights[area_idx]):
+            # Multiply each input with each corresponding ff weights
                 if area_idx == '0':  # first area gets external input
-                    # multiply each input with each corresponding ff weights
-                    ff_current_area += ext_ff_rate[ff_idx] * ff_weight
+                    feedforward_current += ext_ff_rate[ff_idx] * ff_target_weight
 
                 elif area_idx > '0':  # subsequent areas receive previous area's firing rate
-                    idx_prev_area = str(int(area_idx) - 1)
-                    prev_area_fr = fr_per_area[idx_prev_area][ff_idx] * self.ff_source_mask
+                    key_prev_area = str(int(area_idx) - 1)
+                    prev_area_fr = fr_per_area[key_prev_area][ff_idx] * self.feedforward_source_weights[area_idx][ff_idx]
                     prev_area_fr_sum = torch.sum(prev_area_fr)
-                    # prev_area_fr_sum = prev_area_fr_sum * 10.
-                    ff_current_area += prev_area_fr_sum * ff_weight
+                    feedforward_current += prev_area_fr_sum * ff_target_weight
 
-            feedforward_current = torch.relu(ff_current_area)  # make sure ff_currents are never negative
+            # Compute feedback current
+            feedback_current = torch.zeros(area.num_populations)
+
+            if int(area_idx) < (len(self.areas) - 1):  # only last area has no fb weights, so skip that one
+                for fb_idx, fb_target_weight in enumerate(self.feedback_target_weights[area_idx]):
+                    key_next_area = str(int(area_idx) + 1)
+                    next_area_fr = fr_per_area[key_next_area][fb_idx] * self.feedback_source_weights[area_idx][fb_idx]
+                    next_area_fr_sum = torch.sum(next_area_fr)
+                    feedback_current += next_area_fr_sum * fb_target_weight
 
             # Background and recurrent current
             background_current = area.background_weights * area.background_drive
-            recurrent_current = torch.matmul(area.recurrent_weights, fr_per_area[area_idx].flatten())   # recurrent input
+            recurrent_current = torch.matmul((area.recurrent_weights + area.lateral_weights), fr_per_area[area_idx].flatten())
 
             # Total current of this area
-            # Notice that ff is not scaled down by synapse time constant bc ff weights are already scaled down for training
-            total_current_area = feedforward_current + (background_current + recurrent_current) * area.synapse_time_constant
+            # Notice that ff an fb are not scaled down by synapse time constant bc they are already scaled down for training
+            total_current_area = feedforward_current + feedback_current + (background_current + recurrent_current) * area.synapse_time_constant
 
             total_current = torch.cat((total_current, total_current_area), dim=0)
         return total_current
@@ -506,3 +671,4 @@ class ColumnNetwork(torch.nn.Module):
         split = (len(y[0]) // 3) * 2
         g[:, split:] = noise_std  # only firing rates (after split)
         return g
+
