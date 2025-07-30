@@ -3,6 +3,7 @@ import torch
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
+from matplotlib.ticker import MultipleLocator, FormatStrFormatter
 import numpy as np
 import time
 
@@ -25,6 +26,76 @@ def coherence_results_ccn(fn):
     # Load network
     with open(fn, 'rb') as f:
         network = pickle.load(f)
+
+    col_params = load_config('../config/model.toml')
+    network = ColumnAreaWTA(col_params, area='mt')
+
+    orig_weights = torch.tensor([[ 4.1900e-01, -4.9223e-01,  1.1323e-01, -1.0566e-01,  2.0433e-02,
+          0.0000e+00,  5.3040e-03,  0.0000e+00, -0.0000e+00,  0.0000e+00,
+         -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
+          0.0000e+00],
+        [ 3.8463e-01, -3.9232e-01,  3.9754e-02, -6.5461e-02,  4.8854e-02,
+          0.0000e+00,  2.9262e-03,  0.0000e+00,  5.4915e-01,  0.0000e+00,
+         -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
+          0.0000e+00],
+        [ 2.0566e-02, -1.5744e-02,  6.3114e-02, -1.7955e-01,  4.1836e-03,
+         -1.8672e-04,  3.2230e-02,  0.0000e+00, -0.0000e+00,  0.0000e+00,
+         -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
+          0.0000e+00],
+        [ 1.9051e-01, -7.7270e-03,  1.0242e-01, -2.1542e-01,  2.0571e-03,
+          0.0000e+00,  7.7669e-02,  0.0000e+00, -0.0000e+00,  0.0000e+00,
+         -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
+          0.0000e+00],
+        [ 2.8151e-01, -1.7086e-01,  6.4156e-02, -7.0772e-03,  5.3991e-02,
+         -2.9011e-01,  1.4330e-02,  0.0000e+00, -0.0000e+00,  0.0000e+00,
+         -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
+          0.0000e+00],
+        [ 1.4995e-01, -7.2550e-02,  3.2234e-02, -2.7268e-03,  3.8507e-02,
+         -2.3618e-01,  6.0050e-03,  0.0000e+00, -0.0000e+00,  0.0000e+00,
+         -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
+          0.0000e+00],
+        [ 4.1833e-02, -1.7618e-02,  2.6403e-02, -2.0724e-02,  3.6656e-02,
+         -1.2382e-02,  2.8092e-02, -1.7739e-01, -0.0000e+00,  0.0000e+00,
+         -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
+          0.0000e+00],
+        [ 9.8653e-02, -2.6619e-03,  4.2166e-03, -6.1922e-04,  1.7482e-02,
+         -4.9986e-03,  4.7322e-02, -1.0834e-01, -0.0000e+00,  0.0000e+00,
+         -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
+          0.0000e+00],
+        [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
+          0.0000e+00, -0.0000e+00,  0.0000e+00,  4.1900e-01, -4.9223e-01,
+          1.1323e-01, -1.0566e-01,  2.0433e-02,  0.0000e+00,  5.3040e-03,
+          0.0000e+00],
+        [ 5.4915e-01,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
+          0.0000e+00, -0.0000e+00,  0.0000e+00,  3.8463e-01, -3.9232e-01,
+          3.9754e-02, -6.5461e-02,  4.8854e-02,  0.0000e+00,  2.9262e-03,
+          0.0000e+00],
+        [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
+          0.0000e+00, -0.0000e+00,  0.0000e+00,  2.0566e-02, -1.5744e-02,
+          6.3114e-02, -1.7955e-01,  4.1836e-03, -1.8672e-04,  3.2230e-02,
+          0.0000e+00],
+        [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
+          0.0000e+00, -0.0000e+00,  0.0000e+00,  1.9051e-01, -7.7270e-03,
+          1.0242e-01, -2.1542e-01,  2.0571e-03,  0.0000e+00,  7.7669e-02,
+          0.0000e+00],
+        [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
+          0.0000e+00, -0.0000e+00,  0.0000e+00,  2.8151e-01, -1.7086e-01,
+          6.4156e-02, -7.0772e-03,  5.3991e-02, -2.9011e-01,  1.4330e-02,
+          0.0000e+00],
+        [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
+          0.0000e+00, -0.0000e+00,  0.0000e+00,  1.4995e-01, -7.2550e-02,
+          3.2234e-02, -2.7268e-03,  3.8507e-02, -2.3618e-01,  6.0050e-03,
+          0.0000e+00],
+        [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
+          0.0000e+00, -0.0000e+00,  0.0000e+00,  4.1833e-02, -1.7618e-02,
+          2.6403e-02, -2.0724e-02,  3.6656e-02, -1.2382e-02,  2.8092e-02,
+         -1.7739e-01],
+        [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
+          0.0000e+00, -0.0000e+00,  0.0000e+00,  9.8653e-02, -2.6619e-03,
+          4.2166e-03, -6.1922e-04,  1.7482e-02, -4.9986e-03,  4.7322e-02,
+         -1.0834e-01]])
+
+    network.recurrent_weights = orig_weights
 
     # Time params
     dt = 1e-4
@@ -120,6 +191,7 @@ def coherence_results_ccn(fn):
             else:  # For bottom subplots: relabel x-axis from 0–600 to -100–500
                 axes_.tick_params(labelsize=8)
                 xlabels = xticks - 100  # Shift labels
+                # xlabels = xlabels / /10
                 axes_.set_xticklabels(xlabels)
             axes_.set_xticks(xticks)
             axes_.set_xlim(0, 600)
@@ -439,11 +511,12 @@ def wta_timecourse(fn):
 
     # Initial state is just zeros
     initial_state = torch.zeros(48).unsqueeze(0)  # 48 = 8*2*3
+    initial_state[:, :16] = torch.tile(torch.tensor([-1.5554, 8.9735, 12.0712, 12.5040, -5.2554, 10.4650, -30.8225, 12.6189]), (2,))
 
     with torch.no_grad():
         i = 0
 
-        for stims in [[0., 0.], [0., 0.], [10., 30.], [0., 0.], [30., 10.], [0., 0.], [20., 20.], [20., 20.], [20., 20.], [20., 20.], [0., 0.]]:  #
+        for stims in [[0., 0.], [0., 0.], [0., 0.], [10., 30.], [0., 0.], [30., 10.], [0., 0.], [20., 20.], [20., 20.], [20., 20.], [20., 20.], [0., 0.]]:  #
             muA = stims[0]
             muB = stims[1]
 
@@ -470,29 +543,34 @@ def wta_timecourse(fn):
         with open('../wta_timecourse_plot.pkl', 'wb') as f:
             pickle.dump(time_course, f)
 
-        # Set the figure size (wide, not too tall)
-        fig, (ax1, ax3, ax4) = plt.subplots(3, 1, figsize=(12, 8), sharex=True,
-                                                 gridspec_kw={'height_ratios': [2.5, 1.0, 1.0]})
+        with open("../wta_timecourse_plot_28-07.pkl", 'rb') as f:
+            time_course = pickle.load(f)
 
-        ax1.plot(time_course[:, 0], label='Column A', color='deepskyblue', linewidth=2)
-        ax1.plot(time_course[:, 8], label='Column B', color='coral', linewidth=2)
+        time_course = time_course[time_steps:]
+        stim_time_course = stim_time_course[time_steps:]
+
+        time = np.arange(time_course.shape[0]) * dt
+
+        # Set the figure size (wide, not too tall)
+        fig, (ax1, ax3) = plt.subplots(2, 1, figsize=(12, 8), sharex=True,
+                                                 gridspec_kw={'height_ratios': [2.5, 1.0]})
+
+        ax1.plot(time, time_course[:, 0], label='Column A', color='royalblue', linewidth=2)
+        ax1.plot(time, time_course[:, 8], label='Column B', color='darkorange', linewidth=2)
         ax1.set_title('L2/3e firing rates in columns A & B', fontsize=14)
         ax1.set_ylabel('Firing Rate', fontsize=12)
         ax1.legend()
         ax1.grid(True, linestyle='--', alpha=0.5)
 
-        ax3.plot(stim_time_course[:, 2], label='Input 1', color='deepskyblue', linewidth=2)
-        ax3.set_title('Input to column A', fontsize=14)
+        ax3.plot(time, stim_time_course[:, 2], label='Input 1', color='royalblue', linewidth=5)
+        ax3.plot(time, stim_time_course[:, 10], label='Input 2', color='darkorange', linewidth=5, linestyle='--')
+        ax3.set_title('Inputs', fontsize=14)
+        ax3.set_xlabel('Time (s)', fontsize=12)
+        ax3.xaxis.set_major_formatter(FormatStrFormatter('%.1f'))
         ax3.set_ylabel('Hz', fontsize=12)
         ax3.set_ylim(-5.0, 40.0)
+        ax1.legend()
         ax3.grid(True, linestyle='--', alpha=0.5)
-
-        ax4.plot(stim_time_course[:, 10], label='Input 2', color='coral', linewidth=2)
-        ax4.set_title('Input to column B', fontsize=14)
-        ax4.set_xlabel('Time Step', fontsize=12)
-        ax4.set_ylabel('Hz', fontsize=12)
-        ax4.set_ylim(-5.0, 40.0)
-        ax4.grid(True, linestyle='--', alpha=0.5)
 
         # Layout adjustment
         plt.tight_layout()
@@ -503,8 +581,9 @@ if __name__ == '__main__':
 
     fn = '../ww_trained_model_7.pkl'
 
-    # coherence_results_ccn(fn)
+    coherence_results_ccn(fn)
+
     # bistable_perception(fn, nr_iterations=100)  # nr_iters * 10 = total seconds
     # plot_dom_alt()
 
-    wta_timecourse(fn)
+    # wta_timecourse(fn)

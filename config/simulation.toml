@@ -1,4 +1,4 @@
-time_step = 1e-3
+time_step = 1e-4
 
 [protocol]
 pre_stimulus_period = 0.5  # *1s

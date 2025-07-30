@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 
 from src.utils import *
-from src.xor_columns import ColumnsXOR  # to compare to
+# from src.xor_columns import ColumnsXOR  # to compare to
 
 
 class ColumnArea(torch.nn.Module):
@@ -30,17 +30,29 @@ class ColumnArea(torch.nn.Module):
         Initialize basic parameters for the columns.
         """
         # Basic parameters
-        self.background_drive = torch.tensor(column_parameters['background_drive'])
-        self.adaptation_strength = torch.tensor(column_parameters['adaptation_strength'])
+        self.register_buffer("background_drive", torch.tensor(column_parameters['background_drive'], dtype=torch.float32)) # device
+        self.register_buffer("adaptation_strength", torch.tensor(column_parameters['adaptation_strength'], dtype=torch.float32))  # device
 
         # Time constants and membrane resistance
         self.time_constants = column_parameters['time_constants']
-        self.synapse_time_constant  = torch.tensor(self.time_constants['synapse'])
-        self.membrane_time_constant = torch.tensor(self.time_constants['membrane'])
-        self.adapt_time_constant    = torch.tensor(self.time_constants['adaptation'])
+        self.register_buffer("synapse_time_constant", torch.tensor(self.time_constants['synapse'], dtype=torch.float32)) # device
+        self.register_buffer("membrane_time_constant", torch.tensor(self.time_constants['membrane'], dtype=torch.float32))  # device
+        self.register_buffer("adapt_time_constant", torch.tensor(self.time_constants['adaptation'], dtype=torch.float32))  # device
+        resistance = self.time_constants['membrane'] / column_parameters['capacitance']
+        self.register_buffer("resistance", torch.tensor(resistance, dtype=torch.float32))  # device
 
-        self.resistance = torch.tensor(self.time_constants['membrane']
-                                       / column_parameters['capacitance'])
+        # # Basic parameters
+        # self.background_drive = torch.tensor(column_parameters['background_drive'])
+        # self.adaptation_strength = torch.tensor(column_parameters['adaptation_strength'])
+        #
+        # # Time constants and membrane resistance
+        # self.time_constants = column_parameters['time_constants']
+        # self.synapse_time_constant  = torch.tensor(self.time_constants['synapse'])
+        # self.membrane_time_constant = torch.tensor(self.time_constants['membrane'])
+        # self.adapt_time_constant    = torch.tensor(self.time_constants['adaptation'])
+        #
+        # self.resistance = torch.tensor(self.time_constants['membrane']
+        #                                / column_parameters['capacitance'])
 
     def _initilize_population_parameters(self, column_parameters):
         """
@@ -140,7 +152,9 @@ class ColumnArea(torch.nn.Module):
         Build recurrent, background, external, and feedforward weights from synapse counts and synaptic strengths.
         """
         self.recurrent_weights = self.recurrent_synapse_counts * self.recurrent_synaptic_strength
-        self.background_weights = self.background_synapse_counts * self.baseline_synaptic_strength
+        # self.background_weights = self.background_synapse_counts * self.baseline_synaptic_strength
+        background_weights = self.background_synapse_counts * self.baseline_synaptic_strength # device
+        self.register_buffer("background_weights", background_weights) # device
         self.feedforward_weights = self.feedforward_synapse_counts * self.baseline_synaptic_strength
 
     def _make_in_ex_masks(self, num_columns):
@@ -291,80 +305,6 @@ class ColumnAreaWTA(ColumnArea):
         return g
 
 
-# Example weights matrices
-#     def _initialize_ff_fb_weights(self):
-#         '''
-#         Initialize the feedforward/feedback weights as learnable weights.
-#         These connect areas to each other and allow information flow in both
-#         feedforward and feedback directions.
-#         '''
-#
-#         ff_weights = nn.ParameterList()
-#
-#         for area_idx, area in self.areas.items():
-#
-#             if area_idx == '0':   # first area receives input
-#                 size_source = self.nr_input_units  # nr of rows weights matrix
-#
-#                 ff_area_weights = torch.zeros((1, 8))
-#                 ff_area_weights[0, 2], ff_area_weights[0, 3] = 1.0, 1.0
-#
-#             else:  # for subsequent areas, check how many inputs from previous area
-#                 idx_prev_area = str(int(area_idx) - 1)
-#                 size_source = self.areas[idx_prev_area].num_columns  # nr of rows weights matrix
-#
-#                 ff_area_weights = torch.zeros((8, 8))
-#                 ff_area_weights[0, 2], ff_area_weights[0, 3], ff_area_weights[4, 2], ff_area_weights[4, 3] = 1.0, 1.0, 1.0, 1.0
-#
-#             size_target = area.num_columns  # nr of columns weights matrix
-#             ff_area_weights = torch.tile(ff_area_weights, (size_source, size_target))
-#             ff_weights.append(nn.Parameter(ff_area_weights))
-#
-#             # # Weight initialization should not be too small, otherwise no ff flow and no training possible
-#             # original_weights = area.feedforward_weights.clone().detach() * area.synapse_time_constant
-#             # std_W = area.synapse_time_constant
-#             #
-#             # for i in range(nr_ff_weights):
-#             #     rand_weights = abs(torch.normal(mean=original_weights, std=std_W))
-#             #     rand_weights_masked = rand_weights * torch.tile(self.input_target_mask, (area.num_columns,))
-#             #     blep = nn.Parameter(rand_weights_masked, requires_grad=True)
-#             #     ff_weights[area_idx].append(blep)
-#
-#         self.ff_weights = ff_weights
-#
-#     def compute_currents(self, ext_ff_rate, fr_per_area, t):
-#         '''
-#         Compute the current for each area separately. The total current
-#         consists of feedforward current (stimulus-driven and/or from other
-#         brain areas), background current and recurrent current.
-#         '''
-#         total_current = torch.Tensor()
-#
-#         for area_idx, area in self.areas.items():
-#
-#             # Compute feedforward current of each area, based on
-#             # area=0: external input or area>0: the previous area's firing rate
-#
-#             if area_idx == '0':
-#                 feedforward_current = torch.matmul(ext_ff_rate, self.ff_weights[int(area_idx)])
-#             elif area_idx > '0':  # subsequent areas receive previous area's firing rate
-#                 idx_prev_area = str(int(area_idx) - 1)
-#                 prev_area_fr = fr_per_area[idx_prev_area]
-#                 feedforward_current = torch.matmul(prev_area_fr, self.ff_weights[int(area_idx)])
-#             feedforward_current = torch.relu(feedforward_current)  # make sure ff_currents are never negative
-#
-#             # Background and recurrent current
-#             background_current = area.background_weights * area.background_drive
-#             recurrent_current = torch.matmul(area.recurrent_weights, fr_per_area[area_idx].flatten())   # recurrent input
-#
-#             # Total current of this area
-#             # Notice that ff is not scaled down by synapse time constant bc ff weights are already scaled down for training
-#             total_current_area = feedforward_current + (background_current + recurrent_current) * area.synapse_time_constant
-#
-#             total_current = torch.cat((total_current, total_current_area), dim=0)
-#         return total_current
-
-
 
 class ColumnNetwork(torch.nn.Module):
 
@@ -375,168 +315,219 @@ class ColumnNetwork(torch.nn.Module):
     only feedforward- and feedback connections are allowed.
     '''
 
-    def __init__(self, column_parameters, network_dict):
+    def __init__(self, model_parameters, network_dict, device):
         super().__init__()
 
         self.noise_type = "diagonal"  # sde params
         self.sde_type = "ito"
 
-        self._initialize_areas(column_parameters, network_dict)
+        self.device = device
+        self._initialize_areas(model_parameters, network_dict)
 
-        self.network_as_area = ColumnArea(column_parameters, 'mt', sum(network_dict['nr_columns_per_area']))
+        self.network_as_area = ColumnArea(model_parameters, 'mt', sum(network_dict['nr_columns_per_area']))
         self.nr_input_units = network_dict['nr_input_units']
         self.nr_columns_per_area = network_dict['nr_columns_per_area']
+        self.nr_areas = network_dict['nr_areas']
 
-        self._initialize_lateral_weights()
-        self._initialize_ff_fb_masks()
-        self._initialize_feedforward_weights()
-        self._initialize_feedback_weights()
-        self._initialize_output_weights()
+        self._initialize_masks(model_parameters)
+        self._initialize_lateral_weights(model_parameters)
+        self._initialize_feedforward_weights(model_parameters)
+        self._initialize_feedback_weights(model_parameters)
+        self._initialize_intput_weights(model_parameters)
+        self._initialize_output_weights(model_parameters)
 
-    def _initialize_areas(self, column_parameters, network_dict):
+    def _initialize_areas(self, model_parameters, network_dict):
+        '''
+        Initialize the areas as ColumnArea objects.
+        '''
         self.areas = nn.ModuleDict({})
         for area_idx in range(network_dict['nr_areas']):
 
             area_name = network_dict['areas'][area_idx]
             num_columns = network_dict['nr_columns_per_area'][area_idx]
 
-            area = ColumnArea(column_parameters, area_name, num_columns)
+            area = ColumnArea(model_parameters, area_name, num_columns)
+            area = area.to(self.device)
             self.areas[str(area_idx)] = area
 
-    def _initialize_lateral_weights(self):
+    def _initialize_masks(self, model_parameters):
         '''
-        Sets external recurrent weights of all areas to zero, to make sure
-        all lateral connectivity is removed.
+        Binary masks to select only legal connections between populations,
+        based on the nature of the connection.
         '''
-        for idx, area in self.areas.items():
-            recurr_weights = area.recurrent_weights
-            area.recurrent_weights = recurr_weights * area.internal_mask  # set any existing external connectivity to zero
+        masks = model_parameters['connection_masks']
 
-            lateral_weights = torch.zeros((16, 16))
-            lateral_weights[1, 8], lateral_weights[9, 0] = 0.01, 0.01  # initialize the lateral weights
-            lateral_weights = torch.tile(lateral_weights, (area.num_columns, area.num_columns))
-            lateral_weights = lateral_weights[:area.num_populations, :area.num_populations]
+        self.input_mask = torch.tensor(masks['input'])
+        self.output_mask = torch.tensor(masks['output'])
+        self.feedforward_mask = torch.tensor(masks['feedforward'])
+        self.feedback_mask = torch.tensor(masks['feedback'])
+        self.lateral_mask = torch.tensor(masks['lateral'])
 
-            std_W = area.synapse_time_constant
-            rand_weights = abs(torch.normal(mean=lateral_weights, std=std_W))
-            rand_weights *= (lateral_weights * 100.)  # *100 to use it as a 1.0 mask
-
-            area.lateral_weights = nn.Parameter(rand_weights, requires_grad=True)
-
-    def _initialize_ff_fb_masks(self):
+    def _initialize_lateral_weights(self, model_parameters):
         '''
-        Specify from which population the feedforward flow comes
-        (source) and which population it targets (target).
+        Random initialization of lateral weights between columns,
+        for each area separately.
         '''
-        # Source of ff is L2/3e (and L5e)
-        ff_source_mask = torch.tensor([1., 0., 0., 0., 1., 0., 0., 0.])
-        self.ff_source_mask = ff_source_mask
 
-        # Target of ff is L4e and L4i
-        ff_target_mask = torch.tensor([0., 0., 1., 1., 0., 0., 0., 0.])
-        self.ff_target_mask = ff_target_mask
-
-        # Source of fb is L5e and L6e
-        fb_source_mask = torch.tensor([0., 0., 0., 0., 1., 0., 1., 0.])
-        self.fb_source_mask = fb_source_mask
-
-        # Target of fb is L2/3, L5, L6
-        fb_target_mask = torch.tensor([1., 1., 0., 0., 1., 1., 1., 1.])
-        self.fb_target_mask = fb_target_mask
-
-    def _initialize_feedforward_weights(self):
-        '''
-        Initialize the feedforward weights as learnable weights. Both target
-        and source weights are initialized.
-        '''
-        feedforward_target_weights = nn.ModuleDict({})
-        feedforward_source_weights = nn.ModuleDict({})
+        self.lateral_scale = 0.1
 
         for area_idx, area in self.areas.items():
+            area.inner_weights = area.recurrent_weights * area.internal_mask  # set any existing external connectivity to zero
+            area.inner_weights = area.inner_weights.to(self.device)
 
-            feedforward_target_weights[area_idx] = nn.ParameterList()
-            feedforward_source_weights[area_idx] = nn.ParameterList()
+            area.inner_values = area.inner_weights[area.internal_mask.bool()].clone()
+            area.inner_indices = area.internal_mask.nonzero(as_tuple=False).T  # shape: [2, num_connections]
+            area.inner_size = tuple(area.internal_mask.shape)  # needed for sparse shape
 
-            if area_idx == '0':   # if first area, check how many external inputs it receives
-                nr_ff_weights = self.nr_input_units
-            else:               # for subsequent areas, check how many inputs from previous area
-                key_prev_area = str(int(area_idx)-1)
-                nr_ff_weights = self.areas[key_prev_area].num_columns
+            # Reshape weight initialization
+            lateral_init = torch.tensor(model_parameters['connection_inits']['lateral'])
+            lateral_init = torch.tile(lateral_init, (area.num_columns, area.num_columns))
 
-            # Weight initialization should not be too small, otherwise no ff flow and no training possible
-            original_target_weights = area.feedforward_weights.clone().detach() * area.synapse_time_constant
-            init_source_weights = torch.tensor([1.0, 0.0, 0.0, 0.0, 0.15, 0.0, 0.0, 0.0])  # no tiling, cuz will be applied to only one column of prev area
-            std_W = area.synapse_time_constant
+            # Reshape mask and store in area
+            lateral_mask = torch.tile(self.lateral_mask, (area.num_columns, area.num_columns)) * area.external_mask
+            area.lateral_mask = lateral_mask
 
-            for i in range(nr_ff_weights):
+            # Randomly initialize lateral weights and store in area as learnable param
+            std_W = area.synapse_time_constant.item() # 10.0
+            rand_weights = abs(torch.normal(mean=lateral_init, std=std_W)) * self.lateral_scale
+            rand_weights *= 0.1  # SCALE DOWN
+            rand_weights *= area.lateral_mask
+            rand_weights *= area.external_mask
+            rand_weights = rand_weights.to(self.device)
 
-                rand_weights_target = abs(torch.normal(mean=original_target_weights, std=std_W))
-                rand_weights_target = rand_weights_target * torch.tile(self.ff_target_mask, (area.num_columns,))
-                ff_weights_target = nn.Parameter(rand_weights_target, requires_grad=True)
-                feedforward_target_weights[area_idx].append(ff_weights_target)
+            # Sparse matrices
+            # area.lateral_indices = area.lateral_mask.nonzero(as_tuple=False).T  # shape: [2, num_connections]
+            # area.lateral_size = tuple(area.lateral_mask.shape)  # needed for sparse shape
+            # sparse_values = rand_weights[area.lateral_mask.bool()].clone()
 
-                rand_weights_source = abs(torch.normal(mean=init_source_weights, std=std_W))
-                rand_weights_source = rand_weights_source * self.ff_source_mask
-                if area_idx == '0':  # the first area needs no source weights; but need to init to keep indexing
-                    ff_weights_source = nn.Parameter(rand_weights_source, requires_grad=False)
-                else:
-                    ff_weights_source = nn.Parameter(rand_weights_source, requires_grad=True)
-                feedforward_source_weights[area_idx].append(ff_weights_source)
+            if area.num_columns > 1:
+                # area.lateral_values = nn.Parameter(sparse_values, requires_grad=True)
+                area.lateral_weights = nn.Parameter(rand_weights, requires_grad=True)  # NO LEARNABLE LATERAL WEIGHTS
+            else:  # area with only one column should have no trainable lateral connections
+                # area.lateral_values = nn.Parameter(sparse_values, requires_grad=False)
+                area.lateral_weights = nn.Parameter(rand_weights, requires_grad=False)
 
-        self.feedforward_target_weights = feedforward_target_weights
-        self.feedforward_source_weights = feedforward_source_weights
-
-    def _initialize_feedback_weights(self):
+    def _initialize_feedforward_weights(self, model_parameters):
         '''
-        Initialize the feedback weights as learnable weights. Both target
-        and source weights are initialized.
+        Initialize the feedforward weights between each set of areas as learnable weights.
+        Attach the weights to the target area.
         '''
-        feedback_target_weights = nn.ModuleDict({})
-        feedback_source_weights = nn.ModuleDict({})
+
+        self.feedforward_scale = 0.001
 
         for area_idx, area in self.areas.items():
+            if area_idx != '0':  # first area gets no ff input
 
-            if int(area_idx) == (len(self.areas) - 1):  # skip last area
-                break
+                size_source = self.nr_columns_per_area[int(area_idx) - 1]
+                size_target = self.nr_columns_per_area[int(area_idx)]
 
-            feedback_target_weights[area_idx] = nn.ParameterList()
-            feedback_source_weights[area_idx] = nn.ParameterList()
+                ff_init = torch.tensor(model_parameters['connection_inits']['feedforward'])
+                ff_init = torch.tile(ff_init, (size_target, size_source))
+                ff_init /= area.num_columns  # SCALE DOWN
 
-            key_next_area = str(int(area_idx) + 1)
-            nr_fb_weights = self.areas[key_next_area].num_columns
+                std_W = area.synapse_time_constant.item() # 1.0 #
+                rand_ff_weights = abs(torch.normal(mean=ff_init, std=std_W)) * self.feedforward_scale
 
-            # Disclaimer: I really don't know what I'm doing here in terms of initialization (which layers, exci/inhi or magnitude)
-            # Target weights need to be in range ~25,16 (range original feedforward weights)
-            init_target_weights = torch.tile(torch.tensor([5.0, 0.1, 0.0, 0.0, 5.0, 0.1, 5.0, 0.1]), (area.num_columns,)) * area.synapse_time_constant
-            init_source_weights = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.1, 0.0, 0.1, 0.0])  # no tiling, cuz will be applied to only one column of prev area
-            std_W = area.synapse_time_constant
+                ff_mask = torch.tile(self.feedforward_mask, (size_target, size_source))
+                area.feedforward_mask = ff_mask
 
-            for i in range(nr_fb_weights):
-                rand_weights_target = abs(torch.normal(mean=init_target_weights, std=std_W))
-                rand_weights_target = rand_weights_target * torch.tile(self.fb_target_mask, (area.num_columns,))
-                fb_weights_target = nn.Parameter(rand_weights_target, requires_grad=True)
-                feedback_target_weights[area_idx].append(fb_weights_target)
+                # Sparse matrices
+                # indices = ff_mask.nonzero(as_tuple=False).T  # shape: [2, num_connections]
+                # sparse_values = rand_ff_weights[ff_mask.bool()].clone()
 
-                rand_weights_source = abs(torch.normal(mean=init_source_weights, std=std_W))
-                rand_weights_source = rand_weights_source * self.fb_source_mask
-                fb_weights_source = nn.Parameter(rand_weights_source, requires_grad=True)
-                feedback_source_weights[area_idx].append(fb_weights_source)
+                # area.feedforward_values = nn.Parameter(sparse_values, requires_grad=True)
+                # area.feedforward_indices = indices
+                # area.feedforward_size = tuple(ff_mask.shape)  # needed for sparse shape
 
-        self.feedback_target_weights = feedback_target_weights
-        self.feedback_source_weights = feedback_source_weights
+                # Non-sparse matrices
+                rand_ff_weights = rand_ff_weights * ff_mask
+                area.feedforward_weights = nn.Parameter(rand_ff_weights, requires_grad=True)
 
-    def _initialize_output_weights(self):
+    def _initialize_feedback_weights(self, model_parameters):
+        '''
+        Initialize the feedback weights between each set of areas as learnable weights.
+        Attach the weights to the target area.
+        '''
+
+        self.feedback_scale = 0.1
+
+        for area_idx, area in self.areas.items():
+            if int(area_idx) != (len(self.areas) - 1):  # last area gets no fb
+
+                size_source = self.nr_columns_per_area[int(area_idx) + 1]
+                size_target = self.nr_columns_per_area[int(area_idx)]
+
+                fb_init = torch.tensor(model_parameters['connection_inits']['feedback'])
+                fb_init = torch.tile(fb_init, (size_target, size_source))
+                fb_init *= 0.1  # SCALE DOWN
+
+                std_W = area.synapse_time_constant.item() # 5.0 #
+                rand_fb_weights = abs(torch.normal(mean=fb_init, std=std_W)) * self.feedback_scale
+
+                fb_mask = torch.tile(self.feedback_mask, (size_target, size_source))
+                area.feedback_mask = fb_mask
+
+                # Sparse matrices
+                # indices = fb_mask.nonzero(as_tuple=False).T  # shape: [2, num_connections]
+                # sparse_values = rand_fb_weights[fb_mask.bool()].clone()
+
+                # area.feedback_values = nn.Parameter(sparse_values, requires_grad=True)
+                # area.feedback_indices = indices
+                # area.feedback_size = tuple(fb_mask.shape)  # needed for sparse shape
+
+                # Non-sparse matrices
+                rand_fb_weights = rand_fb_weights * fb_mask
+                area.feedback_weights = nn.Parameter(rand_fb_weights, requires_grad=True)  # NOT TRAINING FEEDBACK RIGHT NOW
+
+    def _initialize_intput_weights(self, model_parameters):
+        '''
+        Initialize learnable input weights to weight the input going into the first area.
+        '''
+        first_area = self.areas['0']
+
+        size_source = self.nr_input_units
+        size_target = first_area.num_columns
+
+        input_init = torch.tensor(model_parameters['connection_inits']['input'])
+        input_init = torch.tile(input_init, (size_target, size_source))
+        input_init *= 0.5  # SCALE DOWN
+
+        std_W = first_area.synapse_time_constant.item() # 1.0 #
+        rand_input_weights = abs(torch.normal(mean=input_init, std=std_W)) * self.feedforward_scale
+
+        input_mask = torch.tile(self.input_mask, (size_target, size_source))
+        first_area.input_mask = input_mask
+
+        # # Sparse matrices
+        # indices = input_mask.nonzero(as_tuple=False).T  # shape: [2, num_connections]
+        # sparse_values = rand_input_weights[input_mask.bool()].clone()
+        #
+        # first_area.input_values = nn.Parameter(sparse_values, requires_grad=True)
+        # first_area.input_indices = indices
+        # first_area.input_size = tuple(input_mask.shape)  # needed for sparse shape
+
+        # Non-sparse matrices
+        rand_input_weights = rand_input_weights * input_mask
+        first_area.input_weights = nn.Parameter(rand_input_weights, requires_grad=True)
+
+    def _initialize_output_weights(self, model_parameters):
         '''
         Initialize learnable output weights that can be used to read out
         the firing rates of the final column as a means of classification.
         '''
-        key_last_area = str(len(self.areas)-1)
-        nr_pops_final_area = self.areas[key_last_area].num_populations
-        output_weights = torch.zeros(nr_pops_final_area)
-        output_weights[0], output_weights[4] = 1.0, 0.05
+        self.output_scale = 0.01
 
-        std_W = self.network_as_area.synapse_time_constant
-        rand_output_weights = abs(torch.normal(mean=output_weights, std=std_W))
+        key_last_area = str(len(self.areas)-1)
+        size_source = self.areas[key_last_area].num_columns
+
+        output_init = torch.tensor(model_parameters['connection_inits']['output'])
+        output_init = torch.tile(output_init, (size_source,))
+
+        std_W = 0.001 # self.network_as_area.synapse_time_constant.item()
+        rand_output_weights = abs(torch.normal(mean=output_init, std=std_W))
+        rand_output_weights *= rand_output_weights * torch.tile(self.output_mask, (size_source,))
+        rand_output_weights *= self.output_scale
+
         self.output_weights = nn.Parameter(rand_output_weights, requires_grad=True)
 
     def set_time_vec(self, time_vec):
@@ -562,8 +553,8 @@ class ColumnNetwork(torch.nn.Module):
         idx = 0
         for area_idx, area in self.areas.items():
             fr_area = firing_rate[idx : idx + area.num_populations]
-            fr_area_reshape = fr_area.reshape(area.num_columns, 8)
-            fr_per_area[area_idx] = fr_area_reshape
+            # fr_area_reshape = fr_area.reshape(area.num_columns, 8)  # not necessary for matmul
+            fr_per_area[area_idx] = fr_area
             idx = idx + area.num_populations
         return fr_per_area
 
@@ -573,43 +564,50 @@ class ColumnNetwork(torch.nn.Module):
         consists of feedforward current (stimulus-driven and/or from other
         brain areas), background current and recurrent current.
         '''
-        total_current = torch.Tensor()
+        total_current = torch.Tensor().to(self.device)
 
         for area_idx, area in self.areas.items():
 
             # Compute feedforward current of each area, based on
             # area=0: external input or area>0: the previous area's firing rate
-            feedforward_current = torch.zeros(area.num_populations)
-
-            for ff_idx, ff_target_weight in enumerate(self.feedforward_target_weights[area_idx]):
-            # Multiply each input with each corresponding ff weights
-                if area_idx == '0':  # first area gets external input
-                    feedforward_current += ext_ff_rate[ff_idx] * ff_target_weight
-
-                elif area_idx > '0':  # subsequent areas receive previous area's firing rate
-                    key_prev_area = str(int(area_idx) - 1)
-                    prev_area_fr = fr_per_area[key_prev_area][ff_idx] * self.feedforward_source_weights[area_idx][ff_idx]
-                    prev_area_fr_sum = torch.sum(prev_area_fr)
-                    feedforward_current += prev_area_fr_sum * ff_target_weight
+            feedforward_current = torch.zeros(area.num_populations).to(self.device)
+            if area_idx == '0':
+                # input_weights = torch.sparse_coo_tensor(area.input_indices, area.input_values, size=area.input_size)
+                # feedforward_current = torch.sparse.mm(input_weights, ext_ff_rate.unsqueeze(1)).squeeze(1)
+                feedforward_current = torch.matmul(area.input_weights, ext_ff_rate)
+            elif area_idx > '0':  # subsequent areas receive previous area's firing rate
+                idx_prev_area = str(int(area_idx) - 1)
+                prev_area_fr = fr_per_area[idx_prev_area]
+                # feedforward_weights = torch.sparse_coo_tensor(area.feedforward_indices, area.feedforward_values, size=area.feedforward_size)
+                # feedforward_current = torch.sparse.mm(feedforward_weights, prev_area_fr.unsqueeze(1)).squeeze(1)
+                feedforward_current = torch.matmul(area.feedforward_weights, prev_area_fr)
 
             # Compute feedback current
-            feedback_current = torch.zeros(area.num_populations)
-
+            feedback_current = torch.zeros(area.num_populations).to(self.device)
             if int(area_idx) < (len(self.areas) - 1):  # only last area has no fb weights, so skip that one
-                for fb_idx, fb_target_weight in enumerate(self.feedback_target_weights[area_idx]):
-                    key_next_area = str(int(area_idx) + 1)
-                    next_area_fr = fr_per_area[key_next_area][fb_idx] * self.feedback_source_weights[area_idx][fb_idx]
-                    next_area_fr_sum = torch.sum(next_area_fr)
-                    feedback_current += next_area_fr_sum * fb_target_weight
+                key_next_area = str(int(area_idx) + 1)
+                next_area_fr = fr_per_area[key_next_area]
+                # feedback_weights = torch.sparse_coo_tensor(area.feedback_indices, area.feedback_values, size=area.feedback_size)
+                # feedback_current = torch.sparse.mm(feedback_weights, next_area_fr.unsqueeze(1)).squeeze(1)
+                feedback_current = torch.matmul(area.feedback_weights, next_area_fr)
 
-            # Background and recurrent current
+            # Compute recurrent current
+            # recurrent_weights = torch.sparse_coo_tensor(area.inner_indices, area.inner_values, size=area.inner_size)
+            # lateral_weights = torch.sparse_coo_tensor(area.lateral_indices, area.lateral_values, size=area.lateral_size)
+            # recurrent_current = torch.sparse.mm(inner_weights, fr_per_area[area_idx].unsqueeze(1)).squeeze(1)
+            # lateral_current = torch.sparse.mm(lateral_weights, fr_per_area[area_idx].unsqueeze(1)).squeeze(1)
+            recurrent_current = torch.matmul(area.inner_weights, fr_per_area[area_idx])
+            lateral_current = torch.matmul(area.lateral_weights, fr_per_area[area_idx])
+
+            # Background current
             background_current = area.background_weights * area.background_drive
-            recurrent_current = torch.matmul((area.recurrent_weights + area.lateral_weights), fr_per_area[area_idx].flatten())
 
             # Total current of this area
-            # Notice that ff an fb are not scaled down by synapse time constant bc they are already scaled down for training
-            total_current_area = feedforward_current + feedback_current + (background_current + recurrent_current) * area.synapse_time_constant
-
+            total_current_area = ((feedforward_current / self.feedforward_scale) +
+                                  (feedback_current / self.feedback_scale) +
+                                  (lateral_current / self.lateral_scale) +
+                                  recurrent_current +
+                                  background_current) * area.synapse_time_constant
             total_current = torch.cat((total_current, total_current_area), dim=0)
         return total_current
 
@@ -632,7 +630,6 @@ class ColumnNetwork(torch.nn.Module):
 
         # Get current stimulus (external ff rate) based on current time t and the time vector time_vec
         ext_ff_rate = torch_interp(t, self.time_vec, self.stim)
-        ext_ff_rate = ext_ff_rate * 20.  # input in 1Hz range, so scale up
 
         # Compute input current
         total_current = self.compute_currents(ext_ff_rate, fr_per_area, t)
@@ -665,10 +662,9 @@ class ColumnNetwork(torch.nn.Module):
         return state.unsqueeze(0)
 
     def diffusion(self, t, y):
-        # Only membrane gets noise, adaptation is deterministic
         noise_std = 3.0
         g = torch.zeros_like(y)
         split = (len(y[0]) // 3) * 2
-        g[:, split:] = noise_std  # only firing rates (after split)
+        g[:, :] = noise_std
         return g
 

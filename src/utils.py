@@ -12,26 +12,19 @@ def compute_firing_rate_torch(x):
     '''
     a, b, d = 48.0, 981.0, 0.0089  # gain, threshold, noise factor
     x_nom = a * x - b
-    # exp_input = -d * x_nom
-    exp_input = soft_clamp(-d * x_nom)
+    exp_input = -d * x_nom
+    exp_input = soft_clamp(exp_input)
     exp_term = torch.exp(exp_input)
 
     denom = 1 - exp_term
     x_activ = x_nom / denom
-
-
-    # if (abs(exp_input) > 45).any():   #  or (exp_input < -30).any():
-    #     pprint(x_nom)
-    #     pprint(exp_input)
-    #     pprint(exp_term)
-    #     pprint(x_activ)
-    #     blep = 0
 
     if torch.isnan(x_activ).any():
         print("⚠️ NaN detected in firing rate computation!")
         print(f"x_nom max: {x_nom.max().item()}, min: {x_nom.min().item()}")
         print(f"exp_input max: {exp_input.max().item()}, min: {exp_input.min().item()}")
         print(f"exp_term max: {exp_term.max().item()}, min: {exp_term.min().item()}")
+        print(f"exp_term argmax: {exp_term.argmax().item()}, argmin: {exp_term.argmin().item()}")
 
     return x_activ
 

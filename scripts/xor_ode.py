@@ -9,6 +9,9 @@ from src.utils import *
 from torchsde import sdeint, sdeint_adjoint
 from torchdiffeq import odeint, odeint_adjoint
 
+import matplotlib as mpl
+mpl.rcParams['font.family'] = 'Arial'
+
 
 
 class ColumnNetworkXOR(torch.nn.Module):
@@ -79,10 +82,19 @@ class ColumnNetworkXOR(torch.nn.Module):
         feedforward_target_weights['0'].append(torch.tensor([0.0000, 0.0000, 0.0140, 0.0036, 0.0000, 0.0000, 0.0000, 0.0000,
                                                              0.0000, 0.0000, 0.0131, 0.0066, 0.0000, 0.0000, 0.0000, 0.0000]))
         feedforward_target_weights['0'].append(torch.tensor([0.0000, 0.0000, 0.0162, 0.0063, 0.0000, 0.0000, 0.0000, 0.0000,
-                                                             0.0000, 0.0000, 0.0046, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000]))
+                                                             0.0000, 0.0000, 0.0146, 0.0076, 0.0000, 0.0000, 0.0000, 0.0000]))
         feedforward_target_weights['1'] = nn.ParameterList()
         feedforward_target_weights['1'].append(torch.tensor([0.0000, 0.0000, 0.0157, 0.0044, 0.0000, 0.0000, 0.0000, 0.0000]))
         feedforward_target_weights['1'].append(torch.tensor([0.0000, 0.0000, 0.0116, 0.0094, 0.0000, 0.0000, 0.0000, 0.0000]))
+
+        # feedforward_target_weights['0'] = nn.ParameterList()
+        # feedforward_target_weights['0'].append(torch.tensor([0.0000, 0.0000, 0.0140, 0.0036, 0.0000, 0.0000, 0.0000, 0.0000,
+        #                                                      0.0000, 0.0000, 0.0131, 0.0066, 0.0000, 0.0000, 0.0000, 0.0000]))
+        # feedforward_target_weights['0'].append(torch.tensor([0.0000, 0.0000, 0.0162, 0.0063, 0.0000, 0.0000, 0.0000, 0.0000,
+        #                                                      0.0000, 0.0000, 0.0046, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000]))
+        # feedforward_target_weights['1'] = nn.ParameterList()
+        # feedforward_target_weights['1'].append(torch.tensor([0.0000, 0.0000, 0.0157, 0.0044, 0.0000, 0.0000, 0.0000, 0.0000]))
+        # feedforward_target_weights['1'].append(torch.tensor([0.0000, 0.0000, 0.0116, 0.0094, 0.0000, 0.0000, 0.0000, 0.0000]))
 
         # feedforward_target_weights['0'] = nn.ParameterList()
         # feedforward_target_weights['0'].append(torch.tensor([0.0000, 0.0000, 0.0138, 0.0072, 0.0000, 0.0000, 0.0000, 0.0000,
@@ -215,6 +227,7 @@ class ColumnNetworkXOR(torch.nn.Module):
         membrane_potential, adaptation = state[:mem_adap_split], state[mem_adap_split:adap_rate_split]
 
         firing_rate = compute_firing_rate_torch(membrane_potential - adaptation)
+        # firing_rate = 500. * torch.sigmoid(membrane_potential - adaptation)
 
         # Partition firing rate per area
         fr_per_area = self.partition_firing_rates(firing_rate)
@@ -245,6 +258,8 @@ class ColumnNetworkXOR(torch.nn.Module):
         g = torch.zeros_like(y)
         split = (len(y[0]) // 3)
         g[:, :split] = noise_std  # membrane gets noise
+        # split = (len(y[0]) // 3) * 2
+        # g[:, split:] = noise_std
         return g
 
 
@@ -286,7 +301,7 @@ def vis_xor_results(firing_rates, stim, train_loss, iter1, iter2):
     plt.savefig('../results/png/{:02d}_{:1d}'.format(iter1+1, iter2))
     plt.close(fig)
 
-def vis_xor_results_layer5(firing_rates, network, stim, train_loss, iter1, iter2):
+def look_at_all_layers(firing_rates):
     '''
     Visualizes the training process of the XOR classification task. Plots the
     firing rates of column A, B and C and reports the training loss, the input
@@ -297,39 +312,43 @@ def vis_xor_results_layer5(firing_rates, network, stim, train_loss, iter1, iter2
 
     if not os.path.exists('../results/png'):
         os.makedirs('../results/png')
-    fig, axes = plt.subplots(1, 3, figsize=(12, 5))
+    fig, axes = plt.subplots(2, 4, figsize=(15, 8))
 
-    if stim[2] != stim[10]:
-        condition = "diff input - XOR"
-    else:
-        condition = "same input - AND"
+    axes[0, 0].plot(firing_rates[:, 0], label='col A')
+    axes[0, 0].plot(firing_rates[:, 8], label='col B')
+    axes[0, 0].set_title("Firing rates L2/3e in column A and B")
 
-    axes[0].plot(firing_rates[:, 0], label='col A')
-    axes[0].plot(firing_rates[:, 8], label='col B')
-    # axes[0].set_ylim(0.0, 3.0)
-    axes[0].set_title("Firing rates L2/3e in column A and B")
+    axes[1, 0].plot(firing_rates[:, 1], label='col A')
+    axes[1, 0].plot(firing_rates[:, 9], label='col B')
+    axes[1, 0].set_title("Firing rates L2/3i in column A and B")
 
-    axes[1].plot(firing_rates[:, 4], label='col A')
-    axes[1].plot(firing_rates[:, 12], label='col B')
-    # axes[1].set_ylim(0.0, 50.0)
-    axes[1].set_title("Firing rates L5e in column A and B")
+    axes[0, 1].plot(firing_rates[:, 2], label='col A')
+    axes[0, 1].plot(firing_rates[:, 10], label='col B')
+    axes[0, 1].set_title("Firing rates L4e in column A and B")
 
-    axes[2].plot(firing_rates[:, 16], label='col C L23')
-    axes[2].plot(firing_rates[:, 20], label='col C L5')
-    columnC_weighted = torch.sum(firing_rates[:, 16:] * network.ff_source_mask, dim=1)
-    axes[2].plot(columnC_weighted, label='col C mean')
-    # axes[2].set_ylim(0.0, 50.0)
-    axes[2].set_title("Firing rates in column C")
+    axes[1, 1].plot(firing_rates[:, 3], label='col A')
+    axes[1, 1].plot(firing_rates[:, 11], label='col B')
+    axes[1, 1].set_title("Firing rates L4i in column A and B")
 
-    fig.text(0.2, 0.03, f"Training loss: {train_loss:.2f}", ha='center', fontsize=10, fontweight='bold')
-    fig.text(0.5, 0.03, f"Input: {condition}", ha='center', fontsize=10, color='#ff7f0e', fontweight='bold')
-    fig.text(0.8, 0.03, f"Final FR: {columnC_weighted[-1]:.2f}", ha='center', fontsize=10, fontweight='bold')
+    axes[0, 2].plot(firing_rates[:, 4], label='col A')
+    axes[0, 2].plot(firing_rates[:, 12], label='col B')
+    axes[0, 2].set_title("Firing rates L5e in column A and B")
 
-    fig.legend(loc="upper left")
+    axes[1, 2].plot(firing_rates[:, 5], label='col A')
+    axes[1, 2].plot(firing_rates[:, 13], label='col B')
+    axes[1, 2].set_title("Firing rates L5i in column A and B")
+
+    axes[0, 3].plot(firing_rates[:, 6], label='col A')
+    axes[0, 3].plot(firing_rates[:, 14], label='col B')
+    axes[0, 3].set_title("Firing rates L6e in column A and B")
+
+    axes[1, 3].plot(firing_rates[:, 7], label='col A')
+    axes[1, 3].plot(firing_rates[:, 15], label='col B')
+    axes[1, 3].set_title("Firing rates L6i in column A and B")
+
     plt.tight_layout(pad=3.0)
     fig.subplots_adjust(left=0.15)
-    plt.savefig('../results/png/{:02d}_{:1d}'.format(iter1+1, iter2))
-    plt.close(fig)
+    plt.show()
 
 def make_stim(shuffle=True):
     '''
@@ -343,7 +362,7 @@ def make_stim(shuffle=True):
                                [1., 1.],
                                [0., 0.]])
     for i in range(4):
-        rand_stim = conditions[i] * torch.empty(1).uniform_(0.975, 1.025)
+        rand_stim = conditions[i] # * torch.empty(1).uniform_(0.975, 1.025)
         stim = create_feedforward_input(16, rand_stim[0], rand_stim[1])
         stims[i, :] = stim
 
@@ -542,52 +561,66 @@ def run_xor_timecourse():
     time_steps = int(sim_params['protocol']['stimulus_duration'] * 2 / sim_params['time_step'])
     time_vec = torch.linspace(0., time_steps * sim_params['time_step'], time_steps)
 
-    time_course = torch.Tensor(time_steps*4, 24)  # 4 stimuli * N time steps, 24 populations
-    stim_time_course = torch.Tensor(time_steps*4, 2)
+    time_course = torch.Tensor(time_steps*5, 24)  # 5 stimuli * N time steps, 24 populations
+    stim_time_course = torch.Tensor(time_steps*5, 2)
 
     four_stims = make_stim(shuffle=False)
+    five_stims = torch.concat([four_stims[3].unsqueeze(0), four_stims], dim=0)
 
     with torch.no_grad():
-        for stim_iter, stim in enumerate(four_stims):
-            stim_ode = prep_stim_ode(stim, time_vec)
+        for stim_iter, stim in enumerate(five_stims):
+            if stim_iter == 3:
+                stim_ode = prep_stim_ode(stim, time_vec)
 
-            network.time_vec = time_vec
-            network.stim = stim_ode
-            # ode_output = odeint(network, initial_state, time_vec)
-            ode_output = sdeint(network, initial_state, time_vec, names={'drift': 'forward', 'diffusion': 'diffusion'})
+                network.time_vec = time_vec
+                network.stim = stim_ode
+                # ode_output = odeint(network, initial_state, time_vec)
+                ode_output = sdeint(network, initial_state, time_vec, names={'drift': 'forward', 'diffusion': 'diffusion'})
 
-            initial_state = ode_output[-1, :, :]
+                if stim_iter == 3:
+                    look_at_all_layers(ode_output[:, 0, :24])
+                    look_at_all_layers(ode_output[:, 0, 48:])
 
-            # Store results
-            time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, :] = ode_output[:, 0, 48:]
-            stim_time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, 0] = stim_ode[:, 0, 2]  # idx2 = layer 4
-            stim_time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, 1] = stim_ode[:, 1, 2]
+                initial_state = ode_output[-1, :, :]
+
+                # Store results
+                time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, :] = ode_output[:, 0, 48:]
+                stim_time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, 0] = stim_ode[:, 0, 2]  # idx2 = layer 4
+                stim_time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, 1] = stim_ode[:, 1, 2]
+
+        # firing_rates = time_course[:, :]
+        # look_at_all_layers(firing_rates)
+
+        time_course = time_course[time_steps:]  # remove first resting state period
+        stim_time_course = stim_time_course[time_steps:]
+
+        time = np.arange(time_course.shape[0]) * sim_params['time_step']
 
         # Set the figure size (wide, not too tall)
-        fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 10), sharex=True, gridspec_kw={'height_ratios': [2.5, 2.5, 0.5, 0.5]})
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 10), sharex=True, gridspec_kw={'height_ratios': [2.5, 2.5, 0.75]})
 
-        ax1.plot(time_course[:, 0], label='Column A', color='deepskyblue', linewidth=2)
-        ax1.plot(time_course[:, 8], label='Column B', color='coral', linewidth=2)
+        ax1.plot(time, time_course[:, 0], label='Column A', color='royalblue', linewidth=2)
+        ax1.plot(time, time_course[:, 8], label='Column B', color='darkorange', linewidth=2)
         ax1.set_title('L2/3e firing rates in columns A & B', fontsize=14)
         ax1.set_ylabel('Firing Rate', fontsize=12)
         ax1.legend()
         ax1.grid(True, linestyle='--', alpha=0.5)
 
-        ax2.plot(time_course[:, 16], label='Column C', color='limegreen', linewidth=2)
+        ax2.plot(time, time_course[:, 16], label='Column C', color='forestgreen', linewidth=2)
+        ax2.plot(time, np.ones(len(time)), label='Classification label = 1', color='forestgreen', linewidth=2, linestyle='--')
+        # ax2.axhline(y=1, color='forestgreen', linestyle='--', linewidth=2)
         ax2.set_title('L2/3e firing rates in column C', fontsize=14)
         ax2.set_ylabel('Firing Rate', fontsize=12)
+        ax2.legend()
         ax2.grid(True, linestyle='--', alpha=0.5)
 
-        ax3.plot(stim_time_course[:, 0]*20., label='Input 1', color='black', linewidth=2)
-        ax3.set_title('Input 1', fontsize=14)
+        ax3.plot(time, stim_time_course[:, 0]*20., label='Input 1', color='black', linewidth=5)
+        ax3.plot(time, stim_time_course[:, 1]*20., label='Input 2', color='grey', linewidth=5, linestyle='--')
+        ax3.set_title('Inputs', fontsize=14)
+        ax3.set_xlabel('Time (s)', fontsize=12)
         ax3.set_ylabel('Hz', fontsize=12)
+        ax3.set_ylim(-5, 30)
         ax3.grid(True, linestyle='--', alpha=0.5)
-
-        ax4.plot(stim_time_course[:, 1]*20., label='Input 2', color='black', linewidth=2)
-        ax4.set_title('Input 2', fontsize=14)
-        ax4.set_xlabel('Time Step', fontsize=12)
-        ax4.set_ylabel('Hz', fontsize=12)
-        ax4.grid(True, linestyle='--', alpha=0.5)
 
         # Layout adjustment
         plt.tight_layout()
