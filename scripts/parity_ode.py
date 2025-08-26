@@ -26,44 +26,58 @@ from src.utils import *
 #     return train_set, test_set
 
 def make_ds(nr_inputs, nr_samples, batch_size):
+    all_combinations = torch.tensor([[0., 0., 0., 1.],
+                                     [0., 0., 1., 1.],
+                                     [0., 1., 1., 1.],
+                                     [1., 1., 1., 1.],
+                                    ], dtype=torch.float32)
+    all_combinations *= 15.
+    all_combinations = torch.tile(all_combinations, (batch_size//4, 1))
 
-    # Generate all binary combinations for the given input size
-    all_inputs = list(itertools.product([0, 1], repeat=nr_inputs))
+    train_set = all_combinations[torch.randperm(all_combinations.size(0))][:batch_size]
+    test_set = all_combinations[torch.randperm(all_combinations.size(0))][:1]
 
-    # Group by number of active units (Hamming weight)
-    hamming_groups = {i: [] for i in range(nr_inputs + 1)}
-    for vec in all_inputs:
-        hamming_groups[sum(vec)].append(vec)
+    return train_set, test_set
 
-    # Add [0, 0, ..., 0] case only once
-    dataset = [hamming_groups[0][0]]
-
-    # Number of groups to balance (excluding the zero case)
-    num_active_groups = nr_inputs
-    samples_per_group = (batch_size - 1) // num_active_groups
-
-    for h in range(1, nr_inputs + 1):
-        group = hamming_groups[h]
-        for _ in range(samples_per_group):
-            sample = random.choice(group)
-            dataset.append(sample)
-
-    # Pad to reach desired batch size
-    while len(dataset) < batch_size:
-        dataset.append(random.choice(hamming_groups[nr_inputs]))
-
-    # Shuffle
-    random.shuffle(dataset)
-
-    # Convert to tensor and scale inputs to 0–15
-    X = torch.tensor(dataset, dtype=torch.float32) * 15.0
-    y = (X.sum(dim=1) / 15 % 2).long()  # parity of active units
-
-    # # Train/test split
-    # X_train, X_test, y_train, y_test = train_test_split(
-    #     X, y, test_size=test_size, stratify=y, random_state=42
-    # )
-    return X, y
+# def make_ds(nr_inputs, nr_samples, batch_size):
+#
+#     # Generate all binary combinations for the given input size
+#     all_inputs = list(itertools.product([0, 1], repeat=nr_inputs))
+#
+#     # Group by number of active units (Hamming weight)
+#     hamming_groups = {i: [] for i in range(nr_inputs + 1)}
+#     for vec in all_inputs:
+#         hamming_groups[sum(vec)].append(vec)
+#
+#     # Add [0, 0, ..., 0] case only once
+#     dataset = [hamming_groups[0][0]]
+#
+#     # Number of groups to balance (excluding the zero case)
+#     num_active_groups = nr_inputs
+#     samples_per_group = (batch_size - 1) // num_active_groups
+#
+#     for h in range(1, nr_inputs + 1):
+#         group = hamming_groups[h]
+#         for _ in range(samples_per_group):
+#             sample = random.choice(group)
+#             dataset.append(sample)
+#
+#     # Pad to reach desired batch size
+#     while len(dataset) < batch_size:
+#         dataset.append(random.choice(hamming_groups[nr_inputs]))
+#
+#     # Shuffle
+#     random.shuffle(dataset)
+#
+#     # Convert to tensor and scale inputs to 0–15
+#     X = torch.tensor(dataset, dtype=torch.float32) * 15.0
+#     y = (X.sum(dim=1) / 15 % 2).long()  # parity of active units
+#
+#     # # Train/test split
+#     # X_train, X_test, y_train, y_test = train_test_split(
+#     #     X, y, test_size=test_size, stratify=y, random_state=42
+#     # )
+#     return X, y
 
 
 def prep_stim_ode(stim_raw, time_vec, num_columns):
@@ -116,12 +130,12 @@ def init_network(device):
     return network, time_vec, initial_state
 
 
-def visualize_results(network, firing_rates, stims, loss, train_iter):
+def visualize_results(network, firing_rates, stims, loss, train_iter, batch_size):
 
     if not os.path.exists('../results/png'):
         os.makedirs('../results/png')
 
-    nr_samples = 16  # how many to visualize
+    nr_samples = batch_size  # how many to visualize
 
     for i in range(nr_samples):
         fig, axes = plt.subplots(2, 3, figsize=(13, 7))
@@ -159,6 +173,28 @@ def visualize_results(network, firing_rates, stims, loss, train_iter):
         plt.tight_layout(pad=3.0)
         fig.subplots_adjust(left=0.15)
         plt.savefig('../results/png/firing_rates_{:02d}_{:1d}'.format(train_iter + 1, i))
+        plt.close(fig)
+
+        # Also plot the first eight columns
+        fig, axes = plt.subplots(2, 4, figsize=(13, 7))
+
+        fig.text(0.2, 0.03, f"Training loss: {loss:.2f}", ha='center', fontsize=10, fontweight='bold')
+        fig.text(0.5, 0.03, f"Input: {stims[i]}", ha='center', fontsize=10, color='#ff7f0e', fontweight='bold')
+        fig.text(0.8, 0.03, f"Final FR: {final_column[-1]:.2f}", ha='center', fontsize=10, fontweight='bold')
+
+        col_indices = [[0, 8, 16, 24], [32, 40, 48, 56]]
+
+        for idx_1 in [0, 1]:
+            for idx_2 in [0, 1, 2, 3]:
+
+                idx_col = 208 + col_indices[idx_1][idx_2]  # membrane,adap + idx column
+                axes[idx_1, idx_2].plot(firing_rates[i, :, 0, idx_col + 0].detach().numpy(), label='L23e')
+                axes[idx_1, idx_2].plot(firing_rates[i, :, 0, idx_col + 4].detach().numpy() * 0.1, label='L5e')
+                axes[idx_1, idx_2].plot(firing_rates[i, :, 0, idx_col + 6].detach().numpy(), label='L6e')
+
+        plt.tight_layout(pad=3.0)
+        fig.subplots_adjust(left=0.15)
+        plt.savefig('../results/png/firing_rates_first8_{:02d}_{:1d}'.format(train_iter + 1, i))
         plt.close(fig)
 
 
@@ -203,23 +239,24 @@ def mask_weights(network):
     for area_idx in range(network.nr_areas - 1):  # lateral weights, skip last
         network.areas[str(area_idx)].lateral_weights.grad *= network.areas[str(area_idx)].lateral_mask
 
-    for area_idx in range(network.nr_areas - 1):  # feedback weights, skip last
-        network.areas[str(area_idx)].feedback_weights.grad *= network.areas[str(area_idx)].feedback_mask
+    # for area_idx in range(network.nr_areas - 1):  # feedback weights, skip last
+    #     network.areas[str(area_idx)].feedback_weights.grad *= network.areas[str(area_idx)].feedback_mask
 
 
 def train_parity_ode(nr_inputs, nr_samples, batch_size, device):
+    train_set, _ = make_ds(nr_inputs, nr_samples, batch_size)
 
     network, time_vec, initial_state = init_network(device)
     num_populations = network.network_as_area.num_populations
 
+    # with open('../results/4_1600_lat_target10_largerffweights/parity_pre_training.pkl', 'rb') as f:
+    #     network = pickle.load(f)
+
     with open('../parity_pre_training.pkl', 'wb') as f:
         pickle.dump(network, f)
 
-    optimizer = torch.optim.RMSprop(network.parameters(), lr=1e-4, alpha=0.95)
-
-    # for name, param in network.named_parameters():
-    #     print(name)
-    #     # print(param)
+    # optimizer = torch.optim.RMSprop(network.parameters(), lr=1e-4, alpha=0.95)  # alpha weights previous losses
+    optimizer = torch.optim.Adam(network.parameters(), lr=1e-4, betas=(0.9, 0.999), eps=1e-08)
 
     nr_batches = int(nr_samples/batch_size)
 
@@ -250,17 +287,25 @@ def train_parity_ode(nr_inputs, nr_samples, batch_size, device):
             # for i in range(104):
             #     print(i)
             #     # plt.plot(ode_output[:, :, -8].detach().numpy())
-            #     # plt.plot(ode_output[:, :, 64+0+i].detach().numpy())
+            #     plt.plot(ode_output[:, :, i].detach().numpy())
+            #     plt.show()
+            #     plt.plot(ode_output[:, :, 64+104+i].detach().numpy())
+            #     plt.show()
             #     plt.plot(ode_output[:, :, 64+208+i].detach().numpy())
             #     plt.show()
 
             batch_output[itr, :, :, :] = ode_output
 
         # Compute loss and update weights
-        final_fr = batch_output[:, -1, 0, -8:]  # final firing rate of output column
-        final_fr_summed = torch.sum((final_fr * network.output_weights) / network.output_scale , dim=-1)
+        split = network.network_as_area.num_populations
+        firing_rates = compute_firing_rate_torch(batch_output[:, :, :, :split] - batch_output[:, :, :, split:(split*2)])
+        final_fr = firing_rates[:, -100:, 0, -8:]
+        # final_fr = batch_output[:, -100:, 0, -8:]  # final firing rates of output column
+        final_fr_mean = torch.mean(final_fr, dim=1)  # mean over last 100 firing rates
+        final_fr_summed = torch.sum((final_fr_mean * network.output_weights) / network.output_scale , dim=-1)
 
         parity_targets = (train_set.sum(dim=1) % 30 == 0).float()
+        # parity_targets = (train_set.sum(dim=1) < 40).float()
         parity_targets = parity_targets * 20.
 
         parity_targets = parity_targets.to(device).to(torch.float32)
@@ -287,15 +332,17 @@ def train_parity_ode(nr_inputs, nr_samples, batch_size, device):
         optimizer.step()
 
         for name, param in network.named_parameters():
-            param.data.clamp_(min=0.0)  # weights can not be negative
+            if 'lateral' in name:
+                param.data.clamp_(max=0.0)  # weights can not be positive
+            if 'lateral' not in name:
+                param.data.clamp_(min=0.0)  # weights can not be negative
             if 'output' in name:
                 param.data.clamp_(min=0.0, max=network.output_scale)
 
         with torch.no_grad():
-            visualize_results(network, batch_output, train_set, loss.item(), batch_itr)
-            visualize_weights(network, batch_itr)
-
             if batch_itr % 5 == 0:
+                visualize_results(network, batch_output, train_set, loss.item(), batch_itr, batch_size)
+                visualize_weights(network, batch_itr)
                 with open('../parity_post_training.pkl', 'wb') as f:
                     pickle.dump(network, f)
 
@@ -305,7 +352,7 @@ def train_parity_ode(nr_inputs, nr_samples, batch_size, device):
 if __name__ == '__main__':
 
     nr_inputs = 4 # 16 combinations
-    nr_samples = 1600
+    nr_samples = 3200
     batch_size = 16
     # device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     device = torch.device("cpu")

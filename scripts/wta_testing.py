@@ -551,39 +551,49 @@ def wta_timecourse(fn):
 
         time = np.arange(time_course.shape[0]) * dt
 
+        plt.rcParams.update({
+            'axes.titlesize': 28,  # Title size
+            'axes.labelsize': 24,  # X and Y label size
+            'xtick.labelsize': 20,  # X tick label size
+            'ytick.labelsize': 20,  # Y tick label size
+            'legend.fontsize': 24,  # Legend font size
+            'font.size': 24  # Default text size
+        })
+
         # Set the figure size (wide, not too tall)
-        fig, (ax1, ax3) = plt.subplots(2, 1, figsize=(12, 8), sharex=True,
+        fig, (ax1, ax3) = plt.subplots(2, 1, figsize=(20, 13), sharex=True,
                                                  gridspec_kw={'height_ratios': [2.5, 1.0]})
 
-        ax1.plot(time, time_course[:, 0], label='Column A', color='royalblue', linewidth=2)
-        ax1.plot(time, time_course[:, 8], label='Column B', color='darkorange', linewidth=2)
-        ax1.set_title('L2/3e firing rates in columns A & B', fontsize=14)
-        ax1.set_ylabel('Firing Rate', fontsize=12)
+        ax1.plot(time, time_course[:, 0], label='Column A', color='royalblue', linewidth=3)
+        ax1.plot(time, time_course[:, 8], label='Column B', color='darkorange', linewidth=3)
+        ax1.set_title('L2/3e firing rates in columns A & B')
+        ax1.set_ylabel('Firing Rate')
         ax1.legend()
         ax1.grid(True, linestyle='--', alpha=0.5)
 
-        ax3.plot(time, stim_time_course[:, 2], label='Input 1', color='royalblue', linewidth=5)
-        ax3.plot(time, stim_time_course[:, 10], label='Input 2', color='darkorange', linewidth=5, linestyle='--')
-        ax3.set_title('Inputs', fontsize=14)
-        ax3.set_xlabel('Time (s)', fontsize=12)
+        ax3.plot(time, stim_time_course[:, 2], label='Input 1', color='royalblue', linewidth=7)
+        ax3.plot(time, stim_time_course[:, 10], label='Input 2', color='darkorange', linewidth=7, linestyle='--')
+        ax3.set_title('Inputs')
+        ax3.set_xlabel('Time (s)')
         ax3.xaxis.set_major_formatter(FormatStrFormatter('%.1f'))
-        ax3.set_ylabel('Hz', fontsize=12)
+        ax3.set_ylabel('Hz')
         ax3.set_ylim(-5.0, 40.0)
         ax1.legend()
         ax3.grid(True, linestyle='--', alpha=0.5)
 
         # Layout adjustment
         plt.tight_layout()
-        plt.show()
+        plt.savefig('../wta_timecourse')
+        plt.close(fig)
 
 
 if __name__ == '__main__':
 
     fn = '../ww_trained_model_7.pkl'
 
-    coherence_results_ccn(fn)
+    # coherence_results_ccn(fn)
 
     # bistable_perception(fn, nr_iterations=100)  # nr_iters * 10 = total seconds
     # plot_dom_alt()
 
-    # wta_timecourse(fn)
+    wta_timecourse(fn)

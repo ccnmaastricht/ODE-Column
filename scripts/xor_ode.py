@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FormatStrFormatter
 import os
 import pickle
 import numpy as np
@@ -227,7 +228,6 @@ class ColumnNetworkXOR(torch.nn.Module):
         membrane_potential, adaptation = state[:mem_adap_split], state[mem_adap_split:adap_rate_split]
 
         firing_rate = compute_firing_rate_torch(membrane_potential - adaptation)
-        # firing_rate = 500. * torch.sigmoid(membrane_potential - adaptation)
 
         # Partition firing rate per area
         fr_per_area = self.partition_firing_rates(firing_rate)
@@ -569,24 +569,19 @@ def run_xor_timecourse():
 
     with torch.no_grad():
         for stim_iter, stim in enumerate(five_stims):
-            if stim_iter == 3:
-                stim_ode = prep_stim_ode(stim, time_vec)
+            stim_ode = prep_stim_ode(stim, time_vec)
 
-                network.time_vec = time_vec
-                network.stim = stim_ode
-                # ode_output = odeint(network, initial_state, time_vec)
-                ode_output = sdeint(network, initial_state, time_vec, names={'drift': 'forward', 'diffusion': 'diffusion'})
+            network.time_vec = time_vec
+            network.stim = stim_ode
+            # ode_output = odeint(network, initial_state, time_vec)
+            ode_output = sdeint(network, initial_state, time_vec, names={'drift': 'forward', 'diffusion': 'diffusion'})
 
-                if stim_iter == 3:
-                    look_at_all_layers(ode_output[:, 0, :24])
-                    look_at_all_layers(ode_output[:, 0, 48:])
+            initial_state = ode_output[-1, :, :]
 
-                initial_state = ode_output[-1, :, :]
-
-                # Store results
-                time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, :] = ode_output[:, 0, 48:]
-                stim_time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, 0] = stim_ode[:, 0, 2]  # idx2 = layer 4
-                stim_time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, 1] = stim_ode[:, 1, 2]
+            # Store results
+            time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, :] = ode_output[:, 0, 48:]
+            stim_time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, 0] = stim_ode[:, 0, 2]  # idx2 = layer 4
+            stim_time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, 1] = stim_ode[:, 1, 2]
 
         # firing_rates = time_course[:, :]
         # look_at_all_layers(firing_rates)
@@ -596,35 +591,45 @@ def run_xor_timecourse():
 
         time = np.arange(time_course.shape[0]) * sim_params['time_step']
 
-        # Set the figure size (wide, not too tall)
-        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 10), sharex=True, gridspec_kw={'height_ratios': [2.5, 2.5, 0.75]})
+        plt.rcParams.update({
+            'axes.titlesize': 28,  # Title size
+            'axes.labelsize': 24,  # X and Y label size
+            'xtick.labelsize': 20,  # X tick label size
+            'ytick.labelsize': 20,  # Y tick label size
+            'legend.fontsize': 24,  # Legend font size
+            'font.size': 24  # Default text size
+        })
 
-        ax1.plot(time, time_course[:, 0], label='Column A', color='royalblue', linewidth=2)
-        ax1.plot(time, time_course[:, 8], label='Column B', color='darkorange', linewidth=2)
-        ax1.set_title('L2/3e firing rates in columns A & B', fontsize=14)
-        ax1.set_ylabel('Firing Rate', fontsize=12)
+        # Set the figure size (wide, not too tall)
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(20, 16), sharex=True, gridspec_kw={'height_ratios': [2.5, 2.5, 0.75]})
+
+        ax1.plot(time, time_course[:, 0], label='Column A', color='royalblue', linewidth=3)
+        ax1.plot(time, time_course[:, 8], label='Column B', color='darkorange', linewidth=3)
+        ax1.set_title('L2/3e firing rates in columns A & B')
+        ax1.set_ylabel('Firing Rate')
         ax1.legend()
         ax1.grid(True, linestyle='--', alpha=0.5)
 
-        ax2.plot(time, time_course[:, 16], label='Column C', color='forestgreen', linewidth=2)
-        ax2.plot(time, np.ones(len(time)), label='Classification label = 1', color='forestgreen', linewidth=2, linestyle='--')
+        ax2.plot(time, time_course[:, 16], label='Column C', color='forestgreen', linewidth=3)
+        ax2.plot(time, np.ones(len(time)), label='Classification label = 1', color='forestgreen', linewidth=3, linestyle='--')
         # ax2.axhline(y=1, color='forestgreen', linestyle='--', linewidth=2)
-        ax2.set_title('L2/3e firing rates in column C', fontsize=14)
-        ax2.set_ylabel('Firing Rate', fontsize=12)
+        ax2.set_title('L2/3e firing rates in column C')
+        ax2.set_ylabel('Firing Rate')
         ax2.legend()
         ax2.grid(True, linestyle='--', alpha=0.5)
 
-        ax3.plot(time, stim_time_course[:, 0]*20., label='Input 1', color='black', linewidth=5)
-        ax3.plot(time, stim_time_course[:, 1]*20., label='Input 2', color='grey', linewidth=5, linestyle='--')
-        ax3.set_title('Inputs', fontsize=14)
-        ax3.set_xlabel('Time (s)', fontsize=12)
-        ax3.set_ylabel('Hz', fontsize=12)
+        ax3.plot(time, stim_time_course[:, 0]*20., label='Input 1', color='black', linewidth=7)
+        ax3.plot(time, stim_time_course[:, 1]*20., label='Input 2', color='grey', linewidth=7, linestyle='--')
+        ax3.set_title('Inputs')
+        ax3.set_xlabel('Time (s)')
+        ax3.set_ylabel('Hz')
         ax3.set_ylim(-5, 30)
         ax3.grid(True, linestyle='--', alpha=0.5)
 
         # Layout adjustment
         plt.tight_layout()
-        plt.show()
+        plt.savefig('../xor_timecourse')
+        plt.close(fig)
 
 
 

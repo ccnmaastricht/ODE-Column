@@ -60,7 +60,7 @@ class ColumnArea(torch.nn.Module):
         """
         self.population_sizes = np.array(
             column_parameters['population_size'][self.area])
-        self.population_sizes = np.tile(self.population_sizes, self.num_columns) / self.num_columns ######## keep population sizes as they are
+        self.population_sizes = np.tile(self.population_sizes, self.num_columns) # / self.num_columns ######## keep population sizes as they are
 
         self.num_populations = len(self.population_sizes)
         self.adaptation_strength = torch.tile(self.adaptation_strength, (self.num_columns,))
@@ -369,7 +369,7 @@ class ColumnNetwork(torch.nn.Module):
         for each area separately.
         '''
 
-        self.lateral_scale = 0.1
+        self.lateral_scale = 0.001  # 0.1
 
         for area_idx, area in self.areas.items():
             area.inner_weights = area.recurrent_weights * area.internal_mask  # set any existing external connectivity to zero
@@ -388,9 +388,9 @@ class ColumnNetwork(torch.nn.Module):
             area.lateral_mask = lateral_mask
 
             # Randomly initialize lateral weights and store in area as learnable param
-            std_W = area.synapse_time_constant.item() # 10.0
-            rand_weights = abs(torch.normal(mean=lateral_init, std=std_W)) * self.lateral_scale
-            rand_weights *= 0.1  # SCALE DOWN
+            std_W = 5.0
+            rand_weights = torch.normal(mean=lateral_init, std=std_W) * self.lateral_scale
+            rand_weights *= 0.5  # SCALE DOWN
             rand_weights *= area.lateral_mask
             rand_weights *= area.external_mask
             rand_weights = rand_weights.to(self.device)
@@ -402,7 +402,7 @@ class ColumnNetwork(torch.nn.Module):
 
             if area.num_columns > 1:
                 # area.lateral_values = nn.Parameter(sparse_values, requires_grad=True)
-                area.lateral_weights = nn.Parameter(rand_weights, requires_grad=True)  # NO LEARNABLE LATERAL WEIGHTS
+                area.lateral_weights = nn.Parameter(rand_weights, requires_grad=True)
             else:  # area with only one column should have no trainable lateral connections
                 # area.lateral_values = nn.Parameter(sparse_values, requires_grad=False)
                 area.lateral_weights = nn.Parameter(rand_weights, requires_grad=False)
@@ -423,9 +423,10 @@ class ColumnNetwork(torch.nn.Module):
 
                 ff_init = torch.tensor(model_parameters['connection_inits']['feedforward'])
                 ff_init = torch.tile(ff_init, (size_target, size_source))
-                ff_init /= area.num_columns  # SCALE DOWN
+                # ff_init /= area.num_columns  # SCALE DOWN
+                ff_init *= 1.5
 
-                std_W = area.synapse_time_constant.item() # 1.0 #
+                std_W = 5.0
                 rand_ff_weights = abs(torch.normal(mean=ff_init, std=std_W)) * self.feedforward_scale
 
                 ff_mask = torch.tile(self.feedforward_mask, (size_target, size_source))
@@ -449,7 +450,7 @@ class ColumnNetwork(torch.nn.Module):
         Attach the weights to the target area.
         '''
 
-        self.feedback_scale = 0.1
+        self.feedback_scale = 0.0 # 0.1
 
         for area_idx, area in self.areas.items():
             if int(area_idx) != (len(self.areas) - 1):  # last area gets no fb
@@ -461,7 +462,7 @@ class ColumnNetwork(torch.nn.Module):
                 fb_init = torch.tile(fb_init, (size_target, size_source))
                 fb_init *= 0.1  # SCALE DOWN
 
-                std_W = area.synapse_time_constant.item() # 5.0 #
+                std_W = 0.01
                 rand_fb_weights = abs(torch.normal(mean=fb_init, std=std_W)) * self.feedback_scale
 
                 fb_mask = torch.tile(self.feedback_mask, (size_target, size_source))
@@ -477,7 +478,7 @@ class ColumnNetwork(torch.nn.Module):
 
                 # Non-sparse matrices
                 rand_fb_weights = rand_fb_weights * fb_mask
-                area.feedback_weights = nn.Parameter(rand_fb_weights, requires_grad=True)  # NOT TRAINING FEEDBACK RIGHT NOW
+                area.feedback_weights = nn.Parameter(rand_fb_weights, requires_grad=False)  # NOT TRAINING FEEDBACK RIGHT NOW
 
     def _initialize_intput_weights(self, model_parameters):
         '''
@@ -490,9 +491,10 @@ class ColumnNetwork(torch.nn.Module):
 
         input_init = torch.tensor(model_parameters['connection_inits']['input'])
         input_init = torch.tile(input_init, (size_target, size_source))
-        input_init *= 0.5  # SCALE DOWN
+        # input_init *= 0.5  # SCALE DOWN
+        # input_init *= 1.5
 
-        std_W = first_area.synapse_time_constant.item() # 1.0 #
+        std_W = 5.0
         rand_input_weights = abs(torch.normal(mean=input_init, std=std_W)) * self.feedforward_scale
 
         input_mask = torch.tile(self.input_mask, (size_target, size_source))
@@ -523,7 +525,7 @@ class ColumnNetwork(torch.nn.Module):
         output_init = torch.tensor(model_parameters['connection_inits']['output'])
         output_init = torch.tile(output_init, (size_source,))
 
-        std_W = 0.001 # self.network_as_area.synapse_time_constant.item()
+        std_W = 0.001
         rand_output_weights = abs(torch.normal(mean=output_init, std=std_W))
         rand_output_weights *= rand_output_weights * torch.tile(self.output_mask, (size_source,))
         rand_output_weights *= self.output_scale
@@ -604,7 +606,7 @@ class ColumnNetwork(torch.nn.Module):
 
             # Total current of this area
             total_current_area = ((feedforward_current / self.feedforward_scale) +
-                                  (feedback_current / self.feedback_scale) +
+                                  # (feedback_current / self.feedback_scale) +
                                   (lateral_current / self.lateral_scale) +
                                   recurrent_current +
                                   background_current) * area.synapse_time_constant
@@ -662,9 +664,9 @@ class ColumnNetwork(torch.nn.Module):
         return state.unsqueeze(0)
 
     def diffusion(self, t, y):
-        noise_std = 3.0
+        noise_std = 0.1
         g = torch.zeros_like(y)
-        split = (len(y[0]) // 3) * 2
+        split = (len(y[0]) // 3)
         g[:, :] = noise_std
         return g
 
