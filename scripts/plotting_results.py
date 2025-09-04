@@ -5,14 +5,16 @@ import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 from matplotlib.ticker import MultipleLocator, FormatStrFormatter
 import numpy as np
-import time
+from pprint import pprint
 
 import torchsde
 from torchsde import sdeint, sdeint_adjoint
 from torchdiffeq import odeint, odeint_adjoint
 
 from src.utils import *
-from src.coupled_columns import ColumnAreaWTA
+from src.coupled_columns import ColumnAreaWTA, ColumnNetworkXOR
+from wta_ode import set_stim_three_phases
+from xor_ode import init_xor, make_stim, prep_stim_ode
 
 
 
@@ -27,6 +29,7 @@ def coherence_results_ccn(fn):
     with open(fn, 'rb') as f:
         network = pickle.load(f)
 
+    # Or use original network
     col_params = load_config('../config/model.toml')
     network = ColumnAreaWTA(col_params, area='mt')
 
@@ -126,7 +129,7 @@ def coherence_results_ccn(fn):
 
             # Run the model
             ode_output = odeint(network, initial_state, time_vec)
-            # ode_output = sdeint(network, initial_state, time_vec, names={'drift': 'forward', 'diffusion': 'diffusion'})
+            # ode_output = sdeint(network, initial_state, time_vec, names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
 
             # Compute firing rates
             fr = ode_output[:, 0, 32:]
@@ -135,8 +138,6 @@ def coherence_results_ccn(fn):
             fr_results[1, i, :, :] = fr[400:1000, [2, 10]]  # layer 4
             fr_results[2, i, :, :] = fr[400:1000, [4, 12]]  # layer 5
             fr_results[3, i, :, :] = fr[400:1000, [6, 14]]  # layer 6
-
-
 
         # Plot results
         fig, axes = plt.subplots(2, 2, figsize=(7, 4))
@@ -244,12 +245,6 @@ def dominance_time(A1, A2, dt=1e-4, cutoff=.1, thresh=0.0001, sliding_window=100
     switch_inds = np.where(np.diff(sign_diff) != 0)[0]
     switch_times = switch_inds * dt
 
-    # print(switch_times)
-    #
-    # plt.plot(A1_smooth)
-    # plt.plot(A2_smooth)
-    # plt.show()
-
     DT_signed = []
     for i in range(len(switch_times) - 1):
         start = switch_inds[i]
@@ -291,7 +286,6 @@ def alternation_rate(A1, A2, dt=1e-4, cutoff=.1, sliding_window=1000):
                 k += 1
     AR = (AL / (len(A_diff) * dt))
     return AR, AL
-
 
 def bistable_perception(fn, nr_iterations):
 
@@ -379,8 +373,6 @@ def bistable_perception(fn, nr_iterations):
     # Initial state is just zeros
     initial_state = torch.zeros(48).unsqueeze(0)  # 48 = 8*2*3
 
-    curr_time = time.time()
-
     with torch.no_grad():
 
         for muA in [20.]: # [13., 14., 15., 16., 17., 18., 19., 20.]:
@@ -394,32 +386,16 @@ def bistable_perception(fn, nr_iterations):
                 network.stim = stim
                 network.time_vec = time_vec
 
-                # Run the model
-                # ode_output = odeint(network, initial_state, time_vec)
-                # bm = torchsde.BrownianInterval(
-                #     t0=time_vec[0].item(),
-                #     t1=time_vec[-1].item(),
-                #     size=initial_state.size(),
-                #     levy_area_approximation="space-time",  # Required for SRK
-                # )
-                # bm = torchsde.BrownianTree(
-                #     t0=time_vec[0].item(),
-                #     t1=time_vec[-1].item(),
-                #     w0=torch.zeros_like(initial_state))
-                # ode_output = sdeint(network, initial_state, time_vec, bm=bm, names={'drift': 'forward', 'diffusion': 'diffusion'}, method='euler')
-
                 # loop for nr of iterations
                 for i in range(nr_iterations):
                     ode_output = sdeint(network, initial_state, time_vec,
-                                        names={'drift': 'forward', 'diffusion': 'diffusion'})
-                    comp_fr = compute_firing_rate_torch(ode_output[:, 0, :16] - ode_output[:, 0, 16:32])
+                                        names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
+                    comp_fr = compute_firing_rate(ode_output[:, 0, :16] - ode_output[:, 0, 16:32])
                     if i == 0:
                         total = comp_fr
                     else:
                         total = torch.concat([total, comp_fr], dim=0)
                     initial_state = ode_output[-1, :, :]
-
-                    # print(time.time() - curr_time)
 
                     # Plot results
                     m = ode_output[:, 0, :16]
@@ -528,9 +504,8 @@ def wta_timecourse(fn):
             network.time_vec = time_vec
 
             ode_output = sdeint(network, initial_state, time_vec,
-                                names={'drift': 'forward', 'diffusion': 'diffusion'})
-            comp_fr = compute_firing_rate_torch(ode_output[:, 0, :16] - ode_output[:, 0, 16:32])
-            # comp_fr = ode_output[:, 0, 32:]
+                                names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
+            comp_fr = compute_firing_rate(ode_output[:, 0, :16] - ode_output[:, 0, 16:32])
             if i == 0:
                 time_course = comp_fr
                 stim_time_course = stim
@@ -543,7 +518,7 @@ def wta_timecourse(fn):
         with open('../wta_timecourse_plot.pkl', 'wb') as f:
             pickle.dump(time_course, f)
 
-        with open("../wta_timecourse_plot_28-07.pkl", 'rb') as f:
+        with open("../wta_timecourse_plot_28-07.pkl", 'rb') as f:  # this one was used for the CCN poster!
             time_course = pickle.load(f)
 
         time_course = time_course[time_steps:]
@@ -587,13 +562,106 @@ def wta_timecourse(fn):
         plt.close(fig)
 
 
+def xor_timecourse():
+
+    # Initialize the network
+    network, initial_state, time_vec, time_steps = init_xor()
+
+    network.feedforward_target_weights['0'] = torch.nn.ParameterList([
+        torch.tensor([0.0, 0.0, 28.0, 7.2, 0.0, 0.0, 0.0, 0.0,
+                      0.0, 0.0, 26.2, 13.2, 0.0, 0.0, 0.0, 0.0]),
+        torch.tensor([0.0, 0.0, 32.4, 12.6, 0.0, 0.0, 0.0, 0.0,
+                      0.0, 0.0, 29.2, 15.2, 0.0, 0.0, 0.0, 0.0])
+    ])
+    network.feedforward_target_weights['1'] = torch.nn.ParameterList([
+        torch.tensor([0.0, 0.0, 31.4, 8.8, 0.0, 0.0, 0.0, 0.0]),
+        torch.tensor([0.0, 0.0, 23.2, 18.8, 0.0, 0.0, 0.0, 0.0])
+    ])
+
+    time_course = torch.Tensor(time_steps*5, 24)  # 5 stimuli * N time steps, 24 populations
+    stim_time_course = torch.Tensor(time_steps*5, 2)
+
+    four_stims = make_stim(shuffle=False)
+    five_stims = torch.concat([four_stims[3].unsqueeze(0), four_stims], dim=0)  # add an extra (0,0) to start time course
+
+    with torch.no_grad():
+        for stim_iter, stim in enumerate(five_stims):
+            stim_ode = prep_stim_ode(stim, time_vec)
+
+            network.time_vec = time_vec
+            network.stim = stim_ode
+            # ode_output = odeint(network, initial_state, time_vec)
+            ode_output = sdeint(network, initial_state, time_vec, names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
+
+            initial_state = ode_output[-1, :, :]
+
+            # Store results
+            firing_rates = compute_firing_rate(ode_output[:, :, :24] - ode_output[:, :, 24:48]).squeeze(dim=1)
+            time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, :] = firing_rates
+            stim_time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, 0] = stim_ode[:, 0, 2]  # idx2 = layer 4
+            stim_time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, 1] = stim_ode[:, 1, 2]
+
+        time_course = time_course[time_steps:]  # remove first resting state period
+        stim_time_course = stim_time_course[time_steps:]
+
+        time = np.arange(time_course.shape[0]) * 1e-3
+
+        plt.rcParams.update({
+            'axes.titlesize': 28,  # Title size
+            'axes.labelsize': 24,  # X and Y label size
+            'xtick.labelsize': 20,  # X tick label size
+            'ytick.labelsize': 20,  # Y tick label size
+            'legend.fontsize': 24,  # Legend font size
+            'font.size': 24  # Default text size
+        })
+
+        # Set the figure size (wide, not too tall)
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(20, 16), sharex=True, gridspec_kw={'height_ratios': [2.5, 2.5, 0.75]})
+
+        ax1.plot(time, time_course[:, 0], label='Column A', color='royalblue', linewidth=3)
+        ax1.plot(time, time_course[:, 8], label='Column B', color='darkorange', linewidth=3)
+        ax1.set_title('L2/3e firing rates in columns A & B')
+        ax1.set_ylabel('Firing Rate')
+        ax1.legend()
+        ax1.grid(True, linestyle='--', alpha=0.5)
+
+        ax2.plot(time, time_course[:, 16], label='Column C', color='forestgreen', linewidth=3)
+        ax2.plot(time, np.ones(len(time)), label='Classification label = 1', color='forestgreen', linewidth=3, linestyle='--')
+        # ax2.axhline(y=1, color='forestgreen', linestyle='--', linewidth=2)
+        ax2.set_title('L2/3e firing rates in column C')
+        ax2.set_ylabel('Firing Rate')
+        ax2.legend()
+        ax2.grid(True, linestyle='--', alpha=0.5)
+
+        ax3.plot(time, stim_time_course[:, 0], label='Input 1', color='black', linewidth=7)
+        ax3.plot(time, stim_time_course[:, 1], label='Input 2', color='grey', linewidth=7, linestyle='--')
+        ax3.set_title('Inputs')
+        ax3.set_xlabel('Time (s)')
+        ax3.set_ylabel('Hz')
+        ax3.set_ylim(-5, 30)
+        ax3.grid(True, linestyle='--', alpha=0.5)
+
+        # Layout adjustment
+        plt.tight_layout()
+        plt.savefig('../xor_timecourse')
+        plt.close(fig)
+
+
+
+
 if __name__ == '__main__':
 
-    fn = '../ww_trained_model_7.pkl'
+    # fn = '../ww_trained_model_7.pkl'
 
+    # Coherence rainbow plots
     # coherence_results_ccn(fn)
 
+    # Bistable perception results (didn't use in the end)
     # bistable_perception(fn, nr_iterations=100)  # nr_iters * 10 = total seconds
     # plot_dom_alt()
 
-    wta_timecourse(fn)
+    # WTA time course showing WTA and bistable perception - used for CCN poster
+    # wta_timecourse(fn)
+
+    # XOR time course - used for CCN poster
+    xor_timecourse()
