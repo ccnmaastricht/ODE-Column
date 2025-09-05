@@ -164,7 +164,7 @@ def train_xor_ode(nr_samples, nr_test_samples, batch_size):
     '''
     network, initial_state, time_vec, time_steps = init_xor()
 
-    optimizer = torch.optim.RMSprop(network.parameters(), lr=1.0, alpha=0.95)
+    optimizer = torch.optim.RMSprop(network.parameters(), lr=0.5, alpha=0.95)
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.8)  # higher gamma = slower decay
 
     nr_batches = nr_samples // batch_size

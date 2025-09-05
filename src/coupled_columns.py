@@ -329,7 +329,7 @@ class ColumnNetworkXOR(torch.nn.Module):
 
             # Initialize random feedforward weights
             original_target_weights = area.feedforward_weights.clone().detach()
-            std_W = 0.0001
+            std_W = 0.1
 
             for i in range(nr_ff_weights):
 
@@ -508,7 +508,6 @@ class ColumnNetwork(torch.nn.Module):
         self.input_mask = torch.tensor(masks['input'])
         self.output_mask = torch.tensor(masks['output'])
         self.feedforward_mask = torch.tensor(masks['feedforward'])
-        self.feedback_mask = torch.tensor(masks['feedback'])
         self.lateral_mask = torch.tensor(masks['lateral'])
 
     def make_mask_fan_in(self, mask, num_target_blocks, num_source_blocks):
