@@ -25,7 +25,7 @@ def visualize_results(network, firing_rates, stims, loss, train_iter, batch_size
     nr_samples = batch_size  # how many samples to visualize
 
     for i in range(nr_samples):
-        fig, axes = plt.subplots(2, 3, figsize=(13, 7))
+        fig, axes = plt.subplots(2, 4, figsize=(13, 7))
 
         final_column = torch.sum((firing_rates[i, :, 0, -8:] * network.output_weights) / network.output_scale, dim=-1)
 
@@ -54,8 +54,18 @@ def visualize_results(network, firing_rates, stims, loss, train_iter, batch_size
         axes[1, 1].plot(firing_rates[i, :, 0, idx_col1 + 4].detach().numpy() * 0.1, label='L5e')
         axes[1, 1].plot(firing_rates[i, :, 0, idx_col1 + 6].detach().numpy(), label='L6e')
 
-        axes[1, 2].plot(final_column.detach().numpy())
-        axes[1, 2].set_title('Final column')
+        idx_col1 = 64 + 32
+        axes[0, 2].plot(firing_rates[i, :, 0, idx_col1 + 0].detach().numpy(), label='L23e')
+        axes[0, 2].plot(firing_rates[i, :, 0, idx_col1 + 4].detach().numpy() * 0.1, label='L5e')
+        axes[0, 2].plot(firing_rates[i, :, 0, idx_col1 + 6].detach().numpy(), label='L6e')
+
+        idx_col1 = 64 + 40
+        axes[1, 2].plot(firing_rates[i, :, 0, idx_col1 + 0].detach().numpy(), label='L23e')
+        axes[1, 2].plot(firing_rates[i, :, 0, idx_col1 + 4].detach().numpy() * 0.1, label='L5e')
+        axes[1, 2].plot(firing_rates[i, :, 0, idx_col1 + 6].detach().numpy(), label='L6e')
+
+        axes[1, 3].plot(final_column.detach().numpy())
+        axes[1, 3].set_title('Final column')
 
         plt.tight_layout(pad=3.0)
         fig.subplots_adjust(left=0.15)
@@ -119,13 +129,17 @@ def make_ds(nr_inputs, nr_samples, batch_size, fixed_position=True):
     or position-invariant (i.e. all possible
     '''
     if fixed_position:
-        all_combinations = torch.tensor([[0., 0., 0., 1.],
-                                         [0., 0., 1., 1.],
-                                         [0., 1., 1., 1.],
-                                         [1., 1., 1., 1.],
+        all_combinations = torch.tensor([[0., 0., 0., 0., 0., 0., 0., 1.],
+                                         [0., 0., 0., 0., 0., 0., 1., 1.],
+                                         [0., 0., 0., 0., 0., 1., 1., 1.],
+                                         [0., 0., 0., 0., 1., 1., 1., 1.],
+                                         [0., 0., 0., 1., 1., 1., 1., 1.],
+                                         [0., 0., 1., 1., 1., 1., 1., 1.],
+                                         [0., 1., 1., 1., 1., 1., 1., 1.],
+                                         [1., 1., 1., 1., 1., 1., 1., 1.],
                                         ], dtype=torch.float32)
         all_combinations *= 15.
-        all_combinations = torch.tile(all_combinations, (batch_size//4, 1))
+        all_combinations = torch.tile(all_combinations, (batch_size//nr_inputs, 1))
 
         train_set = all_combinations[torch.randperm(all_combinations.size(0))][:batch_size]
         test_set = all_combinations[torch.randperm(all_combinations.size(0))][:1]
@@ -159,9 +173,9 @@ def init_network(device):
     '''
     col_params = load_config('../config/model.toml')
 
-    network_input = {'nr_areas': 3,
-                     'areas': ['mt', 'mt', 'mt'],
-                     'nr_columns_per_area': [8, 4, 1],
+    network_input = {'nr_areas': 4,
+                     'areas': ['mt', 'mt', 'mt',  'mt'],
+                     'nr_columns_per_area': [8, 4, 2, 1],
                      'nr_input_units': nr_inputs}
     network = ColumnNetwork(col_params, network_input, device)
     num_columns = sum(network_input['nr_columns_per_area'])
@@ -231,7 +245,7 @@ def train_parity_ode(nr_inputs, nr_samples, batch_size, device):
             network.stim = stim_ode
 
             ode_output = odeint(network, initial_state, time_vec)
-            # ode_output = sdeint(network, initial_state, time_vec, names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk', adaptive=True)
+            # ode_output = sdeint(network, initial_state, time_vec, names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
 
             batch_output[itr, :, :, :] = ode_output
 
@@ -285,9 +299,9 @@ def train_parity_ode(nr_inputs, nr_samples, batch_size, device):
 
 if __name__ == '__main__':
 
-    nr_inputs = 4 # 16 combinations
+    nr_inputs = 8
     nr_samples = 6400
-    batch_size = 4
+    batch_size = 8
     # device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     device = torch.device("cpu")
 

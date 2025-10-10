@@ -536,7 +536,7 @@ class ColumnNetwork(torch.nn.Module):
 
         if source_is_input:
             n_pops_per_course_col = 1
-            nr_sources_target_receives = 2
+            nr_sources_target_receives = 3
         else:
             n_pops_per_course_col = 8
             nr_sources_target_receives = 3
@@ -586,15 +586,14 @@ class ColumnNetwork(torch.nn.Module):
         input_init = torch.tensor(model_parameters['connection_inits']['input'])
         input_init = torch.tile(input_init, (size_target, size_source))
 
-        std_W = 3.0
+        std_W = 1.0 # 3.0
         rand_input_weights = abs(torch.normal(mean=input_init, std=std_W)) * self.feedforward_scale
-        rand_input_weights *= 0.8
+        rand_input_weights *= 1.0 # 0.8
 
         input_mask = torch.tile(self.input_mask, (size_target, size_source))
-        input_mask = self.make_mask_fan_in(input_mask, 2, 2)
-        input_mask[0:16, :] = input_mask[32:48, :]
-        input_mask[32:48, :] = input_mask[16:32, :]
-        # input_mask = self.make_mask_fan_in_random(input_mask, source_is_input=True)  # use this fan-in function to initialize random connections
+        input_mask = self.make_mask_fan_in(input_mask, 8, 4)
+        input_mask[32:64, :] = input_mask[0:32, :]
+        # input_mask = self.make_mask_fan_in_random(input_mask, source_is_input=True)
         first_area.input_mask = input_mask
 
         rand_input_weights = rand_input_weights * input_mask
@@ -623,8 +622,13 @@ class ColumnNetwork(torch.nn.Module):
 
                 ff_mask = torch.tile(self.feedforward_mask, (size_target, size_source))
                 if size_target > 1:  # no fan-in connectivity for area with only one column
-                    ff_mask = self.make_mask_fan_in(ff_mask, 2, 2)
-                    # ff_mask = self.make_mask_fan_in(ff_mask)  # use this fan-in function to initialize random connections
+                    if size_target == 2:
+                        # ff_mask = self.make_mask_fan_in_random(ff_mask)
+                        ff_mask = self.make_mask_fan_in(ff_mask, 2, 2)
+                        rand_ff_weights *= 2.0
+                    else:
+                        # ff_mask = self.make_mask_fan_in_random(ff_mask)
+                        ff_mask = self.make_mask_fan_in(ff_mask, 4, 4)
                 area.feedforward_mask = ff_mask
 
                 rand_ff_weights = rand_ff_weights * ff_mask
