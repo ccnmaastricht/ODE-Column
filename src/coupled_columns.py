@@ -152,7 +152,7 @@ class ColumnAreaWTA(ColumnArea):
     def __init__(self, column_parameters, area):
         super().__init__(column_parameters, area, 2, small_network=True)
 
-        self.noise_type = "scalar"  # sde params
+        self.noise_type = "diagonal"  # sde params
         self.sde_type = "ito"
 
         self._make_lat_in_mask()
@@ -241,11 +241,11 @@ class ColumnAreaWTA(ColumnArea):
         Diffusion function used by SDE. Noise is added to the
         membrane potential only
         '''
-        noise_std = 100.0
+        noise_std = 2.0
         g = torch.zeros_like(y)
         split_mem = (len(y[0]) // 3)
         g[:split_mem] = noise_std
-        g = g.unsqueeze(dim=-1)
+        # g = g.unsqueeze(dim=-1)
         return g
 
 
@@ -467,7 +467,7 @@ class ColumnNetwork(torch.nn.Module):
     def __init__(self, model_parameters, network_dict, device):
         super().__init__()
 
-        self.noise_type = "scalar"  # sde params
+        self.noise_type = "diagonal"  # sde params
         self.sde_type = "ito"
 
         self.device = device
@@ -479,9 +479,9 @@ class ColumnNetwork(torch.nn.Module):
         self.nr_areas = network_dict['nr_areas']
 
         self._initialize_masks(model_parameters)
-        self._initialize_lateral_weights(model_parameters)
         self._initialize_feedforward_weights(model_parameters)
-        self._initialize_intput_weights(model_parameters)
+        self._initialize_input_weights(model_parameters)
+        self._initialize_lateral_weights(model_parameters)
         self._initialize_output_weights(model_parameters)
 
     def _initialize_areas(self, model_parameters, network_dict):
@@ -574,7 +574,7 @@ class ColumnNetwork(torch.nn.Module):
 
         return mask * fan_connectivity
 
-    def _initialize_intput_weights(self, model_parameters):
+    def _initialize_input_weights(self, model_parameters):
         '''
         Initialize learnable input weights to weight the input going into the first area.
         '''
@@ -586,13 +586,15 @@ class ColumnNetwork(torch.nn.Module):
         input_init = torch.tensor(model_parameters['connection_inits']['input'])
         input_init = torch.tile(input_init, (size_target, size_source))
 
-        std_W = 1.0 # 3.0
+        std_W = 3.0 # 1.0
         rand_input_weights = abs(torch.normal(mean=input_init, std=std_W)) * self.feedforward_scale
-        rand_input_weights *= 1.0 # 0.8
+        rand_input_weights *= 0.8 # 1.0
 
         input_mask = torch.tile(self.input_mask, (size_target, size_source))
         input_mask = self.make_mask_fan_in(input_mask, 8, 4)
         input_mask[32:64, :] = input_mask[0:32, :]
+        input_mask[0:32, 1:8] = input_mask[0:32, 0:7].clone()  # TRYING SOMETHING OUT
+        input_mask[0:32, 0] = torch.zeros(input_mask[0:32, 0].shape)  # TRYING SOMETHING OUT
         # input_mask = self.make_mask_fan_in_random(input_mask, source_is_input=True)
         first_area.input_mask = input_mask
 
@@ -616,12 +618,12 @@ class ColumnNetwork(torch.nn.Module):
                 ff_init = torch.tensor(model_parameters['connection_inits']['feedforward'])
                 ff_init = torch.tile(ff_init, (size_target, size_source))
 
-                std_W = 1.0
+                std_W = 1.0 # 0.1
                 rand_ff_weights = abs(torch.normal(mean=ff_init, std=std_W)) * self.feedforward_scale
                 rand_ff_weights *= 4.0
 
                 ff_mask = torch.tile(self.feedforward_mask, (size_target, size_source))
-                if size_target > 1:  # no fan-in connectivity for area with only one column
+                if int(area_idx) < (self.nr_areas - 1):  # last area should be fully connected
                     if size_target == 2:
                         # ff_mask = self.make_mask_fan_in_random(ff_mask)
                         ff_mask = self.make_mask_fan_in(ff_mask, 2, 2)
@@ -639,8 +641,6 @@ class ColumnNetwork(torch.nn.Module):
         Random initialization of lateral weights between columns,
         for each area separately.
         '''
-
-        self.lateral_scale = 1.0
 
         for area_idx, area in self.areas.items():
             area.inner_weights = area.recurrent_weights * area.internal_mask  # set any existing external connectivity to zero
@@ -660,7 +660,7 @@ class ColumnNetwork(torch.nn.Module):
 
             # Randomly initialize lateral weights and store in area as learnable param
             std_W = 0.01
-            rand_weights = torch.normal(mean=lateral_init, std=std_W) * self.lateral_scale
+            rand_weights = torch.normal(mean=lateral_init, std=std_W)
             rand_weights *= 0.01  # initialize small lateral weights - let them be learned from scratch
             rand_weights *= area.lateral_mask
             rand_weights *= area.external_mask
@@ -668,7 +668,7 @@ class ColumnNetwork(torch.nn.Module):
 
             if area.num_columns > 1:
                 area.lateral_weights = nn.Parameter(rand_weights, requires_grad=True)
-            else:  # area with only one column should have no trainable lateral connections
+            else:  # lateral weights of area with one column should not be trainable
                 area.lateral_weights = nn.Parameter(rand_weights, requires_grad=False)
 
     def _initialize_output_weights(self, model_parameters):
@@ -683,10 +683,11 @@ class ColumnNetwork(torch.nn.Module):
 
         output_init = torch.tensor(model_parameters['connection_inits']['output'])
         output_init = torch.tile(output_init, (size_source,))
+        self.output_mask = torch.tile(self.output_mask, (size_source,))
 
         std_W = 0.001
         rand_output_weights = abs(torch.normal(mean=output_init, std=std_W))
-        rand_output_weights *= rand_output_weights * torch.tile(self.output_mask, (size_source,))
+        rand_output_weights *= output_init * self.output_mask
         rand_output_weights *= self.output_scale
 
         self.output_weights = nn.Parameter(rand_output_weights, requires_grad=True)
@@ -747,8 +748,8 @@ class ColumnNetwork(torch.nn.Module):
             background_current = area.background_weights * area.background_drive
 
             # Total current of this area
-            total_current_area = ((feedforward_current / self.feedforward_scale) +
-                                  (lateral_current / self.lateral_scale) +
+            total_current_area = (feedforward_current +
+                                  lateral_current +
                                   recurrent_current +
                                   background_current) * area.synapse_time_constant
             total_current = torch.cat((total_current, total_current_area), dim=0)
@@ -766,7 +767,7 @@ class ColumnNetwork(torch.nn.Module):
         adap_rate_split = len(state) // 3 * 2
         membrane_potential, adaptation = state[:mem_adap_split], state[mem_adap_split:adap_rate_split]
 
-        firing_rate = compute_firing_rate(membrane_potential - adaptation)
+        firing_rate = compute_firing_rate(membrane_potential - adaptation) ############## - adaptation
 
         # Partition firing rate per area
         fr_per_area = self.partition_firing_rates(firing_rate)
@@ -776,6 +777,7 @@ class ColumnNetwork(torch.nn.Module):
 
         # Compute input current
         total_current = self.compute_currents(ext_ff_rate, fr_per_area, t)
+        # total_current += adaptation ##### this is representing noise
 
         # Compute derivative membrane potential and adaptation
         delta_membrane_potential = (-membrane_potential +
@@ -787,7 +789,7 @@ class ColumnNetwork(torch.nn.Module):
         prev_firing_rate = state[adap_rate_split:]
         delta_firing_rate = (-prev_firing_rate + firing_rate) / self.network_as_area.synapse_time_constant
 
-        state = torch.concat((delta_membrane_potential, delta_adaptation, delta_firing_rate))
+        state = torch.concat((delta_membrane_potential, delta_adaptation, delta_firing_rate)) ############### delta_adaptation
 
         return state.unsqueeze(0)
 
@@ -796,10 +798,10 @@ class ColumnNetwork(torch.nn.Module):
         Diffusion function used by SDE, noise is only applied
         to membrane potential.
         '''
-        noise_std = 10.0
+        noise_std = 3.0
         g = torch.zeros_like(y)
         split = (len(y[0]) // 3)
         g[:split, :] = noise_std
-        g = g.unsqueeze(dim=-1)
+        g = g.unsqueeze(dim=-1) # only when noise type is scalar
         return g
 

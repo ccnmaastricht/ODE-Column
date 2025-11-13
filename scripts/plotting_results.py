@@ -29,9 +29,9 @@ def coherence_results_ccn(fn):
     with open(fn, 'rb') as f:
         network = pickle.load(f)
 
-    # Or use original network
-    col_params = load_config('../config/model.toml')
-    network = ColumnAreaWTA(col_params, area='mt')
+    # # Or use original network
+    # col_params = load_config('../config/model.toml')
+    # network = ColumnAreaWTA(col_params, area='mt')
 
     orig_weights = torch.tensor([[ 4.1900e-01, -4.9223e-01,  1.1323e-01, -1.0566e-01,  2.0433e-02,
           0.0000e+00,  5.3040e-03,  0.0000e+00, -0.0000e+00,  0.0000e+00,
@@ -98,7 +98,8 @@ def coherence_results_ccn(fn):
           4.2166e-03, -6.1922e-04,  1.7482e-02, -4.9986e-03,  4.7322e-02,
          -1.0834e-01]])
 
-    network.recurrent_weights = orig_weights
+    # orig_weights = torch.nn.Parameter(orig_weights, requires_grad=False)
+    # network.recurrent_weights = orig_weights
 
     # Time params
     dt = 1e-4
@@ -106,8 +107,10 @@ def coherence_results_ccn(fn):
     time_steps = int((stim_phase * 3) / dt)  # add pre- and post-stimulus phase
     time_vec = torch.linspace(0., time_steps * dt, time_steps)
 
-    # Initial state is just zeros
+    # Initial state is just zeros, expect for the membrane potential
     initial_state = torch.zeros(48).unsqueeze(0)  # 48 = 8*2*3
+    initial_state[0, :16] = torch.tensor([-1.7997e-01, 8.3757e+00, 1.1346e+01, 1.1953e+01, -6.5426e+00, 1.0319e+01, -2.9719e+01, 1.2530e+01,
+                                       -1.7997e-01, 8.3757e+00, 1.1346e+01, 1.1953e+01, -6.5426e+00, 1.0319e+01, -2.9719e+01, 1.2530e+01])
 
     with torch.no_grad():
 
@@ -183,7 +186,7 @@ def coherence_results_ccn(fn):
             axes_.spines['right'].set_visible(False)
 
             # Remove y-ticks
-            axes_.set_yticks([])
+            # axes_.set_yticks([])
 
             # Set x-ticks
             xticks = np.arange(0, 601, 100)
@@ -192,7 +195,7 @@ def coherence_results_ccn(fn):
             else:  # For bottom subplots: relabel x-axis from 0–600 to -100–500
                 axes_.tick_params(labelsize=8)
                 xlabels = xticks - 100  # Shift labels
-                # xlabels = xlabels / /10
+                xlabels = xlabels // 10
                 axes_.set_xticklabels(xlabels)
             axes_.set_xticks(xticks)
             axes_.set_xlim(0, 600)
@@ -476,7 +479,7 @@ def wta_timecourse(fn):
     col_params = load_config('../config/model.toml')
     network = ColumnAreaWTA(col_params, area='mt')
 
-    network.recurrent_weights = weights
+    network.recurrent_weights = torch.nn.Parameter(weights, requires_grad=False)
 
     # Time params
     dt = 1e-4
@@ -485,7 +488,7 @@ def wta_timecourse(fn):
     time_vec = torch.linspace(0., time_steps * dt, time_steps)
     network.time_vec = time_vec
 
-    # Initial state is just zeros
+    # Initial state is just zeros, except membrane potential
     initial_state = torch.zeros(48).unsqueeze(0)  # 48 = 8*2*3
     initial_state[:, :16] = torch.tile(torch.tensor([-1.5554, 8.9735, 12.0712, 12.5040, -5.2554, 10.4650, -30.8225, 12.6189]), (2,))
 
@@ -493,6 +496,8 @@ def wta_timecourse(fn):
         i = 0
 
         for stims in [[0., 0.], [0., 0.], [0., 0.], [10., 30.], [0., 0.], [30., 10.], [0., 0.], [20., 20.], [20., 20.], [20., 20.], [20., 20.], [0., 0.]]:  #
+        # for stims in [[0., 0.], [0., 0.], [0., 0.], [10., 30.], [10., 30.], [10., 30.], [10., 30.], [10., 30.], [10., 30.], [10., 30.], [10., 30.], [0., 0.]]:
+
             muA = stims[0]
             muB = stims[1]
 
@@ -518,8 +523,8 @@ def wta_timecourse(fn):
         with open('../wta_timecourse_plot.pkl', 'wb') as f:
             pickle.dump(time_course, f)
 
-        with open("../wta_timecourse_plot_28-07.pkl", 'rb') as f:  # this one was used for the CCN poster!
-            time_course = pickle.load(f)
+        # with open("../wta_timecourse_plot_28-07.pkl", 'rb') as f:  # this one was used for the CCN poster!
+        #     time_course = pickle.load(f)
 
         time_course = time_course[time_steps:]
         stim_time_course = stim_time_course[time_steps:]
@@ -651,10 +656,10 @@ def xor_timecourse():
 
 if __name__ == '__main__':
 
-    # fn = '../ww_trained_model_7.pkl'
+    fn = '../ww_trained_model.pkl'
 
     # Coherence rainbow plots
-    # coherence_results_ccn(fn)
+    coherence_results_ccn(fn)
 
     # Bistable perception results (didn't use in the end)
     # bistable_perception(fn, nr_iterations=100)  # nr_iters * 10 = total seconds
@@ -664,4 +669,4 @@ if __name__ == '__main__':
     # wta_timecourse(fn)
 
     # XOR time course - used for CCN poster
-    xor_timecourse()
+    # xor_timecourse()
