@@ -37,12 +37,12 @@ def visualize_results(network, firing_rates, stims, loss, train_iter, batch_size
         axes[0, 1].plot(firing_rates[i, :, 0, idx_col1 + 0].detach().numpy(), label='L23e')
         axes[0, 1].plot(firing_rates[i, :, 0, idx_col1 + 4].detach().numpy() * 0.1, label='L5e')
         axes[0, 1].plot(firing_rates[i, :, 0, idx_col1 + 6].detach().numpy(), label='L6e')
-        #
-        # idx_col1 = 64 + 16
-        # axes[1, 0].plot(firing_rates[i, :, 0, idx_col1 + 0].detach().numpy(), label='L23e')
-        # axes[1, 0].plot(firing_rates[i, :, 0, idx_col1 + 4].detach().numpy() * 0.1, label='L5e')
-        # axes[1, 0].plot(firing_rates[i, :, 0, idx_col1 + 6].detach().numpy(), label='L6e')
-        #
+
+        idx_col1 = 64 + 16
+        axes[1, 0].plot(firing_rates[i, :, 0, idx_col1 + 0].detach().numpy(), label='L23e')
+        axes[1, 0].plot(firing_rates[i, :, 0, idx_col1 + 4].detach().numpy() * 0.1, label='L5e')
+        axes[1, 0].plot(firing_rates[i, :, 0, idx_col1 + 6].detach().numpy(), label='L6e')
+
         # idx_col1 = 64 + 24
         # axes[1, 1].plot(firing_rates[i, :, 0, idx_col1 + 0].detach().numpy(), label='L23e')
         # axes[1, 1].plot(firing_rates[i, :, 0, idx_col1 + 4].detach().numpy() * 0.1, label='L5e')
@@ -140,26 +140,22 @@ def make_ds(nr_inputs, nr_samples, batch_size, fixed_position=True):
     or position-invariant (i.e. all possible
     '''
     if fixed_position:
+        # all_combinations = torch.tensor([[0., 0., 0., 0., 0., 0., 0., 1.],
+        #                                  [0., 0., 0., 0., 0., 0., 1., 1.],
+        #                                  [0., 0., 0., 0., 0., 1., 1., 1.],
+        #                                  [0., 0., 0., 0., 1., 1., 1., 1.]
+        #                                 ], dtype=torch.float32)
         all_combinations = torch.tensor([[0., 0., 0., 0., 0., 0., 0., 1.],
                                          [0., 0., 0., 0., 0., 0., 1., 1.],
                                          [0., 0., 0., 0., 0., 1., 1., 1.],
                                          [0., 0., 0., 0., 1., 1., 1., 1.],
-                                         [0., 0., 0., 0., 0., 0., 0., 1.],
-                                         [0., 0., 0., 0., 0., 0., 1., 1.],
-                                         [0., 0., 0., 0., 0., 1., 1., 1.],
-                                         [0., 0., 0., 0., 1., 1., 1., 1.],
+                                         [0., 0., 0., 1., 1., 1., 1., 1.],
+                                         [0., 0., 1., 1., 1., 1., 1., 1.],
+                                         [0., 1., 1., 1., 1., 1., 1., 1.],
+                                         [1., 1., 1., 1., 1., 1., 1., 1.],
                                         ], dtype=torch.float32)
-        # all_combinations = torch.tensor([[0., 0., 0., 0., 0., 0., 0., 1.],
-        #                                  [0., 0., 0., 0., 0., 0., 1., 1.],
-        #                                  [0., 0., 0., 0., 0., 1., 1., 1.],
-        #                                  [0., 0., 0., 0., 1., 1., 1., 1.],
-        #                                  [0., 0., 0., 1., 1., 1., 1., 1.],
-        #                                  [0., 0., 1., 1., 1., 1., 1., 1.],
-        #                                  [0., 1., 1., 1., 1., 1., 1., 1.],
-        #                                  [1., 1., 1., 1., 1., 1., 1., 1.],
-        #                                 ], dtype=torch.float32)
         all_combinations *= 15.
-        all_combinations = torch.tile(all_combinations, (batch_size//nr_inputs, 1))
+        # all_combinations = torch.tile(all_combinations, (batch_size//nr_inputs, 1))
 
         train_set = all_combinations[torch.randperm(all_combinations.size(0))][:batch_size]
         test_set = all_combinations[torch.randperm(all_combinations.size(0))][:1]
@@ -196,12 +192,12 @@ def init_network(device, two_output_cols):
     if two_output_cols:
         network_input = {'nr_areas': 3,
                          'areas': ['mt', 'mt', 'mt'],
-                         'nr_columns_per_area': [8, 4, 2],
+                         'nr_columns_per_area': [8, 2, 2],
                          'nr_input_units': nr_inputs}
     else:
         network_input = {'nr_areas': 3,
                          'areas': ['mt', 'mt', 'mt'],
-                         'nr_columns_per_area': [8, 4, 1],
+                         'nr_columns_per_area': [8, 2, 1],
                          'nr_input_units': nr_inputs}
     network = ColumnNetwork(col_params, network_input, device)
     num_columns = sum(network_input['nr_columns_per_area'])
@@ -213,7 +209,8 @@ def init_network(device, two_output_cols):
 
     initial_state = torch.zeros(num_columns * 8 * 3)  # 3 state variables
     membrane_init = torch.tensor([-1.7997e-01, 8.3757e+00, 1.1346e+01, 1.1953e+01, -6.5426e+00, 1.0319e+01, -2.9719e+01, 1.2530e+01])
-    initial_state[:num_columns * 8] = torch.tile(membrane_init, (num_columns,))
+    num_populations_first_area = network.areas['0'].num_populations
+    initial_state[:num_populations_first_area] = torch.tile(membrane_init, (num_populations_first_area//8,))
     initial_state = initial_state.unsqueeze(0)
 
     network = network.to(device).to(torch.float32)
@@ -239,7 +236,7 @@ def mask_weights(network):
         if network.areas[str(area_idx)].num_columns > 1:  # areas with fewer than 1 column have no lateral connections
             network.areas[str(area_idx)].lateral_weights.grad *= network.areas[str(area_idx)].lateral_mask
 
-def train_parity_ode(nr_inputs, nr_samples, batch_size, device, two_output_cols=True):
+def train_parity_ode(nr_inputs, nr_samples, batch_size, device, two_output_cols=False):
     '''
     Train a network to perform parity classification (even/odd)
     using a neural ODE to train feedforward and lateral weights.
@@ -250,8 +247,8 @@ def train_parity_ode(nr_inputs, nr_samples, batch_size, device, two_output_cols=
     num_populations = network.network_as_area.num_populations
 
     # Load existing network
-    with open('../results/parity_4_bits_8_4_2_new_rfs_trajectory/parity_post_training.pkl', 'rb') as f:
-        network = pickle.load(f)
+    # with open('../results/parity_4_bits_8_4_2_new_rfs_trajectory/parity_post_training.pkl', 'rb') as f:
+    #     network = pickle.load(f)
 
     # network.areas['0'].input_weights = _network.areas['0'].input_weights
     # network.areas['0'].lateral_weights = _network.areas['0'].lateral_weights
@@ -300,50 +297,50 @@ def train_parity_ode(nr_inputs, nr_samples, batch_size, device, two_output_cols=
         split = network.network_as_area.num_populations
         firing_rates = compute_firing_rate(batch_output[:, :, :, :split] - batch_output[:, :, :, split:(split * 2)])
 
-        # # Compute loss and update weights || Training on classification
-        # final_fr = firing_rates[:, -100:, 0, -8:]  # final firing rates of output column
-        # final_fr_mean = torch.mean(final_fr, dim=1)  # mean firing rate over last 100 time steps
-        # final_fr_summed = torch.sum((final_fr_mean * network.output_weights) / network.output_scale , dim=-1)
+        # Compute loss and update weights || Training on classification
+        final_fr = firing_rates[:, -100:, 0, -8:]  # final firing rates of output column
+        final_fr_mean = torch.mean(final_fr, dim=1)  # mean firing rate over last 100 time steps
+        final_fr_summed = torch.sum((final_fr_mean * network.output_weights) / network.output_scale , dim=-1)
+
+        parity_targets = (train_set.sum(dim=1) % 30 == 0).float()
+        # parity_targets = torch.ones(8)
+        parity_targets = parity_targets * 20.  # training target
+
+        parity_targets = parity_targets.to(device).to(torch.float32)
+        loss = torch.mean(abs(final_fr_summed - parity_targets))
+
+        # # Compute loss and update weights || Training on trajectory
+        # if two_output_cols:
+        #     output_col_fr = firing_rates[:, :, 0, -16:]  # firing rates of output columns
+        #     output_col_fr = (output_col_fr * network.output_weights) / network.output_scale
+        #     output_col_fr_reshape = torch.stack([output_col_fr[:, :, :8], output_col_fr[:, :, 8:]])
+        #     output_col_fr_summed = torch.sum(output_col_fr_reshape, dim=-1)
         #
-        # parity_targets = (train_set.sum(dim=1) % 30 == 0).float()
-        # # parity_targets = torch.ones(8)
-        # parity_targets = parity_targets * 20.  # training target
+        #     target_trajectories = torch.Tensor(output_col_fr_summed.shape)
+        #     parity_targets = (train_set.sum(dim=1) % 30 == 0).int()
+        #     for target_idx, target in enumerate(parity_targets):
+        #         if target == 1:
+        #             target_trajectories[0, target_idx, :] = target_trajectory
+        #             target_trajectories[1, target_idx, :] = torch.zeros(output_col_fr_summed.shape[-1])
+        #         elif target == 0:
+        #             target_trajectories[1, target_idx, :] = target_trajectory
+        #             target_trajectories[0, target_idx, :] = torch.zeros(output_col_fr_summed.shape[-1])
         #
-        # parity_targets = parity_targets.to(device).to(torch.float32)
-        # loss = torch.mean(abs(final_fr_summed - parity_targets))
-
-        # Compute loss and update weights || Training on trajectory
-        if two_output_cols:
-            output_col_fr = firing_rates[:, :, 0, -16:]  # firing rates of output columns
-            output_col_fr = (output_col_fr * network.output_weights) / network.output_scale
-            output_col_fr_reshape = torch.stack([output_col_fr[:, :, :8], output_col_fr[:, :, 8:]])
-            output_col_fr_summed = torch.sum(output_col_fr_reshape, dim=-1)
-
-            target_trajectories = torch.Tensor(output_col_fr_summed.shape)
-            parity_targets = (train_set.sum(dim=1) % 30 == 0).int()
-            for target_idx, target in enumerate(parity_targets):
-                if target == 1:
-                    target_trajectories[0, target_idx, :] = target_trajectory
-                    target_trajectories[1, target_idx, :] = torch.zeros(output_col_fr_summed.shape[-1])
-                elif target == 0:
-                    target_trajectories[1, target_idx, :] = target_trajectory
-                    target_trajectories[0, target_idx, :] = torch.zeros(output_col_fr_summed.shape[-1])
-
-            loss = hub_loss(output_col_fr_summed, target_trajectories)
-
-        else:  # if only single output column
-            output_col_fr = firing_rates[:, :, 0, -8:]  # firing rates of output column
-            output_col_fr_summed = torch.sum((output_col_fr * network.output_weights) / network.output_scale, dim=-1)
-
-            target_trajectories = torch.Tensor(output_col_fr_summed.shape)
-            parity_targets = (train_set.sum(dim=1) % 30 == 0).int()
-            for target_idx, target in enumerate(parity_targets):
-                if target == 1:
-                    target_trajectories[target_idx] = target_trajectory
-                elif target == 0:
-                    target_trajectories[target_idx] = torch.zeros(output_col_fr_summed.shape[1])
-
-            loss = hub_loss(output_col_fr_summed, target_trajectories)
+        #     loss = hub_loss(output_col_fr_summed, target_trajectories)
+        #
+        # else:  # if only single output column
+        #     output_col_fr = firing_rates[:, :, 0, -8:]  # firing rates of output column
+        #     output_col_fr_summed = torch.sum((output_col_fr * network.output_weights) / network.output_scale, dim=-1)
+        #
+        #     target_trajectories = torch.Tensor(output_col_fr_summed.shape)
+        #     parity_targets = (train_set.sum(dim=1) % 30 == 0).int()
+        #     for target_idx, target in enumerate(parity_targets):
+        #         if target == 1:
+        #             target_trajectories[target_idx] = target_trajectory
+        #         elif target == 0:
+        #             target_trajectories[target_idx] = torch.zeros(output_col_fr_summed.shape[1])
+        #
+        #     loss = hub_loss(output_col_fr_summed, target_trajectories)
 
         loss.backward()
 
@@ -369,7 +366,7 @@ def train_parity_ode(nr_inputs, nr_samples, batch_size, device, two_output_cols=
             if 'lateral' not in name:
                 param.data.clamp_(min=0.0)  # other weights can not be negative
             if 'output' in name:
-                param.data.clamp_(min=0.0, max=network.output_scale)  # output weights should be between 0 and 1
+                param.data.clamp_(min=0.0)
 
         # Every five batches, visualize training and save the current network
         with torch.no_grad():
@@ -391,3 +388,12 @@ if __name__ == '__main__':
 
     train_parity_ode(nr_inputs, nr_samples, batch_size, device)
 
+
+'''
+8 bits
+8-2-1
+original ff weight masks (only L23 init)
+flexible output weights
+
+classification
+'''
