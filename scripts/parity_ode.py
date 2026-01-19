@@ -134,6 +134,11 @@ def visualize_weights(network, train_iter):
             plt.savefig('../results/png/{}_{:02d}'.format(clean_name, train_iter + 1))
             plt.close(fig)
 
+def set_seed(seed):
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
 def make_ds(nr_inputs, nr_samples, batch_size, fixed_position=True):
     '''
     Make a dataset of all possible combinations. Either with fixed position,
@@ -225,7 +230,7 @@ def mask_weights(network):
     '''
     Apply mask to grad to make sure no illegal updates are made.
     '''
-    network.output_weights.grad *= network.output_mask  # output weights
+    # network.output_weights.grad *= network.output_mask  # output weights
 
     network.areas['0'].input_weights.grad *= network.areas['0'].input_mask  # input weights
 
@@ -289,8 +294,8 @@ def train_parity_ode(nr_inputs, nr_samples, batch_size, device, two_output_cols=
             stim_ode = stim_ode.to(device).to(torch.float32)
             network.stim = stim_ode
 
-            ode_output = odeint(network, initial_state, time_vec)
-            # ode_output = sdeint(network, initial_state, time_vec, names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
+            # ode_output = odeint(network, initial_state, time_vec)
+            ode_output = sdeint(network, initial_state, time_vec, names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
 
             batch_output[itr, :, :, :] = ode_output
 
@@ -361,12 +366,13 @@ def train_parity_ode(nr_inputs, nr_samples, batch_size, device, two_output_cols=
 
         # Clamp the weights to ensure the weights are not below zero after updating (or are not higher than zero)
         for name, param in network.named_parameters():
-            if 'lateral' in name:
-                param.data.clamp_(max=0.0)  # lateral inhibition weights can not be positive
-            if 'lateral' not in name:
-                param.data.clamp_(min=0.0)  # other weights can not be negative
-            if 'output' in name:
-                param.data.clamp_(min=0.0)
+            param.data.clamp_(min=0.0)
+            # if 'lateral' in name:
+            #     param.data.clamp_(max=0.0)  # lateral inhibition weights can not be positive
+            # if 'lateral' not in name:
+            #     param.data.clamp_(min=0.0)  # other weights can not be negative
+            # if 'output' in name:
+            #     param.data.clamp_(min=0.0)
 
         # Every five batches, visualize training and save the current network
         with torch.no_grad():
@@ -383,9 +389,11 @@ if __name__ == '__main__':
     nr_inputs = 8
     nr_samples = 6400
     batch_size = 8
+    seed = 1
     # device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     device = torch.device("cpu")
 
+    set_seed(seed)
     train_parity_ode(nr_inputs, nr_samples, batch_size, device)
 
 
@@ -393,7 +401,9 @@ if __name__ == '__main__':
 8 bits
 8-2-1
 original ff weight masks (only L23 init)
-flexible output weights
+L23e -> L23i lateral inhibition weights (so they are positive!)
+fixed output weights (L5 only)
 
-classification
+classification-based
+noise
 '''

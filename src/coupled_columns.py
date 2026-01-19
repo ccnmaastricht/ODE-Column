@@ -222,7 +222,11 @@ class ColumnAreaWTA(ColumnArea):
         background_current = self.background_weights * self.background_drive    # background input
         recurrent_current = torch.matmul(self.recurrent_weights, firing_rate)   # recurrent input
 
+        # >>> NEW: NOISE
+        # noise = state[adap_rate_split:]
         total_current = (feedforward_current + background_current + recurrent_current) * self.synapse_time_constant
+        # <<<
+        # total_current = (feedforward_current + background_current + recurrent_current) * self.synapse_time_constant
 
         # State derivatives
         delta_membrane_potential = (-membrane_potential +
@@ -234,6 +238,9 @@ class ColumnAreaWTA(ColumnArea):
 
         state = torch.concat((delta_membrane_potential, delta_adaptation, delta_firing_rate))
 
+        # delta_noise = -noise / self.synapse_time_constant
+        # state = torch.concat((delta_membrane_potential, delta_adaptation, delta_noise))
+
         return state.unsqueeze(0)
 
     def diffusion(self, t, y):
@@ -241,11 +248,34 @@ class ColumnAreaWTA(ColumnArea):
         Diffusion function used by SDE. Noise is added to the
         membrane potential only
         '''
-        noise_std = 2.0
+        # noise_std = 1.0
+        # g = torch.zeros_like(y)
+        # n = (len(y[0]) // 3)
+        # g[:, n*2:] = noise_std
+
+        # noise_std = 0.0
+        # g = torch.zeros_like(y)
+        # split_noise = (len(y[0]) // 3) * 2
+        # g[:, split_noise:] = noise_std
+
+        # g = torch.zeros_like(y)
+        # n = y.shape[1] // 3
+        # sigma = 0.0 # 0.5 * 0.01
+        # g[:, 2 * n:] = sigma * torch.sqrt(2 / self.synapse_time_constant)
+
         g = torch.zeros_like(y)
-        split_mem = (len(y[0]) // 3)
-        g[:split_mem] = noise_std
-        # g = g.unsqueeze(dim=-1)
+        n = y.shape[1] // 3
+        sigma_N = 0.5  # original synaptic noise std
+        tau_m = self.membrane_time_constant
+        sigma_H = sigma_N / torch.sqrt(tau_m)
+        g[:, :n] = 2.0 # sigma_H
+
+        n = y.shape[1] // 3
+        sigma0 = 2.0 # baseline adaptation noise
+        tau_a = self.adapt_time_constant
+        sigma_A = sigma0 * torch.sqrt(2 / tau_a)
+        g[:, n:n*2] = sigma_A
+
         return g
 
 
@@ -687,12 +717,12 @@ class ColumnNetwork(torch.nn.Module):
         output_init = torch.tile(output_init, (size_source,))
         self.output_mask = torch.tile(self.output_mask, (size_source,))
 
-        std_W = 0.001
-        rand_output_weights = abs(torch.normal(mean=output_init, std=std_W))
-        rand_output_weights *= output_init * self.output_mask
-        rand_output_weights *= self.output_scale
+        # std_W = 1.0
+        # rand_output_weights = abs(torch.normal(mean=output_init, std=std_W))
+        # rand_output_weights *= self.output_mask
+        # rand_output_weights *= self.output_scale
 
-        self.output_weights = nn.Parameter(rand_output_weights, requires_grad=True)
+        self.output_weights = nn.Parameter(output_init, requires_grad=False) ####### NOT TRAINING OUTPUT WEIGHTS #######
 
     def set_time_vec(self, time_vec):
         '''
@@ -769,7 +799,7 @@ class ColumnNetwork(torch.nn.Module):
         adap_rate_split = len(state) // 3 * 2
         membrane_potential, adaptation = state[:mem_adap_split], state[mem_adap_split:adap_rate_split]
 
-        firing_rate = compute_firing_rate(membrane_potential - adaptation) ############## - adaptation
+        firing_rate = compute_firing_rate(membrane_potential - adaptation)
 
         # Partition firing rate per area
         fr_per_area = self.partition_firing_rates(firing_rate)
@@ -779,7 +809,6 @@ class ColumnNetwork(torch.nn.Module):
 
         # Compute input current
         total_current = self.compute_currents(ext_ff_rate, fr_per_area, t)
-        # total_current += adaptation ##### this is representing noise
 
         # Compute derivative membrane potential and adaptation
         delta_membrane_potential = (-membrane_potential +
@@ -791,7 +820,7 @@ class ColumnNetwork(torch.nn.Module):
         prev_firing_rate = state[adap_rate_split:]
         delta_firing_rate = (-prev_firing_rate + firing_rate) / self.network_as_area.synapse_time_constant
 
-        state = torch.concat((delta_membrane_potential, delta_adaptation, delta_firing_rate)) ############### delta_adaptation
+        state = torch.concat((delta_membrane_potential, delta_adaptation, delta_firing_rate))
 
         return state.unsqueeze(0)
 
@@ -800,10 +829,14 @@ class ColumnNetwork(torch.nn.Module):
         Diffusion function used by SDE, noise is only applied
         to membrane potential.
         '''
-        noise_std = 3.0
         g = torch.zeros_like(y)
-        split = (len(y[0]) // 3)
-        g[:split, :] = noise_std
-        g = g.unsqueeze(dim=-1) # only when noise type is scalar
+        n = y.shape[1] // 3
+        g[:, :n] = 2.0  # sigma_H
+
+        sigma0 = 2.0  # baseline adaptation noise
+        tau_a = self.network_as_area.adapt_time_constant
+        sigma_A = sigma0 * torch.sqrt(2 / tau_a)
+        g[:, n:n * 2] = sigma_A
+
         return g
 
