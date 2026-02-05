@@ -43,20 +43,20 @@ def visualize_results(network, firing_rates, stims, loss, train_iter, batch_size
         axes[1, 0].plot(firing_rates[i, :, 0, idx_col1 + 4].detach().numpy() * 0.1, label='L5e')
         axes[1, 0].plot(firing_rates[i, :, 0, idx_col1 + 6].detach().numpy(), label='L6e')
 
-        # idx_col1 = 64 + 24
-        # axes[1, 1].plot(firing_rates[i, :, 0, idx_col1 + 0].detach().numpy(), label='L23e')
-        # axes[1, 1].plot(firing_rates[i, :, 0, idx_col1 + 4].detach().numpy() * 0.1, label='L5e')
-        # axes[1, 1].plot(firing_rates[i, :, 0, idx_col1 + 6].detach().numpy(), label='L6e')
-        #
-        # idx_col1 = 64 + 32
-        # axes[0, 2].plot(firing_rates[i, :, 0, idx_col1 + 0].detach().numpy(), label='L23e')
-        # axes[0, 2].plot(firing_rates[i, :, 0, idx_col1 + 4].detach().numpy() * 0.1, label='L5e')
-        # axes[0, 2].plot(firing_rates[i, :, 0, idx_col1 + 6].detach().numpy(), label='L6e')
-        #
-        # idx_col1 = 64 + 40
-        # axes[1, 2].plot(firing_rates[i, :, 0, idx_col1 + 0].detach().numpy(), label='L23e')
-        # axes[1, 2].plot(firing_rates[i, :, 0, idx_col1 + 4].detach().numpy() * 0.1, label='L5e')
-        # axes[1, 2].plot(firing_rates[i, :, 0, idx_col1 + 6].detach().numpy(), label='L6e')
+        idx_col1 = 64 + 24
+        axes[1, 1].plot(firing_rates[i, :, 0, idx_col1 + 0].detach().numpy(), label='L23e')
+        axes[1, 1].plot(firing_rates[i, :, 0, idx_col1 + 4].detach().numpy() * 0.1, label='L5e')
+        axes[1, 1].plot(firing_rates[i, :, 0, idx_col1 + 6].detach().numpy(), label='L6e')
+
+        idx_col1 = 64 + 32
+        axes[0, 2].plot(firing_rates[i, :, 0, idx_col1 + 0].detach().numpy(), label='L23e')
+        axes[0, 2].plot(firing_rates[i, :, 0, idx_col1 + 4].detach().numpy() * 0.1, label='L5e')
+        axes[0, 2].plot(firing_rates[i, :, 0, idx_col1 + 6].detach().numpy(), label='L6e')
+
+        idx_col1 = 64 + 40
+        axes[1, 2].plot(firing_rates[i, :, 0, idx_col1 + 0].detach().numpy(), label='L23e')
+        axes[1, 2].plot(firing_rates[i, :, 0, idx_col1 + 4].detach().numpy() * 0.1, label='L5e')
+        axes[1, 2].plot(firing_rates[i, :, 0, idx_col1 + 6].detach().numpy(), label='L6e')
 
         # Final column
         if two_output_cols:
@@ -145,11 +145,6 @@ def make_ds(nr_inputs, nr_samples, batch_size, fixed_position=True):
     or position-invariant (i.e. all possible
     '''
     if fixed_position:
-        # all_combinations = torch.tensor([[0., 0., 0., 0., 0., 0., 0., 1.],
-        #                                  [0., 0., 0., 0., 0., 0., 1., 1.],
-        #                                  [0., 0., 0., 0., 0., 1., 1., 1.],
-        #                                  [0., 0., 0., 0., 1., 1., 1., 1.]
-        #                                 ], dtype=torch.float32)
         all_combinations = torch.tensor([[0., 0., 0., 0., 0., 0., 0., 1.],
                                          [0., 0., 0., 0., 0., 0., 1., 1.],
                                          [0., 0., 0., 0., 0., 1., 1., 1.],
@@ -197,7 +192,7 @@ def init_network(device, two_output_cols):
     if two_output_cols:
         network_input = {'nr_areas': 3,
                          'areas': ['mt', 'mt', 'mt'],
-                         'nr_columns_per_area': [8, 2, 2],
+                         'nr_columns_per_area': [8, 4, 2],
                          'nr_input_units': nr_inputs}
     else:
         network_input = {'nr_areas': 3,
@@ -230,7 +225,7 @@ def mask_weights(network):
     '''
     Apply mask to grad to make sure no illegal updates are made.
     '''
-    # network.output_weights.grad *= network.output_mask  # output weights
+    network.output_weights.grad *= network.output_mask  # output weights
 
     network.areas['0'].input_weights.grad *= network.areas['0'].input_mask  # input weights
 
@@ -241,7 +236,7 @@ def mask_weights(network):
         if network.areas[str(area_idx)].num_columns > 1:  # areas with fewer than 1 column have no lateral connections
             network.areas[str(area_idx)].lateral_weights.grad *= network.areas[str(area_idx)].lateral_mask
 
-def train_parity_ode(nr_inputs, nr_samples, batch_size, device, two_output_cols=False):
+def train_parity_ode(nr_inputs, nr_samples, batch_size, device, two_output_cols=True):
     '''
     Train a network to perform parity classification (even/odd)
     using a neural ODE to train feedforward and lateral weights.
@@ -251,17 +246,9 @@ def train_parity_ode(nr_inputs, nr_samples, batch_size, device, two_output_cols=
     network, time_vec, initial_state = init_network(device, two_output_cols)
     num_populations = network.network_as_area.num_populations
 
-    # Load existing network
-    # with open('../results/parity_4_bits_8_4_2_new_rfs_trajectory/parity_post_training.pkl', 'rb') as f:
+    # # Load existing network
+    # with open('../results/parity_8bit_classification_seed1_onlyL5output_L23einhibi/parity_post_training.pkl', 'rb') as f:
     #     network = pickle.load(f)
-
-    # network.areas['0'].input_weights = _network.areas['0'].input_weights
-    # network.areas['0'].lateral_weights = _network.areas['0'].lateral_weights
-    # network.areas['1'].feedforward_weights = _network.areas['1'].feedforward_weights
-    # network.areas['1'].lateral_weights = _network.areas['1'].lateral_weights
-    # network.areas['2'].feedforward_weights = _network.areas['2'].feedforward_weights
-    # network.areas['2'].lateral_weights = _network.areas['2'].lateral_weights
-    # network.areas['3'].feedforward_weights = _network.areas['3'].feedforward_weights
 
     # Save the network pre-training
     with open('../parity_pre_training.pkl', 'wb') as f:
@@ -294,58 +281,58 @@ def train_parity_ode(nr_inputs, nr_samples, batch_size, device, two_output_cols=
             stim_ode = stim_ode.to(device).to(torch.float32)
             network.stim = stim_ode
 
-            # ode_output = odeint(network, initial_state, time_vec)
-            ode_output = sdeint(network, initial_state, time_vec, names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
+            ode_output = odeint(network, initial_state, time_vec)
+            # ode_output = sdeint(network, initial_state, time_vec, names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
 
             batch_output[itr, :, :, :] = ode_output
 
         split = network.network_as_area.num_populations
         firing_rates = compute_firing_rate(batch_output[:, :, :, :split] - batch_output[:, :, :, split:(split * 2)])
 
-        # Compute loss and update weights || Training on classification
-        final_fr = firing_rates[:, -100:, 0, -8:]  # final firing rates of output column
-        final_fr_mean = torch.mean(final_fr, dim=1)  # mean firing rate over last 100 time steps
-        final_fr_summed = torch.sum((final_fr_mean * network.output_weights) / network.output_scale , dim=-1)
+        # # Compute loss and update weights || Training on classification
+        # final_fr = firing_rates[:, -100:, 0, -8:]  # final firing rates of output column
+        # final_fr_mean = torch.mean(final_fr, dim=1)  # mean firing rate over last 100 time steps
+        # final_fr_summed = torch.sum((final_fr_mean * network.output_weights) / network.output_scale , dim=-1)
+        #
+        # parity_targets = (train_set.sum(dim=1) % 30 == 0).float()
+        # # parity_targets = torch.ones(8)
+        # parity_targets = parity_targets * 20.  # training target
+        #
+        # parity_targets = parity_targets.to(device).to(torch.float32)
+        # loss = torch.mean(abs(final_fr_summed - parity_targets))
 
-        parity_targets = (train_set.sum(dim=1) % 30 == 0).float()
-        # parity_targets = torch.ones(8)
-        parity_targets = parity_targets * 20.  # training target
+        # Compute loss and update weights || Training on trajectory
+        if two_output_cols:
+            output_col_fr = firing_rates[:, :, 0, -16:]  # firing rates of output columns
+            output_col_fr = (output_col_fr * network.output_weights) / network.output_scale
+            output_col_fr_reshape = torch.stack([output_col_fr[:, :, :8], output_col_fr[:, :, 8:]])
+            output_col_fr_summed = torch.sum(output_col_fr_reshape, dim=-1)
 
-        parity_targets = parity_targets.to(device).to(torch.float32)
-        loss = torch.mean(abs(final_fr_summed - parity_targets))
+            target_trajectories = torch.Tensor(output_col_fr_summed.shape)
+            parity_targets = (train_set.sum(dim=1) % 30 == 0).int()
+            for target_idx, target in enumerate(parity_targets):
+                if target == 1:
+                    target_trajectories[0, target_idx, :] = target_trajectory
+                    target_trajectories[1, target_idx, :] = torch.zeros(output_col_fr_summed.shape[-1])
+                elif target == 0:
+                    target_trajectories[1, target_idx, :] = target_trajectory
+                    target_trajectories[0, target_idx, :] = torch.zeros(output_col_fr_summed.shape[-1])
 
-        # # Compute loss and update weights || Training on trajectory
-        # if two_output_cols:
-        #     output_col_fr = firing_rates[:, :, 0, -16:]  # firing rates of output columns
-        #     output_col_fr = (output_col_fr * network.output_weights) / network.output_scale
-        #     output_col_fr_reshape = torch.stack([output_col_fr[:, :, :8], output_col_fr[:, :, 8:]])
-        #     output_col_fr_summed = torch.sum(output_col_fr_reshape, dim=-1)
-        #
-        #     target_trajectories = torch.Tensor(output_col_fr_summed.shape)
-        #     parity_targets = (train_set.sum(dim=1) % 30 == 0).int()
-        #     for target_idx, target in enumerate(parity_targets):
-        #         if target == 1:
-        #             target_trajectories[0, target_idx, :] = target_trajectory
-        #             target_trajectories[1, target_idx, :] = torch.zeros(output_col_fr_summed.shape[-1])
-        #         elif target == 0:
-        #             target_trajectories[1, target_idx, :] = target_trajectory
-        #             target_trajectories[0, target_idx, :] = torch.zeros(output_col_fr_summed.shape[-1])
-        #
-        #     loss = hub_loss(output_col_fr_summed, target_trajectories)
-        #
-        # else:  # if only single output column
-        #     output_col_fr = firing_rates[:, :, 0, -8:]  # firing rates of output column
-        #     output_col_fr_summed = torch.sum((output_col_fr * network.output_weights) / network.output_scale, dim=-1)
-        #
-        #     target_trajectories = torch.Tensor(output_col_fr_summed.shape)
-        #     parity_targets = (train_set.sum(dim=1) % 30 == 0).int()
-        #     for target_idx, target in enumerate(parity_targets):
-        #         if target == 1:
-        #             target_trajectories[target_idx] = target_trajectory
-        #         elif target == 0:
-        #             target_trajectories[target_idx] = torch.zeros(output_col_fr_summed.shape[1])
-        #
-        #     loss = hub_loss(output_col_fr_summed, target_trajectories)
+            loss = hub_loss(output_col_fr_summed, target_trajectories)
+
+        else:  # if only single output column
+            output_col_fr = firing_rates[:, :, 0, -8:]  # firing rates of output column
+            output_col_fr_summed = torch.sum((output_col_fr * network.output_weights) / network.output_scale, dim=-1)
+
+            target_trajectories = torch.Tensor(output_col_fr_summed.shape)
+            parity_targets = (train_set.sum(dim=1) % 30 == 0).int()
+            for target_idx, target in enumerate(parity_targets):
+                if target == 1:
+                    target_trajectories[target_idx] = target_trajectory
+                elif target == 0:
+                    target_trajectories[target_idx] = torch.zeros(output_col_fr_summed.shape[1])
+
+            loss = hub_loss(output_col_fr_summed, target_trajectories)
 
         loss.backward()
 
@@ -399,11 +386,12 @@ if __name__ == '__main__':
 
 '''
 8 bits
-8-2-1
+8-4-2
 original ff weight masks (only L23 init)
 L23e -> L23i lateral inhibition weights (so they are positive!)
-fixed output weights (L5 only)
+learnable output weights
 
-classification-based
-noise
+double trajectory
+
+seed 1
 '''

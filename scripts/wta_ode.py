@@ -75,8 +75,8 @@ def make_ds_wwp(ds_file, nr_samples, time_steps):
         for i in range(nr_samples):
 
             # Random input
-            muA = np.random.uniform(15.0, 25.0)
-            muB = muA + np.random.uniform(10., 20.)
+            muA = np.random.uniform(15.0, 20.0)
+            muB = muA + np.random.uniform(10., 15.)
             mu_vals = [muA, muB]
             np.random.shuffle(mu_vals)
             muA, muB = mu_vals
@@ -100,7 +100,7 @@ def get_data(nr_samples, batch_size, time_steps, fn):
     '''
     states, stims = make_ds_wwp(fn, nr_samples+10, time_steps)
 
-    states = states / 20.  # scale down wang-wong firing rates to match with L23
+    states = states / 30.  # scale down wang-wong firing rates to match with L23
 
     ds = TensorDataset(states, stims)
     data_loader = DataLoader(ds, batch_size=batch_size, shuffle=True)
@@ -131,6 +131,8 @@ def init_network(network_class, time_steps, dt):
 
     # Initial state
     initial_state = torch.zeros(48).unsqueeze(0)
+    initial_state[:, :16] = torch.tile(torch.tensor([-1.7997e-01, 8.3757e+00, 1.1346e+01, 1.1953e+01,
+                                                     -6.5426e+00, 1.0319e+01, -2.9719e+01, 1.2530e+01]), (1, 2,))
 
     # Time vector
     time_vec = torch.linspace(0., time_steps * dt, time_steps)
@@ -207,10 +209,10 @@ def train_wta_ode(nr_samples, batch_size, fn):
 
 if __name__ == '__main__':
 
-    nr_samples = 3000
+    nr_samples = 6000
     batch_size = 16
 
-    network = train_wta_ode(nr_samples, batch_size, '../data/ds_wta_3000_noise.pkl')
+    network = train_wta_ode(nr_samples, batch_size, '../data/ds_wta_6000_uniform_diffs.pkl')
 
     with open('../ww_trained_model.pkl', 'wb') as f:
         pickle.dump(network, f)

@@ -8,6 +8,7 @@ import numpy as np
 from pprint import pprint
 
 import torchsde
+from sympy.printing.pretty.pretty_symbology import line_width
 from torchsde import sdeint, sdeint_adjoint
 from torchdiffeq import odeint, odeint_adjoint
 
@@ -16,11 +17,6 @@ from src.coupled_columns import ColumnAreaWTA, ColumnNetworkXOR
 from wta_ode import set_stim_three_phases
 from xor_ode import init_xor, make_stim, prep_stim_ode
 
-
-
-def blend_with_white(c, factor=0.6):
-    """Blend color c with white by a factor."""
-    return (1 - factor) * np.array([1, 1, 1]) + factor * np.array(c)
 
 
 def test_blep(fn):
@@ -70,7 +66,7 @@ def compute_WSI_DivT(firing_rates, dt, divt_threshold=0.1, divt_window=50):
     divt_results = torch.zeros((firing_rates.shape[0], firing_rates.shape[1]))
 
     for i_layer in range(firing_rates.shape[0]):
-        for i_coh in range(firing_rates.shape[1]):
+        for i_coh in range(1, firing_rates.shape[1]):  # SKIP THE PURPLE ONE (coherence=0)
             winner_column = firing_rates[i_layer, i_coh, :, 0]
             loser_column = firing_rates[i_layer, i_coh, :, 1]
 
@@ -94,32 +90,32 @@ def compute_WSI_DivT(firing_rates, dt, divt_threshold=0.1, divt_window=50):
             # plt.plot(abs_difference)
             # plt.show()
 
-    # Plotting average WSI
-    plt.plot(torch.mean(wsi_results, dim=1))
-    plt.xticks(np.arange(4), ['L23', 'L4', 'L5', 'L6'])
-    plt.ylabel('Winner selectivity index')
-    plt.show()
-
-    # Plotting WSI per coherence level (rainbow)
+    # Plotting WSI
+    mean_wsi = torch.mean(wsi_results, dim=1)
+    sd_wsi = torch.std(wsi_results, dim=1)
+    plt.plot(mean_wsi, color='black', marker='o', linewidth=2)
+    plt.errorbar(np.arange(4), mean_wsi, yerr=sd_wsi, ecolor='black', elinewidth=2, capthick=2, capsize=7, barsabove=True)
+    # Plotting per coherence level (rainbow)
     colors = plt.get_cmap('rainbow', firing_rates.shape[1])
-    for i_coh in range(firing_rates.shape[1]):
+    for i_coh in range(1, firing_rates.shape[1]):
         color = colors(i_coh)
         plt.plot(wsi_results[:, i_coh], color=color, zorder=1)
+    plt.grid(True, linestyle='--', alpha=1.0)
     plt.xticks(np.arange(4), ['L23', 'L4', 'L5', 'L6'])
     plt.ylabel('Winner selectivity index')
     plt.show()
 
-    # Plotting average DivT
-    plt.plot(torch.mean(divt_results, dim=1))
-    plt.xticks(np.arange(4), ['L23', 'L4', 'L5', 'L6'])
-    plt.ylabel('Divergence timing')
-    plt.show()
-
-    # Plotting WSI per coherence level (rainbow)
+    # Plotting DivT
+    mean_divt = torch.mean(divt_results, dim=1)
+    sd_divt = torch.std(divt_results, dim=1)
+    plt.plot(mean_divt, color='black', marker='o', linewidth=2)
+    plt.errorbar(np.arange(4), mean_divt, yerr=sd_divt, ecolor='black', elinewidth=2, capthick=2, capsize=7, barsabove=True)
+    # Plotting per coherence level (rainbow)
     colors = plt.get_cmap('rainbow', firing_rates.shape[1])
-    for i_coh in range(firing_rates.shape[1]):
+    for i_coh in range(1, firing_rates.shape[1]):
         color = colors(i_coh)
         plt.plot(divt_results[:, i_coh], color=color, zorder=1)
+    plt.grid(True, linestyle='--', alpha=1.0)
     plt.xticks(np.arange(4), ['L23', 'L4', 'L5', 'L6'])
     plt.ylabel('Divergence timing')
     plt.show()
@@ -136,74 +132,6 @@ def coherence_results_ccn(fn):
     # col_params = load_config('../config/model.toml')
     # network = ColumnAreaWTA(col_params, area='mt')
 
-    # orig_weights = torch.tensor([[ 4.1900e-01, -4.9223e-01,  1.1323e-01, -1.0566e-01,  2.0433e-02,
-    #       0.0000e+00,  5.3040e-03,  0.0000e+00, -0.0000e+00,  0.0000e+00,
-    #      -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-    #       0.0000e+00],
-    #     [ 3.8463e-01, -3.9232e-01,  3.9754e-02, -6.5461e-02,  4.8854e-02,
-    #       0.0000e+00,  2.9262e-03,  0.0000e+00,  5.4915e-01,  0.0000e+00,
-    #      -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-    #       0.0000e+00],
-    #     [ 2.0566e-02, -1.5744e-02,  6.3114e-02, -1.7955e-01,  4.1836e-03,
-    #      -1.8672e-04,  3.2230e-02,  0.0000e+00, -0.0000e+00,  0.0000e+00,
-    #      -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-    #       0.0000e+00],
-    #     [ 1.9051e-01, -7.7270e-03,  1.0242e-01, -2.1542e-01,  2.0571e-03,
-    #       0.0000e+00,  7.7669e-02,  0.0000e+00, -0.0000e+00,  0.0000e+00,
-    #      -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-    #       0.0000e+00],
-    #     [ 2.8151e-01, -1.7086e-01,  6.4156e-02, -7.0772e-03,  5.3991e-02,
-    #      -2.9011e-01,  1.4330e-02,  0.0000e+00, -0.0000e+00,  0.0000e+00,
-    #      -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-    #       0.0000e+00],
-    #     [ 1.4995e-01, -7.2550e-02,  3.2234e-02, -2.7268e-03,  3.8507e-02,
-    #      -2.3618e-01,  6.0050e-03,  0.0000e+00, -0.0000e+00,  0.0000e+00,
-    #      -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-    #       0.0000e+00],
-    #     [ 4.1833e-02, -1.7618e-02,  2.6403e-02, -2.0724e-02,  3.6656e-02,
-    #      -1.2382e-02,  2.8092e-02, -1.7739e-01, -0.0000e+00,  0.0000e+00,
-    #      -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-    #       0.0000e+00],
-    #     [ 9.8653e-02, -2.6619e-03,  4.2166e-03, -6.1922e-04,  1.7482e-02,
-    #      -4.9986e-03,  4.7322e-02, -1.0834e-01, -0.0000e+00,  0.0000e+00,
-    #      -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-    #       0.0000e+00],
-    #     [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-    #       0.0000e+00, -0.0000e+00,  0.0000e+00,  4.1900e-01, -4.9223e-01,
-    #       1.1323e-01, -1.0566e-01,  2.0433e-02,  0.0000e+00,  5.3040e-03,
-    #       0.0000e+00],
-    #     [ 5.4915e-01,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-    #       0.0000e+00, -0.0000e+00,  0.0000e+00,  3.8463e-01, -3.9232e-01,
-    #       3.9754e-02, -6.5461e-02,  4.8854e-02,  0.0000e+00,  2.9262e-03,
-    #       0.0000e+00],
-    #     [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-    #       0.0000e+00, -0.0000e+00,  0.0000e+00,  2.0566e-02, -1.5744e-02,
-    #       6.3114e-02, -1.7955e-01,  4.1836e-03, -1.8672e-04,  3.2230e-02,
-    #       0.0000e+00],
-    #     [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-    #       0.0000e+00, -0.0000e+00,  0.0000e+00,  1.9051e-01, -7.7270e-03,
-    #       1.0242e-01, -2.1542e-01,  2.0571e-03,  0.0000e+00,  7.7669e-02,
-    #       0.0000e+00],
-    #     [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-    #       0.0000e+00, -0.0000e+00,  0.0000e+00,  2.8151e-01, -1.7086e-01,
-    #       6.4156e-02, -7.0772e-03,  5.3991e-02, -2.9011e-01,  1.4330e-02,
-    #       0.0000e+00],
-    #     [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-    #       0.0000e+00, -0.0000e+00,  0.0000e+00,  1.4995e-01, -7.2550e-02,
-    #       3.2234e-02, -2.7268e-03,  3.8507e-02, -2.3618e-01,  6.0050e-03,
-    #       0.0000e+00],
-    #     [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-    #       0.0000e+00, -0.0000e+00,  0.0000e+00,  4.1833e-02, -1.7618e-02,
-    #       2.6403e-02, -2.0724e-02,  3.6656e-02, -1.2382e-02,  2.8092e-02,
-    #      -1.7739e-01],
-    #     [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-    #       0.0000e+00, -0.0000e+00,  0.0000e+00,  9.8653e-02, -2.6619e-03,
-    #       4.2166e-03, -6.1922e-04,  1.7482e-02, -4.9986e-03,  4.7322e-02,
-    #      -1.0834e-01]])
-
-    # orig_weights = torch.nn.Parameter(orig_weights, requires_grad=False)
-    # network.recurrent_weights = orig_weights
-
     # Time params
     dt = 1e-4
     stim_phase = 0.05
@@ -219,6 +147,8 @@ def coherence_results_ccn(fn):
 
         # Run the model for different coherences (diff between input A and B)
         coherences = [0., 2., 4., 6., 8., 10., 12., 14., 16., 18., 20.]
+        # coherences = [0., 0.2, 0.4, 0.6, 0.8, 1., 1.2, 1.4, 1.6, 1.8, 2.]
+        # coherences = [0., 1., 2., 3., 4., 5., 6., 7., 8., 9., 10.]
 
         fr_results = torch.Tensor(4, len(coherences), 600, 2)
 
@@ -400,81 +330,14 @@ def bistable_perception(fn, nr_iterations):
     # Load network
     with open(fn, 'rb') as f:
         network = pickle.load(f)
-    # weights = network.recurrent_weights
+    weights = network.recurrent_weights.detach().numpy()
+
+    # self_excitation = [weights[0, 0], weights[8, 8]]
+    # lat_inhibition = [weights[1, 8], weights[9, 0]]
+    # other_weight = weights[0, 1]
     #
     # col_params = load_config('../config/model.toml')
     # network = ColumnAreaWTA(col_params, area='mt')
-    #
-    orig_weights = torch.tensor([[ 4.1900e-01, -4.9223e-01,  1.1323e-01, -1.0566e-01,  2.0433e-02,
-              0.0000e+00,  5.3040e-03,  0.0000e+00, -0.0000e+00,  0.0000e+00,
-             -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-              0.0000e+00],
-            [ 3.8463e-01, -3.9232e-01,  3.9754e-02, -6.5461e-02,  4.8854e-02,
-              0.0000e+00,  2.9262e-03,  0.0000e+00,  5.4915e-01,  0.0000e+00,
-             -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-              0.0000e+00],
-            [ 2.0566e-02, -1.5744e-02,  6.3114e-02, -1.7955e-01,  4.1836e-03,
-             -1.8672e-04,  3.2230e-02,  0.0000e+00, -0.0000e+00,  0.0000e+00,
-             -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-              0.0000e+00],
-            [ 1.9051e-01, -7.7270e-03,  1.0242e-01, -2.1542e-01,  2.0571e-03,
-              0.0000e+00,  7.7669e-02,  0.0000e+00, -0.0000e+00,  0.0000e+00,
-             -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-              0.0000e+00],
-            [ 2.8151e-01, -1.7086e-01,  6.4156e-02, -7.0772e-03,  5.3991e-02,
-             -2.9011e-01,  1.4330e-02,  0.0000e+00, -0.0000e+00,  0.0000e+00,
-             -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-              0.0000e+00],
-            [ 1.4995e-01, -7.2550e-02,  3.2234e-02, -2.7268e-03,  3.8507e-02,
-             -2.3618e-01,  6.0050e-03,  0.0000e+00, -0.0000e+00,  0.0000e+00,
-             -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-              0.0000e+00],
-            [ 4.1833e-02, -1.7618e-02,  2.6403e-02, -2.0724e-02,  3.6656e-02,
-             -1.2382e-02,  2.8092e-02, -1.7739e-01, -0.0000e+00,  0.0000e+00,
-             -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-              0.0000e+00],
-            [ 9.8653e-02, -2.6619e-03,  4.2166e-03, -6.1922e-04,  1.7482e-02,
-             -4.9986e-03,  4.7322e-02, -1.0834e-01, -0.0000e+00,  0.0000e+00,
-             -0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-              0.0000e+00],
-            [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-              0.0000e+00, -0.0000e+00,  0.0000e+00,  4.1900e-01, -4.9223e-01,
-              1.1323e-01, -1.0566e-01,  2.0433e-02,  0.0000e+00,  5.3040e-03,
-              0.0000e+00],
-            [ 5.4915e-01,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-          0.0000e+00, -0.0000e+00,  0.0000e+00,  3.8463e-01, -3.9232e-01,
-          3.9754e-02, -6.5461e-02,  4.8854e-02,  0.0000e+00,  2.9262e-03,
-          0.0000e+00],
-        [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-          0.0000e+00, -0.0000e+00,  0.0000e+00,  2.0566e-02, -1.5744e-02,
-          6.3114e-02, -1.7955e-01,  4.1836e-03, -1.8672e-04,  3.2230e-02,
-          0.0000e+00],
-        [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-          0.0000e+00, -0.0000e+00,  0.0000e+00,  1.9051e-01, -7.7270e-03,
-          1.0242e-01, -2.1542e-01,  2.0571e-03,  0.0000e+00,  7.7669e-02,
-          0.0000e+00],
-        [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-          0.0000e+00, -0.0000e+00,  0.0000e+00,  2.8151e-01, -1.7086e-01,
-          6.4156e-02, -7.0772e-03,  5.3991e-02, -2.9011e-01,  1.4330e-02,
-          0.0000e+00],
-        [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-          0.0000e+00, -0.0000e+00,  0.0000e+00,  1.4995e-01, -7.2550e-02,
-          3.2234e-02, -2.7268e-03,  3.8507e-02, -2.3618e-01,  6.0050e-03,
-          0.0000e+00],
-        [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-          0.0000e+00, -0.0000e+00,  0.0000e+00,  4.1833e-02, -1.7618e-02,
-          2.6403e-02, -2.0724e-02,  3.6656e-02, -1.2382e-02,  2.8092e-02,
-         -1.7739e-01],
-        [-0.0000e+00,  0.0000e+00, -0.0000e+00,  0.0000e+00, -0.0000e+00,
-          0.0000e+00, -0.0000e+00,  0.0000e+00,  9.8653e-02, -2.6619e-03,
-          4.2166e-03, -6.1922e-04,  1.7482e-02, -4.9986e-03,  4.7322e-02,
-         -1.0834e-01]])
-
-    # with open('../trained_wta_models/ww_trained_model_7.pkl', 'rb') as f:
-    #     network_ = pickle.load(f)
-    # orig_weights = network_.recurrent_weights
-
-    # network.recurrent_weights *= 1000
 
     # Time params
     dt = 1e-4
@@ -490,7 +353,7 @@ def bistable_perception(fn, nr_iterations):
         [-1.7997e-01, 8.3757e+00, 1.1346e+01, 1.1953e+01, -6.5426e+00, 1.0319e+01, -2.9719e+01, 1.2530e+01,
          -1.7997e-01, 8.3757e+00, 1.1346e+01, 1.1953e+01, -6.5426e+00, 1.0319e+01, -2.9719e+01, 1.2530e+01])
 
-    inputs = [10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25., 26., 27., 28., 29., 30.]
+    inputs = [20.] # [10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25., 26., 27., 28., 29., 30.]
 
     output_dom = torch.zeros((len(inputs), len(inputs)))
     output_alt = torch.zeros((len(inputs), len(inputs)))
@@ -520,44 +383,37 @@ def bistable_perception(fn, nr_iterations):
                         total = torch.concat([total, comp_fr], dim=0)
                     initial_state = ode_output[-1, :, :]
 
-                    # # Plot results
-                    # m = ode_output[:, 0, :16]
-                    # plt.plot(m[:, 0])
-                    # plt.plot(m[:, 8])
-                    # plt.show()
-                    #
-                    # a = ode_output[:, 0, 16:32]
-                    # plt.plot(a[:, 0])
-                    # plt.plot(a[:, 8])
-                    # plt.show()
-                    #
-                    # # noise = ode_output[:, 0, 32:]
-                    # # plt.plot(noise[:, 0])
-                    # # plt.plot(noise[:, 8])
-                    # # plt.show()
-                    #
-                    # plt.plot(comp_fr[:, 0])
-                    # plt.plot(comp_fr[:, 8])
+                    # Plot results
+                    m = ode_output[:, 0, :16]
+                    plt.plot(m[:, 0])
+                    plt.plot(m[:, 8])
+                    plt.show()
+
+                    a = ode_output[:, 0, 16:32]
+                    plt.plot(a[:, 0])
+                    plt.plot(a[:, 8])
+                    plt.show()
+
+                    # noise = ode_output[:, 0, 32:]
+                    # plt.plot(noise[:, 0])
+                    # plt.plot(noise[:, 8])
                     # plt.show()
 
-                # plt.plot(total[:, 0])
-                # plt.plot(total[:, 8])
-                # plt.show()
+                    plt.plot(comp_fr[:, 0])
+                    plt.plot(comp_fr[:, 8])
+                    plt.show()
+
+                plt.plot(total[:, 0])
+                plt.plot(total[:, 8])
+                plt.show()
 
                 # Dominance duration
                 A1 = total[:, 0].detach().numpy()  # func expects np
                 A2 = total[:, 8].detach().numpy()
                 dom_time = dominance_time(A1, A2, dt=dt, thresh=0.0001, sliding_window=10000)
-                # pprint(dom_time)
-                # print(np.round(np.sum(dom_time), 2))
 
                 # Alternation rate
                 alt_rate, alt = alternation_rate(A1, A2, dt=dt, sliding_window=1000)
-                # print(np.round(alt_rate, 2))
-
-                # # # Histogram
-                # # plt.hist(abs(dom_time), bins=100, color='r')
-                # # plt.show()
 
                 output_dom[int(muA-10), int(muB-10)] = torch.tensor(np.round(np.sum(dom_time), 2))
                 output_alt[int(muA-10), int(muB-10)] = torch.tensor(np.round(alt_rate, 2))
@@ -1084,19 +940,64 @@ def xor_timecourse():
 
 
 
+def interpolation_plot_wsi():
+
+    population_sizes = np.array([60606, 28202, 14176, 15837]) # L6: 15837
+    wsi = np.array([0.65, -0.1, 0.35, -0.55]) # L6: -0.55
+    divt = np.array([0.006, 0.004, 0.008, 0.0125])
+
+    x_axis = []
+    for i in range(len(population_sizes)):
+        curr_pop_size = population_sizes[i]
+        prev_pop_sizes = sum(population_sizes[:i])
+        x_axis.append(prev_pop_sizes + (curr_pop_size // 2))
+    x_axis = np.array(x_axis)
+
+    # Fit cubic polynomial
+    coeffs = np.polyfit(x_axis, wsi, deg=3)
+    poly = np.poly1d(coeffs)
+
+    # Smooth x for plotting
+    x_smooth = np.linspace(0, population_sizes.sum(), 500)
+    y_smooth = poly(x_smooth)
+
+    # Plot WSI
+    plt.figure(figsize=(6, 4))
+    plt.plot(x_axis, wsi, 'o', color='black', label='Layer values')
+    plt.plot(x_smooth, y_smooth, '-', color='black', linewidth=2, label='Cubic fit')
+    plt.xlim(0, population_sizes.sum())
+    plt.xticks(x_axis, ['L23', 'L4', 'L5', 'L6'])
+    plt.ylabel('Winner Selectivity Index')
+    plt.grid(True, linestyle='--', alpha=1.0)
+    plt.tight_layout()
+    plt.show()
+
+    # Plot DivT
+    plt.figure(figsize=(6, 4))
+    plt.plot(x_axis, divt, 'ro-', color='black', label='Layer values')
+    plt.xlim(0, population_sizes.sum())
+    plt.xticks(x_axis, ['L23', 'L4', 'L5', 'L6'])
+    plt.ylabel('Divergence timing')
+    plt.grid(True, linestyle='--', alpha=1.0)
+    plt.tight_layout()
+    plt.show()
+
+
 
 if __name__ == '__main__':
 
-    fn = '../wta_saved_model.pkl'
-    # fn = '../trained_wta_models/ww_trained_model_7.pkl' # weights *= 1000 # if model_7
+    fn = '../ww_trained_model.pkl'
+    # fn = '../ww_full_pops_no_noise.pkl'
+    # weights *= 1000 # if model_7
 
     # test_blep(fn)
 
     # Coherence rainbow plots
-    coherence_results_ccn(fn)
+    # coherence_results_ccn(fn)
+    # interpolation_plot_wsi()
 
     # Bistable perception results
-    # bistable_perception(fn, nr_iterations=5)  # nr_iters * 10 = total seconds
+    bistable_perception(fn, nr_iterations=5)  # nr_iters * 10 = total seconds
     # plot_dom_alt()
 
     # WTA time course showing WTA and bistable perception - used for CCN poster

@@ -1,6 +1,6 @@
 background_drive = 8.0
 capacitance = 250e-6
-adaptation_strength = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+adaptation_strength = [1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 [connection_probabilities]
 internal =     [[0.1009, 0.1689, 0.0880, 0.0818, 0.0323, 0.0000, 0.0076, 0.0000],

@@ -44,7 +44,7 @@ class ColumnArea(torch.nn.Module):
             column_parameters['population_size'][self.area])
         self.population_sizes = np.tile(self.population_sizes, self.num_columns)
         if small_network:  # for XOR and WTA
-            self.population_sizes = self.population_sizes / self.num_columns
+            self.population_sizes = self.population_sizes #  / self.num_columns   ######### NO HALVING OF POPULATIONS ###########
 
         self.num_populations = len(self.population_sizes)
         self.adaptation_strength = torch.tile(self.adaptation_strength, (self.num_columns,))
@@ -180,6 +180,10 @@ class ColumnAreaWTA(ColumnArea):
         std_W = 0.0001
         rand_weights = abs(torch.normal(mean=original_weights, std=std_W))
         lat_in_weights = (rand_weights * (self.lat_in_mask * self.external_mask)) + original_weights
+
+        # lat_in_weights[1, 8], lat_in_weights[9, 0] = 1060.0, 1060.0  # lateral inhibition
+        # lat_in_weights[0, 0], lat_in_weights[8, 8] = 840.0, 840.0  # self excitation
+
         self.recurrent_weights = nn.Parameter(lat_in_weights, requires_grad=True)
 
     def _initialize_output_weights(self):
@@ -248,33 +252,28 @@ class ColumnAreaWTA(ColumnArea):
         Diffusion function used by SDE. Noise is added to the
         membrane potential only
         '''
-        # noise_std = 1.0
-        # g = torch.zeros_like(y)
-        # n = (len(y[0]) // 3)
-        # g[:, n*2:] = noise_std
-
-        # noise_std = 0.0
-        # g = torch.zeros_like(y)
-        # split_noise = (len(y[0]) // 3) * 2
-        # g[:, split_noise:] = noise_std
-
         # g = torch.zeros_like(y)
         # n = y.shape[1] // 3
-        # sigma = 0.0 # 0.5 * 0.01
-        # g[:, 2 * n:] = sigma * torch.sqrt(2 / self.synapse_time_constant)
+        # sigma_N = 0.5  # original synaptic noise std
+        # tau_m = self.membrane_time_constant
+        # sigma_H = sigma_N / torch.sqrt(tau_m)
+        # g[:, :n] = 2.0  # sigma_H
+        #
+        # n = y.shape[1] // 3
+        # sigma0 = 2.0  # baseline adaptation noise
+        # tau_a = self.adapt_time_constant
+        # sigma_A = sigma0 * torch.sqrt(2 / tau_a)
+        # g[:, n:n * 2] = sigma_A
 
         g = torch.zeros_like(y)
         n = y.shape[1] // 3
         sigma_N = 0.5  # original synaptic noise std
+        R = self.resistance
+        tau_s = self.synapse_time_constant
         tau_m = self.membrane_time_constant
-        sigma_H = sigma_N / torch.sqrt(tau_m)
-        g[:, :n] = 2.0 # sigma_H
-
-        n = y.shape[1] // 3
-        sigma0 = 2.0 # baseline adaptation noise
-        tau_a = self.adapt_time_constant
-        sigma_A = sigma0 * torch.sqrt(2 / tau_a)
-        g[:, n:n*2] = sigma_A
+        sigma_H = sigma_N * R / tau_m * (2 * tau_s) ** 0.5
+        g[:, :n] = 2.0  # sigma_H
+        expected_var = g ** 2 * tau_m / 2
 
         return g
 
@@ -653,16 +652,16 @@ class ColumnNetwork(torch.nn.Module):
 
                 std_W = 1.0
                 rand_ff_weights = abs(torch.normal(mean=ff_init, std=std_W)) * self.feedforward_scale
-                rand_ff_weights *= 4.0 # 12.0 # 4.0
+                rand_ff_weights *= 4.0
 
                 ff_mask = torch.tile(self.feedforward_mask, (size_target, size_source))
                 if int(area_idx) < (self.nr_areas - 1):  # last area should be fully connected
                     if size_target == 2:
                         ff_mask = self.make_mask_fan_in(ff_mask, 2, 2)
-                        rand_ff_weights *= 2.0
+                        # rand_ff_weights *= 2.0
                     else:
-                        # ff_mask = self.make_mask_fan_in(ff_mask, 4, 4)
-                        ff_mask = self.make_mask_fan_in(ff_mask, 2, 2)
+                        ff_mask = self.make_mask_fan_in(ff_mask, 4, 4)
+                        # ff_mask = self.make_mask_fan_in(ff_mask, 2, 2)
                 area.feedforward_mask = ff_mask
 
                 rand_ff_weights = rand_ff_weights * ff_mask
@@ -722,7 +721,7 @@ class ColumnNetwork(torch.nn.Module):
         # rand_output_weights *= self.output_mask
         # rand_output_weights *= self.output_scale
 
-        self.output_weights = nn.Parameter(output_init, requires_grad=False) ####### NOT TRAINING OUTPUT WEIGHTS #######
+        self.output_weights = nn.Parameter(output_init, requires_grad=True)
 
     def set_time_vec(self, time_vec):
         '''

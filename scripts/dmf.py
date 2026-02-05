@@ -106,6 +106,7 @@ def get_params(J_local=87.8e-3, J_lateral=87.8e-3, area='MT'):
     params['W'] = J * K  # recurrent weight
 
     params['W_bg'] = K_bg * J_E
+    w = J * K
 
     params['kappa'] = np.tile([1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 2)
     params['tau_a'] = 10.
@@ -208,47 +209,105 @@ def update(state, params, stim, dt=1e-4):
     return state
 
 
+def run_bistable_perception():
+
+    params = get_params(J_local=0.13, J_lateral=0.172, area='MT')
+
+    state = {}
+    M = params['M']   # number of populations
+    state['I'] = np.zeros(M)    # input current
+    state['A'] = np.zeros(M)    # adaptation
+    state['H'] = np.zeros(M)    # membrane potential
+    state['R'] = np.zeros(M)    # rate
+    state['N'] = np.zeros(M)    # noise
+
+    dt = 1e-4
+    t_sim = 50
+    T = int(t_sim/dt)
+
+    stim = np.zeros(M)
+
+    # simulation
+    R = np.zeros((M, T))    # array for saving rate
+    A = np.zeros((M, T))
+    H = np.zeros((M, T))
+
+    nu_D1 = 20.0
+    nu_D2 = 20.0
+    stim = set_vis(stim, column='H', nu=nu_D1, params=params)
+    stim = set_vis(stim, column='V', nu=nu_D2, params=params)
+
+    for t in range(T):
+        state = update(state, params, stim)
+        H[:, t] = state['H']
+        A[:, t] = state['A']
+        R[:, t] = state['R']
+
+    plt.plot(H[0, :])
+    plt.plot(H[8, :])
+    plt.show()
+
+    plt.plot(A[0, :])
+    plt.plot(A[8, :])
+    plt.show()
+
+    plt.plot(R[0, :])
+    plt.plot(R[8, :])
+    plt.show()
+
+
 
 params = get_params(J_local=0.13, J_lateral=0.172, area='MT')
 
 state = {}
-M = params['M']   # number of populations
-state['I'] = np.zeros(M)    # input current
-state['A'] = np.zeros(M)    # adaptation
-state['H'] = np.zeros(M)    # membrane potential
-state['R'] = np.zeros(M)    # rate
-state['N'] = np.zeros(M)    # noise
+M = params['M']  # number of populations
+state['I'] = np.zeros(M)  # input current
+state['A'] = np.zeros(M)  # adaptation
+state['H'] = np.zeros(M)  # membrane potential
+state['R'] = np.zeros(M)  # rate
+state['N'] = np.zeros(M)  # noise
 
 dt = 1e-4
 t_sim = 50
-T = int(t_sim/dt)
+T = int(t_sim / dt)
 
 stim = np.zeros(M)
 
 # simulation
-R = np.zeros((M, T))    # array for saving rate
+R = np.zeros((M, T))  # array for saving rate
 A = np.zeros((M, T))
 H = np.zeros((M, T))
+I = np.zeros((M, T))
+N = np.zeros((M, T))
 
 nu_D1 = 20.0
 nu_D2 = 20.0
+
 stim = set_vis(stim, column='H', nu=nu_D1, params=params)
 stim = set_vis(stim, column='V', nu=nu_D2, params=params)
 
 for t in range(T):
+
     state = update(state, params, stim)
+    I[:, t] = state['I']
     H[:, t] = state['H']
     A[:, t] = state['A']
     R[:, t] = state['R']
+    N[:, t] = state['N']
 
-plt.plot(H[0, :])
-plt.plot(H[8, :])
-plt.show()
-
-plt.plot(A[0, :])
-plt.plot(A[8, :])
-plt.show()
+# plt.plot(I[0, :])
+# plt.show()
+#
+# plt.plot(H[0, :])
+# plt.show()
+#
+# plt.plot(A[0, :])
+# plt.show()
 
 plt.plot(R[0, :])
 plt.plot(R[8, :])
 plt.show()
+
+# plt.plot(N[0, :])
+# plt.ylim([-0.1, 0.1])
+# plt.show()
