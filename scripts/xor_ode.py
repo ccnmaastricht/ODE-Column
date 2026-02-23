@@ -2,7 +2,7 @@ import os
 from torchsde import sdeint, sdeint_adjoint
 from torchdiffeq import odeint, odeint_adjoint
 
-from src.coupled_columns import *
+from src.column_network_xor import ColumnNetworkXOR
 from src.utils import *
 
 import matplotlib.pyplot as plt

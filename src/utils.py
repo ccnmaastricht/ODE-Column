@@ -1,5 +1,8 @@
 import tomllib
 import torch
+import pickle
+import numpy as np
+import random
 
 
 def load_config(filepath: str) -> dict:
@@ -8,6 +11,23 @@ def load_config(filepath: str) -> dict:
     '''
     with open(filepath, 'rb') as f:
         return tomllib.load(f)
+
+
+def load_pkl_file(fn):
+    '''
+    Load the data from a pickle file
+    '''
+    with open(fn, 'rb') as f:
+        data = pickle.load(f)
+    return data
+
+
+def save_pkl_file(fn, data):
+    '''
+    Save the data to a pickle file
+    '''
+    with open(fn, 'wb') as f:
+        pickle.dump(data, f)
 
 
 def compute_firing_rate(x):
@@ -46,6 +66,15 @@ def torch_interp(x, xp, fp):
     return y0 + slope * (x.unsqueeze(-1) - x0.unsqueeze(-1))
 
 
+def set_seed(seed):
+    '''
+    Sets the random seed
+    '''
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
+
 ### Loss functions ###
 
 def min_max(firing_rates):
@@ -79,6 +108,12 @@ def huber_loss_wta(pred_states, true, network):
     fr_pred = compute_firing_rate(mem_pred - adap_pred)
     fr_pred_A = fr_pred[:, :, :8]
     fr_pred_B = fr_pred[:, :, 8:]
+
+    d1 = fr_pred_A.device
+    d2 = network.output_weights.device
+    d3 = pred_states.device
+    d4 = true.device
+
     fr_pred_A_sum = torch.sum(fr_pred_A * network.output_weights, dim=2)
     fr_pred_B_sum = torch.sum(fr_pred_B * network.output_weights, dim=2)
     fr_pred_sum = torch.stack([fr_pred_A_sum, fr_pred_B_sum], dim=2)
