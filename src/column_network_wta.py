@@ -27,6 +27,8 @@ class ColumnAreaWTA(ColumnArea):
         self._initialize_lat_in_weights()
         self._initialize_output_weights()
 
+        self.constrain_recurr_matrix()
+
     def _make_lat_in_mask(self):
         '''
         Mask to select lateral inhibition connections between L2/3 layers.
@@ -46,9 +48,6 @@ class ColumnAreaWTA(ColumnArea):
         std_W = 0.01
         rand_weights = abs(torch.normal(mean=zero_weights, std=std_W))
         lat_in_weights = rand_weights * self.lat_in_mask
-
-        # lat_in_weights[1, 8], lat_in_weights[9, 0] = 1060.0, 1060.0  # lateral inhibition
-        # lat_in_weights[0, 0], lat_in_weights[8, 8] = 840.0, 840.0  # self excitation
 
         self.lat_in_weights = nn.Parameter(lat_in_weights, requires_grad=True)
 
@@ -71,24 +70,21 @@ class ColumnAreaWTA(ColumnArea):
         '''
         self.time_vec = time_vec
 
-    def set_stim(self, stim):
+    def set_stim(self, stim, three_phases=True):
         '''
         Set the stimulus as a mutable attribute. This is necessary because
         torchsde does not allow any extra parameters other than t, y0.
+        Also specify whether the stimulus should be presented in three phases,
+        i.e. off, on, off instead of presenting it for the full time interval.
         '''
         self.stim = stim.to(self.get_device())
+        self.three_stim_phases = three_phases
 
     def get_device(self):
         '''
         Gets the network's current device, based on the recurrent_weights
         '''
         return self.recurrent_weights.device
-
-    def extend_recurr_matrix(self, W):
-        W_ext = torch.zeros((self.num_populations, self.num_populations))
-        W_ext[:8, :8] = W
-        W_ext[8:, 8:] = W
-        return W_ext
 
     def enforce_pos_neg(self, W):
         '''
@@ -99,49 +95,56 @@ class ColumnAreaWTA(ColumnArea):
         W_pos = torch.relu(W)  # ≥ 0, all excitatory projections are positive
         W_neg = -torch.relu(-W)  # ≤ 0, all inhibitory projections are negative
 
-        d1 = cols.device
-        d2 = W.device
-
         W = torch.where(cols % 2 == 1, W_neg, W_pos)
         return W
 
     def constrain_recurr_matrix(self):
-        # Add recurrent (inner) weights and lateral inhibition weights and constrain
+        '''
+        Add recurrent (inner) weights and lateral inhibition weights and
+        constrain weights matrix.
+        '''
         W = (self.recurrent_weights * self.internal_mask) + (self.lat_in_weights * self.lat_in_mask)
         self.W = self.enforce_pos_neg(W)
+
+    def present_stim(self, t):
+        '''
+        Presents the stimulus based on the current time in the form of
+        feedforward rate.
+        '''
+        if self.three_stim_phases:
+            feedforward_rate = torch.zeros_like(self.stim)
+            if t > self.time_vec[len(self.time_vec)//3] and t < self.time_vec[len(self.time_vec)//3 * 2]:
+                feedforward_rate = self.stim
+        else:
+            feedforward_rate = self.stim
+        return feedforward_rate
 
     def forward(self, t, state):
         '''
         State dynamics the ODE uses
         '''
-        # Prepare the state (membrane, adaptation, firing rate)
-        state = state.squeeze(0)  # lose extra dim
-        mem_adap_split = len(state) // 3
-        adap_rate_split = len(state) // 3 * 2
-        membrane_potential, adaptation = state[:mem_adap_split], state[mem_adap_split:adap_rate_split]
+        # Prepare the state (membrane, adaptation)
+        mem_adap_split = state.shape[1] // 2
+        membrane_potential, adaptation = state[:, :mem_adap_split], state[:, mem_adap_split:]
 
         # Compute new firing rate from membrane and adaptation
         firing_rate = compute_firing_rate(membrane_potential - adaptation)
 
-        # Get current stimulus (ff rate) based on current time t and the time vector time_vec
-        feedforward_rate = torch_interp(t, self.time_vec, self.stim)
+        # Present the stimulus
+        feedforward_rate = self.present_stim(t)
 
-        # Compute current current
-        feedforward_current = self.feedforward_weights * feedforward_rate               # stimulus feedforward input
-        background_current = self.background_weights * self.background_drive            # background input
-        recurrent_current = torch.matmul(self.W, firing_rate)                           # recurrent input
+        # Compute current coming from feedforward, background and recurrent sources
+        feedforward_current = feedforward_rate * self.feedforward_weights
+        background_current = torch.tile(self.background_drive, (state.shape[0], 1)) * self.background_weights
+        recurrent_current = torch.matmul(firing_rate, self.W.T)
         total_current = (feedforward_current + background_current + recurrent_current) * self.synapse_time_constant
 
         # State derivatives
-        delta_membrane_potential = (-membrane_potential +
-            total_current * self.resistance) / self.membrane_time_constant
-        delta_adaptation = (-adaptation + self.adaptation_strength *
-                            firing_rate) / self.adapt_time_constant
-        prev_firing_rate = state[adap_rate_split:]
-        delta_firing_rate = (-prev_firing_rate + firing_rate) / self.synapse_time_constant
+        delta_membrane_potential = (-membrane_potential + total_current * self.resistance) / self.membrane_time_constant
+        delta_adaptation = (-adaptation + self.adaptation_strength * firing_rate) / self.adapt_time_constant
 
-        state = torch.concat((delta_membrane_potential, delta_adaptation, delta_firing_rate))
-        return state.unsqueeze(0)
+        state = torch.concat((delta_membrane_potential, delta_adaptation), dim=1)
+        return state
 
     def diffusion(self, t, y):
         '''
@@ -150,13 +153,12 @@ class ColumnAreaWTA(ColumnArea):
         '''
 
         g = torch.zeros_like(y)
-        n = y.shape[1] // 3
-        sigma_N = 0.5  # original synaptic noise std
-        R = self.resistance
-        tau_s = self.synapse_time_constant
-        tau_m = self.membrane_time_constant
-        sigma_H = sigma_N * R / tau_m * (2 * tau_s) ** 0.5
-        g[:, :n] = 3.0  # sigma_H
-        expected_var = g ** 2 * tau_m / 2
+        n = y.shape[1] // 2
+        # sigma_N = 0.5  # original synaptic noise std
+        # R = self.resistance
+        # tau_s = self.synapse_time_constant
+        # tau_m = self.membrane_time_constant
+        # sigma_H = sigma_N * R / tau_m * (2 * tau_s) ** 0.5
+        g[:, :n] = 3.0
 
         return g

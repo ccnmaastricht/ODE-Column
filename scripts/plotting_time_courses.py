@@ -14,7 +14,7 @@ from torchdiffeq import odeint, odeint_adjoint
 from src.utils import *
 from src.column_network_wta import ColumnAreaWTA
 from src.column_network_xor import ColumnNetworkXOR
-from wta_ode import set_stim_three_phases
+from wta_ode import set_stim_whole_column
 from xor_ode import init_xor, make_stim, prep_stim_ode
 
 
@@ -22,14 +22,14 @@ from xor_ode import init_xor, make_stim, prep_stim_ode
 def wta_timecourse(fn):
 
     # Load network
-    with open(fn, 'rb') as f:
-        _network = pickle.load(f)
-    weights = _network.recurrent_weights
+    network = load_pkl_file(fn)
 
-    col_params = load_config('../config/model.toml')
-    network = ColumnAreaWTA(col_params, area='mt')
+    # weights = network.recurrent_weights + network.lat_in_weights
+    # col_params = load_config('../config/model.toml')
+    # network = ColumnAreaWTA(col_params, area='mt')
+    # network.recurrent_weights = torch.nn.Parameter(weights, requires_grad=False)
 
-    network.recurrent_weights = torch.nn.Parameter(weights, requires_grad=False)
+    weights = network.W
 
     # Time params
     dt = 1e-4
@@ -39,23 +39,25 @@ def wta_timecourse(fn):
     network.time_vec = time_vec
 
     # Initial state is just zeros, except membrane potential
-    initial_state = torch.zeros(48).unsqueeze(0)  # 48 = 8*2*3
-    initial_state[:, :16] = torch.tile(torch.tensor([-1.5554, 8.9735, 12.0712, 12.5040, -5.2554, 10.4650, -30.8225, 12.6189]), (2,))
+    initial_state = torch.zeros(1, 32)
+    initial_state[:, :16] = torch.tile(torch.tensor([-1.7997e-01, 8.3757e+00, 1.1346e+01, 1.1953e+01,
+                                                     -6.5426e+00, 1.0319e+01, -2.9719e+01, 1.2530e+01]),(1, 2,))
 
     with torch.no_grad():
         i = 0
 
-        for stims in [[0., 0.], [0., 0.], [0., 0.], [10., 30.], [0., 0.], [30., 10.], [0., 0.], [20., 20.], [20., 20.], [20., 20.], [20., 20.], [0., 0.]]:  #
+        for stims in [[0., 0.], [0., 0.], [0., 0.], [10., 30.], [0., 0.], [30., 10.], [0., 0.], [20., 20.], [20., 20.], [20., 20.], [20., 20.], [0., 0.]]:
 
             muA = stims[0]
             muB = stims[1]
 
             # Set stim and time_vec
-            stim = torch.zeros(time_steps, 16)
-            stim[:, [2, 3]] = muA
-            stim[:, [10, 11]] = muB
-            network.stim = stim
-            network.time_vec = time_vec
+            stim = torch.zeros(time_steps, 2)
+            stim[:, 0] = muA
+            stim[:, 1] = muB
+            stim = set_stim_whole_column(stim)
+            network.set_stim(stim[0, :].unsqueeze(0), three_phases=False)
+            network.set_time_vec(time_vec)
 
             ode_output = sdeint(network, initial_state, time_vec,
                                 names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
@@ -69,8 +71,8 @@ def wta_timecourse(fn):
             initial_state = ode_output[-1, :, :]
             i += 1
 
-        with open('../wta_timecourse_plot.pkl', 'wb') as f:
-            pickle.dump(time_course, f)
+        # with open('../wta_timecourse_plot.pkl', 'wb') as f:
+        #     pickle.dump(time_course, f)
 
         # with open("../wta_timecourse_plot_28-07.pkl", 'rb') as f:  # this one was used for the CCN poster!
         #     time_course = pickle.load(f)
@@ -206,10 +208,12 @@ def xor_timecourse():
 
 if __name__ == '__main__':
 
-    fn = '../___.pkl'
+    set_seed(1)
 
     # WTA time course showing WTA and bistable perception - used for CCN poster
-    wta_timecourse(fn)
+    fn_wta = '../wta_trained_model.pkl'
+    # fn_wta = '../trained_wta_models/wta_full_pops_new.pkl'
+    wta_timecourse(fn_wta)
 
     # XOR time course - used for CCN poster
     xor_timecourse()

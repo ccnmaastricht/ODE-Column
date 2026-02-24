@@ -13,7 +13,7 @@ from torchdiffeq import odeint, odeint_adjoint
 
 from src.utils import *
 from src.column_network_wta import ColumnAreaWTA
-from wta_ode import set_stim_three_phases
+from wta_ode import set_stim_whole_column
 
 
 
@@ -47,8 +47,8 @@ def plot_wta_layers(fr_results, coherences):
         for c_idx in range(len(coherences)):
             color = colors(c_idx)
 
-            axes_.plot(fr_results[l_idx, c_idx, :, 1], linestyle='--', color=color, zorder=1)
-            axes_.plot(fr_results[l_idx, c_idx, :, 0], color=color, zorder=2)
+            axes_.plot(fr_results[l_idx, :, c_idx, 1], linestyle='--', color=color, zorder=1)
+            axes_.plot(fr_results[l_idx, :, c_idx, 0], color=color, zorder=2)
 
         # Add y label indicating layer
         axes_.set_title(layers[l_idx])
@@ -101,13 +101,13 @@ def plot_wta_layers(fr_results, coherences):
 def compute_WSI_DivT(firing_rates, dt, divt_threshold=0.1, divt_window=0.02):
     divt_window = int(divt_window / dt)  # convert from seconds to timesteps
 
-    wsi_results = torch.zeros((firing_rates.shape[0], firing_rates.shape[1]))
-    divt_results = torch.zeros((firing_rates.shape[0], firing_rates.shape[1]))
+    wsi_results = torch.zeros((firing_rates.shape[0], firing_rates.shape[2]))
+    divt_results = torch.zeros((firing_rates.shape[0], firing_rates.shape[2]))
 
     for i_layer in range(firing_rates.shape[0]):
-        for i_coh in range(0, firing_rates.shape[1]):
-            winner_column = firing_rates[i_layer, i_coh, :, 0]
-            loser_column = firing_rates[i_layer, i_coh, :, 1]
+        for i_coh in range(0, firing_rates.shape[2]):
+            winner_column = firing_rates[i_layer, :, i_coh, 0]
+            loser_column = firing_rates[i_layer, :, i_coh, 1]
 
             # Compute WSI (winner-selective index)
             wsi = (winner_column - loser_column) / (winner_column + loser_column)
@@ -132,8 +132,8 @@ def plot_WSI_DivT(wsi_results, divt_results, firing_rates):
     plt.plot(mean_wsi, color='black', marker='o', linewidth=2)
     plt.errorbar(np.arange(4), mean_wsi, yerr=sd_wsi, ecolor='black', elinewidth=2, capthick=2, capsize=7, barsabove=True)
     # Plotting per coherence level (rainbow)
-    colors = plt.get_cmap('rainbow', firing_rates.shape[1])
-    for i_coh in range(0, firing_rates.shape[1]):
+    colors = plt.get_cmap('rainbow', firing_rates.shape[2])
+    for i_coh in range(0, firing_rates.shape[2]):
         color = colors(i_coh)
         plt.plot(wsi_results[:, i_coh], color=color, zorder=1)
     plt.grid(True, linestyle='--', alpha=1.0)
@@ -150,8 +150,8 @@ def plot_WSI_DivT(wsi_results, divt_results, firing_rates):
     plt.plot(mean_divt, color='black', marker='o', linewidth=2)
     plt.errorbar(np.arange(4), mean_divt, yerr=sd_divt, ecolor='black', elinewidth=2, capthick=2, capsize=7, barsabove=True)
     # Plotting per coherence level (rainbow)
-    colors = plt.get_cmap('rainbow', firing_rates.shape[1])
-    for i_coh in range(0, firing_rates.shape[1]):
+    colors = plt.get_cmap('rainbow', firing_rates.shape[2])
+    for i_coh in range(0, firing_rates.shape[2]):
         color = colors(i_coh)
         plt.plot(divt_results[:, i_coh], color=color, zorder=1)
     plt.grid(True, linestyle='--', alpha=1.0)
@@ -161,7 +161,6 @@ def plot_WSI_DivT(wsi_results, divt_results, firing_rates):
     plt.ylim([0.0, 0.016])
     plt.ylabel('Divergence timing (ms)', fontsize=14)
     plt.show()
-
 
 def plot_WSI_DivT_layer_shifted(wsi_results, divt_results, firing_rates):
 
@@ -180,8 +179,8 @@ def plot_WSI_DivT_layer_shifted(wsi_results, divt_results, firing_rates):
     plt.plot(x_axis, mean_wsi, color='black', marker='o', linewidth=2)
     plt.errorbar(x_axis, mean_wsi, yerr=sd_wsi, ecolor='black', elinewidth=2, capthick=2, capsize=7, barsabove=True)
     # Plotting per coherence level (rainbow)
-    colors = plt.get_cmap('rainbow', firing_rates.shape[1])
-    for i_coh in range(0, firing_rates.shape[1]):
+    colors = plt.get_cmap('rainbow', firing_rates.shape[2])
+    for i_coh in range(0, firing_rates.shape[2]):
         color = colors(i_coh)
         plt.plot(x_axis, wsi_results[:, i_coh], color=color, zorder=1)
     plt.xlim(0, population_sizes.sum())
@@ -196,8 +195,8 @@ def plot_WSI_DivT_layer_shifted(wsi_results, divt_results, firing_rates):
     plt.plot(x_axis, mean_divt, 'ro-', color='black', label='Layer values')
     plt.errorbar(x_axis, mean_divt, yerr=sd_divt, ecolor='black', elinewidth=2, capthick=2, capsize=7, barsabove=True)
     # Plotting per coherence level (rainbow)
-    colors = plt.get_cmap('rainbow', firing_rates.shape[1])
-    for i_coh in range(0, firing_rates.shape[1]):
+    colors = plt.get_cmap('rainbow', firing_rates.shape[2])
+    for i_coh in range(0, firing_rates.shape[2]):
         color = colors(i_coh)
         plt.plot(x_axis, divt_results[:, i_coh], color=color, zorder=1)
     plt.xlim(0, population_sizes.sum())
@@ -214,8 +213,7 @@ def plot_WSI_DivT_layer_shifted(wsi_results, divt_results, firing_rates):
 def wta_rainbow_plots(fn):
 
     # Load network
-    with open(fn, 'rb') as f:
-        network = pickle.load(f)
+    network = load_pkl_file(fn)
 
     # Time params
     dt = 1e-4
@@ -223,45 +221,39 @@ def wta_rainbow_plots(fn):
     time_steps = int((stim_phase * 3) / dt)  # add pre- and post-stimulus phase
     time_vec = torch.linspace(0., time_steps * dt, time_steps)
 
-    # Initial state is just zeros, expect for the membrane potential
-    initial_state = torch.zeros(48).unsqueeze(0)  # 48 = 8*2*3
-    initial_state[0, :16] = torch.tensor([-1.7997e-01, 8.3757e+00, 1.1346e+01, 1.1953e+01, -6.5426e+00, 1.0319e+01, -2.9719e+01, 1.2530e+01,
-                                       -1.7997e-01, 8.3757e+00, 1.1346e+01, 1.1953e+01, -6.5426e+00, 1.0319e+01, -2.9719e+01, 1.2530e+01])
-
     with torch.no_grad():
 
         # Run the model for different coherences (diff between input A and B)
         coherences = [2., 4., 6., 8., 10., 12., 14., 16., 18., 20.]
-        # coherences = [0., 0.2, 0.4, 0.6, 0.8, 1., 1.2, 1.4, 1.6, 1.8, 2.]
-        # coherences = [0., 1., 2., 3., 4., 5., 6., 7., 8., 9., 10.]
 
-        fr_results = torch.Tensor(4, len(coherences), 600, 2)
+        # Initial state is just zeros, expect for the membrane potential
+        initial_state = torch.zeros(len(coherences), 32)
+        initial_state[:, :16] = torch.tile(torch.tensor([-1.7997e-01, 8.3757e+00, 1.1346e+01, 1.1953e+01,
+                                                         -6.5426e+00, 1.0319e+01, -2.9719e+01, 1.2530e+01]), (len(coherences), 2,))
 
+        # Set the stimuli
+        stims = torch.zeros((len(coherences), 2))
         for i, coherence in enumerate(coherences):
-
-            # Determine the stimulus
             muA = 40.
             muB = muA - coherence
-            stim = set_stim_three_phases(network.num_populations, time_vec, torch.tensor([muA, muB]))
+            stims[i, :] = torch.tensor([muA, muB])
+        stims = set_stim_whole_column(stims)
 
-            # Set stim and time_vec
-            network.stim = stim
-            network.time_vec = time_vec
+        # Set stim and time_vec
+        network.set_stim(stims)
+        network.set_time_vec(time_vec)
 
-            # Run the model
-            ode_output = odeint(network, initial_state, time_vec)
-            # ode_output = sdeint(network, initial_state, time_vec, names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
+        # Run the model
+        ode_output = odeint(network, initial_state, time_vec)
+        fr = compute_firing_rate(ode_output[:, :, :16] - ode_output[:, :, 16:32])
 
-            # Compute firing rates
-            fr = ode_output[:, 0, 32:]
-
-            fr_results[0, i, :, :] = fr[400:1000, [0, 8]]  # layer 2/3
-            fr_results[1, i, :, :] = fr[400:1000, [2, 10]]  # layer 4
-            fr_results[2, i, :, :] = fr[400:1000, [4, 12]]  # layer 5
-            fr_results[3, i, :, :] = fr[400:1000, [6, 14]]  # layer 6
+        fr_results = torch.Tensor(4, 600, len(coherences), 2)
+        fr_results[0, :, :, :] = fr[400:1000, :, [0, 8]]  # layer 2/3
+        fr_results[1, :, :, :] = fr[400:1000, :, [2, 10]]  # layer 4
+        fr_results[2, :, :, :] = fr[400:1000, :, [4, 12]]  # layer 5
+        fr_results[3, :, :, :] = fr[400:1000, :, [6, 14]]  # layer 6
 
         plot_wta_layers(fr_results, coherences)
-
         compute_WSI_DivT(fr_results, dt)
 
 
@@ -269,9 +261,7 @@ def wta_rainbow_plots(fn):
 
 def interpolation_plot_wsi(wsi, divt):
 
-    population_sizes = np.array([1, 60606, 28202, 14176, 15837]) # L6: 15837
-    wsi = np.array([1.0, 0.65, 0.1, 0.35, 0.55]) # L6: -0.55
-    divt = np.array([0.0, 0.006, 0.004, 0.008, 0.0125])
+    population_sizes = np.array([60606, 28202, 14176, 15837])
 
     x_axis = []
     for i in range(len(population_sizes)):
@@ -294,7 +284,7 @@ def interpolation_plot_wsi(wsi, divt):
     ax.plot(x_axis, wsi, 'o', color='black', label='Layer values')
     ax.plot(x_smooth, y_smooth, '-', color='black', linewidth=2, label='Cubic fit')
     ax.set_xlim(0, population_sizes.sum())
-    ax.set_xticks(x_axis, [None, 'L2/3', 'L4', 'L5', 'L6'], fontsize=14)
+    ax.set_xticks(x_axis, ['L2/3', 'L4', 'L5', 'L6'], fontsize=14)
     ax.set_ylim([-0.1, 1.1])
     ax.set_yticks([0.0, 0.5, 1.0])
     ax.set_ylabel('Choice Selectivity Index', fontsize=14)
@@ -327,7 +317,7 @@ def interpolation_plot_wsi(wsi, divt):
     ax.plot(x_axis, divt, 'o', color='black', label='Layer values')
     ax.plot(x_smooth, y_smooth, '-', color='black', linewidth=2, label='Cubic fit')
     ax.set_xlim(0, population_sizes.sum())
-    ax.set_xticks(x_axis, [None, 'L2/3', 'L4', 'L5', 'L6'], fontsize=14)
+    ax.set_xticks(x_axis, ['L2/3', 'L4', 'L5', 'L6'], fontsize=14)
     ax.set_ylim([-0.001, 0.015])
     ax.set_yticks([0.0, 0.005, 0.01, 0.015], ['0', '5', '10', '15'])
     ax.set_ylabel('Divergence timing (ms)', fontsize=14)

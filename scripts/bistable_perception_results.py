@@ -13,7 +13,7 @@ from torchdiffeq import odeint, odeint_adjoint
 
 from src.utils import *
 from src.column_network_wta import ColumnAreaWTA
-from wta_ode import set_stim_three_phases
+from wta_ode import set_stim_whole_column
 
 
 
@@ -100,17 +100,6 @@ def run_bistable_perception(fn, nr_iterations):
 
     # Load network
     network = load_pkl_file(fn)
-    inner_weights = network.recurrent_weights.detach()
-    lat_in_weights = network.lat_in_weights.detach()
-    full_weights = inner_weights + lat_in_weights
-
-    self_excitation = [full_weights[0, 0], full_weights[8, 8]]
-    lat_inhibition = [full_weights[1, 8], full_weights[9, 0]]
-
-    # lat_in_weights[0, 0], lat_in_weights[8, 8] = 274.0, 274.0
-    # lat_in_weights[1, 8], lat_in_weights[9, 0] = 1060.0, 1060.0
-    #
-    # network.lat_in_weights = torch.nn.Parameter(lat_in_weights, requires_grad=True)
 
     # Time params
     dt = 1e-4
@@ -121,10 +110,9 @@ def run_bistable_perception(fn, nr_iterations):
     network.adaptation_strength = torch.tensor([1.5, 0., 0., 0., 0., 0., 0., 0., 1.5, 0., 0., 0., 0., 0., 0., 0., ])
 
     # Initial state is just zeros - except for the membrane potential
-    initial_state = torch.zeros(48).unsqueeze(0)  # 48 = 8*2*3
-    initial_state[0, :16] = torch.tensor(
-        [-1.7997e-01, 8.3757e+00, 1.1346e+01, 1.1953e+01, -6.5426e+00, 1.0319e+01, -2.9719e+01, 1.2530e+01,
-         -1.7997e-01, 8.3757e+00, 1.1346e+01, 1.1953e+01, -6.5426e+00, 1.0319e+01, -2.9719e+01, 1.2530e+01])
+    initial_state = torch.zeros(1, 32)
+    initial_state[:, :16] = torch.tile(torch.tensor([-1.7997e-01, 8.3757e+00, 1.1346e+01, 1.1953e+01,
+                                                     -6.5426e+00, 1.0319e+01, -2.9719e+01, 1.2530e+01]),(1, 2,))
 
     inputs = [10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25., 26., 27., 28., 29., 30.]
 
@@ -138,11 +126,12 @@ def run_bistable_perception(fn, nr_iterations):
                 print(muA, muB)
 
                 # Set stim and time_vec
-                stim = torch.zeros(time_steps, 16)
-                stim[:, [2, 3]] = muA
-                stim[:, [10, 11]] = muB
-                network.stim = stim
-                network.time_vec = time_vec
+                stim = torch.zeros(time_steps, 2)
+                stim[:, 0] = muA
+                stim[:, 1] = muB
+                stim = set_stim_whole_column(stim)
+                network.set_stim(stim[0, :].unsqueeze(0), three_phases=False)
+                network.set_time_vec(time_vec)
 
                 # loop for nr of iterations
                 for i in range(nr_iterations):
@@ -151,26 +140,25 @@ def run_bistable_perception(fn, nr_iterations):
                     comp_fr = compute_firing_rate(ode_output[:, 0, :16] - ode_output[:, 0, 16:32])
                     if i == 0:
                         total = comp_fr
-
                     else:
                         total = torch.concat([total, comp_fr], dim=0)
                     initial_state = ode_output[-1, :, :]
 
-                #     # Plot results
-                #     # m = ode_output[:, 0, :16]
-                #     # plt.plot(m[:, 0])
-                #     # plt.plot(m[:, 8])
-                #     # plt.show()
-                #     #
-                #     # a = ode_output[:, 0, 16:32]
-                #     # plt.plot(a[:, 0])
-                #     # plt.plot(a[:, 8])
-                #     # plt.show()
-                #     #
-                #     # plt.plot(comp_fr[:, 0])
-                #     # plt.plot(comp_fr[:, 8])
-                #     # plt.show()
-                #
+                    # Plot results
+                    # m = ode_output[:, 0, :16]
+                    # plt.plot(m[:, 0])
+                    # plt.plot(m[:, 8])
+                    # plt.show()
+                    #
+                    # a = ode_output[:, 0, 16:32]
+                    # plt.plot(a[:, 0])
+                    # plt.plot(a[:, 8])
+                    # plt.show()
+                    #
+                    # plt.plot(comp_fr[:, 0])
+                    # plt.plot(comp_fr[:, 8])
+                    # plt.show()
+
                 # plt.plot(total[:, 0])
                 # plt.plot(total[:, 8])
                 # plt.show()
@@ -222,13 +210,13 @@ def plot_dom_alt(dominance, alternation):
 
 
 if __name__ == '__main__':
-    # fn = '../wta_trained_model.pkl'
+    fn = '../wta_trained_model.pkl'
     # fn = '../trained_wta_models/wta_full_pops_full.pkl'
 
-    # dom_dur, alt_rate = run_bistable_perception(fn, nr_iterations=5)  # nr_iters * 10 = total seconds
-    # save_pkl_file('../dominance_duration.pkl', dom_dur)
-    # save_pkl_file('../alternation_rate.pkl', alt_rate)
-    dom_dur = load_pkl_file('../1_dominance_duration.pkl')
-    alt_rate = load_pkl_file('../1_alternation_rate.pkl')
-    plot_dom_alt(dom_dur, alt_rate)
+    dom_dur, alt_rate = run_bistable_perception(fn, nr_iterations=5)  # nr_iters * 10 = total seconds
+    save_pkl_file('../dominance_duration.pkl', dom_dur)
+    save_pkl_file('../alternation_rate.pkl', alt_rate)
+    # dom_dur = load_pkl_file('../1_dominance_duration.pkl')
+    # alt_rate = load_pkl_file('../1_alternation_rate.pkl')
+    # plot_dom_alt(dom_dur, alt_rate)
 

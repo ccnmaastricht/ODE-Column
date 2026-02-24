@@ -108,22 +108,14 @@ def get_data(nr_samples, batch_size, time_steps, fn):
     data_loader = DataLoader(ds, batch_size=batch_size, shuffle=True)
     return data_loader
 
-def set_stim_three_phases(num_populations, time_vec, raw_stim):
+def set_stim_whole_column(raw_stim):
     '''
-    Extent the given input stimulus to fit the time vector
-    in three phases: pre-, stimulus, and post-.
+    Extent the given input stimulus to all eight populations.
     '''
-    stim = torch.zeros(16)
-    stim[:8] = torch.tile(raw_stim[0], (8,))
-    stim[8:] = torch.tile(raw_stim[1], (8,))
+    stim = torch.repeat_interleave(raw_stim, repeats=8, dim=1)
+    return stim
 
-    stim_vector = torch.zeros((len(time_vec), num_populations))
-    stim_onset = int(len(time_vec) / 3)
-    stim_offset = int(stim_onset + len(time_vec) / 3)
-    stim_vector[stim_onset:stim_offset, :] = stim
-    return stim_vector
-
-def init_network(device):
+def init_network(batch_size, device):
     '''
     Initialize the two-column network, initial state and time vector.
     '''
@@ -137,9 +129,9 @@ def init_network(device):
     network = ColumnAreaWTA(col_params, area='mt')
 
     # Initial state
-    initial_state = torch.zeros(48).unsqueeze(0)
+    initial_state = torch.zeros(batch_size, 32)
     initial_state[:, :16] = torch.tile(torch.tensor([-1.7997e-01, 8.3757e+00, 1.1346e+01, 1.1953e+01,
-                                                     -6.5426e+00, 1.0319e+01, -2.9719e+01, 1.2530e+01]), (1, 2,))
+                                                     -6.5426e+00, 1.0319e+01, -2.9719e+01, 1.2530e+01]), (batch_size, 2,))
 
     # Time vector
     time_vec = torch.linspace(0., time_steps * dt, time_steps)
@@ -147,13 +139,13 @@ def init_network(device):
 
 def run_sample(network, time_vec, initial_state, stim_raw, with_noise):
     '''
-    Runs one stimulus time course through the network
+    Runs one stimulus sample through the network
     '''
-    stim = set_stim_three_phases(network.num_populations, time_vec, stim_raw)
+    stim = set_stim_whole_column(stim_raw)
     network.set_stim(stim)
 
     if with_noise:
-        ode_output = sdeint(network,
+        ode_output = sdeint_adjoint(network,
                             initial_state,
                             time_vec,
                             names={'drift': 'forward', 'diffusion': 'diffusion'},
@@ -216,7 +208,7 @@ def train_wta(nr_samples,
     data from Wang-Wong (WTA dynamics) as a training target.
     '''
     # Initialize network, initial state and time vector
-    network, initial_state, time_vec = init_network(device)
+    network, initial_state, time_vec = init_network(batch_size, device)
     time_steps = len(time_vec)
     network.set_time_vec(time_vec)
 
@@ -244,15 +236,9 @@ def train_wta(nr_samples,
     for iter, (true_states, stim_batch) in enumerate(data_loader):
         optimizer.zero_grad()
         network.constrain_recurr_matrix()
-
-        nr_batch_samples = true_states.shape[0] - 1  # use last sample for testing
-        pred_states = torch.Tensor(nr_batch_samples, time_steps, 1, network.num_populations * 3).to(device)  # *3 bc mem, adap and fr
         true_states = true_states.to(device)
 
-        # Run each training sample in the batch
-        for batch_iter in range(nr_batch_samples):
-            ode_output = run_sample(network, time_vec, initial_state, stim_batch[batch_iter], with_noise)
-            pred_states[batch_iter, :, :, :] = ode_output
+        pred_states = run_sample(network, time_vec, initial_state[:-1], stim_batch[:-1], with_noise)
 
         # Compute loss between pred and true
         hub_loss = huber_loss_wta(pred_states, true_states[:-1], network)
@@ -262,26 +248,28 @@ def train_wta(nr_samples,
         if adjust_pd:
             penalty = compute_pd_deviation_penalty(network, pd_original_connectivity)
             # loss += (penalty * 0.1)  # penalty weight!
-            print(hub_loss.item())
+            print(loss.item())
             print(penalty.item())
 
         loss.backward()
         optimizer.step()
-        scheduler.step()
+        if iter > (nr_samples / batch_size) / 2:
+            scheduler.step()
 
         # Validate network and visualize results
         with torch.no_grad():
             # Save current weights
             network.constrain_recurr_matrix()
             curr_weights = network.W.detach().cpu().numpy()
-            weights.append(curr_weights - pd_original_connectivity.cpu().numpy())
+            # weights.append(curr_weights - pd_original_connectivity.cpu().numpy())
+            weights.append(curr_weights)
 
             # Run test sample
-            pred_state = run_sample(network, time_vec, initial_state, stim_batch[-1], with_noise)
+            pred_state = run_sample(network, time_vec, initial_state[-1].unsqueeze(0), stim_batch[-1].unsqueeze(0), with_noise)
 
             # Visualize final test sample
-            test_state = true_states[-1, :, :]
-            test_loss = huber_loss_wta(pred_state.unsqueeze(0), test_state.unsqueeze(0), network)
+            test_state = true_states[-1]
+            test_loss = huber_loss_wta(pred_state, test_state.unsqueeze(0), network)
             visualize_results(pred_state, test_state, stim_batch[-1], network, loss.item(), test_loss, weights)
 
     return network
@@ -292,7 +280,7 @@ def train_wta(nr_samples,
 if __name__ == '__main__':
 
     set_seed(1)
-    device = torch.device('mps')
+    device = torch.device('cpu')
     ds_target = '../data/ds_wta_6000_15_20_10_15.pkl'
 
     network = train_wta(nr_samples=3000,

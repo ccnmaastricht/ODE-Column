@@ -4,6 +4,8 @@ import pickle
 import numpy as np
 import random
 
+import matplotlib.pyplot as plt
+
 
 def load_config(filepath: str) -> dict:
     '''
@@ -104,15 +106,10 @@ def huber_loss_wta(pred_states, true, network):
     '''
     Computes Huber loss, a loss function suited for trajectories.
     '''
-    mem_pred, adap_pred = pred_states[:, :, 0, :16], pred_states[:, :, 0, 16:32]
+    mem_pred, adap_pred = pred_states[:, :, :16], pred_states[:, :, 16:32]
     fr_pred = compute_firing_rate(mem_pred - adap_pred)
     fr_pred_A = fr_pred[:, :, :8]
     fr_pred_B = fr_pred[:, :, 8:]
-
-    d1 = fr_pred_A.device
-    d2 = network.output_weights.device
-    d3 = pred_states.device
-    d4 = true.device
 
     fr_pred_A_sum = torch.sum(fr_pred_A * network.output_weights, dim=2)
     fr_pred_B_sum = torch.sum(fr_pred_B * network.output_weights, dim=2)
@@ -120,4 +117,5 @@ def huber_loss_wta(pred_states, true, network):
 
     # Compute loss between ode prediction and WangWong simulated data
     hub_loss = torch.nn.SmoothL1Loss(beta=1.0)
-    return hub_loss(fr_pred_sum, true)
+    true_reshaped = true.transpose(0, 1).contiguous()
+    return hub_loss(fr_pred_sum, true_reshaped)
