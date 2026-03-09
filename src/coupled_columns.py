@@ -43,8 +43,6 @@ class ColumnArea(torch.nn.Module):
         self.population_sizes = np.array(
             column_parameters['population_size'][self.area])
         self.population_sizes = np.tile(self.population_sizes, self.num_columns)
-        if small_network:  # for XOR and WTA
-            self.population_sizes = self.population_sizes #  / self.num_columns   ######### NO HALVING OF POPULATIONS ###########
 
         self.num_populations = len(self.population_sizes)
         self.adaptation_strength = torch.tile(self.adaptation_strength, (self.num_columns,))

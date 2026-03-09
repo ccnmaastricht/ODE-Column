@@ -7,9 +7,9 @@ import numpy as np
 from torchsde import sdeint, sdeint_adjoint
 from torchdiffeq import odeint, odeint_adjoint
 
-from src.coupled_columns import ColumnNetwork
+from src.column_network_parity import ColumnNetwork
 from src.utils import *
-from parity_ode import prep_stim_ode
+from parity_ode import prep_parity_stim
 
 
 
@@ -69,7 +69,7 @@ def plot_all_parity_cases(nr_output_cols, random_order, draw_numbers):
         i = 0
 
         for stim in stims:
-            stim_ode = prep_stim_ode(stim, time_vec, network.areas['0'].num_columns)
+            stim_ode = prep_parity_stim(stim, time_vec, network.areas['0'].num_columns)
             network.stim = stim_ode
 
             ode_output = odeint(network, initial_state, time_vec)
@@ -152,4 +152,6 @@ def plot_all_parity_cases(nr_output_cols, random_order, draw_numbers):
 
 if __name__ == '__main__':
     plot_all_parity_cases(nr_output_cols=2, random_order=False, draw_numbers=False)
+
+    # Note: still needs to be updated after changes
 
