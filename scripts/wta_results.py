@@ -61,14 +61,14 @@ def plot_wta_layers(fr_results, coherences):
         axes_.spines['right'].set_visible(False)
 
         # set y-ticks for each layer separately
-        if l_idx == 0:
-            axes_.set_yticks([0, 1])
-        if l_idx == 1:
-            axes_.set_yticks([6, 10, 14])
-        if l_idx == 2:
-            axes_.set_yticks([0, 0.1, 0.2])
-        if l_idx == 3:
-            axes_.set_yticks([0, 1e-6, 2e-6], ['0', '1e-6', '2e-6'])
+        # if l_idx == 0:
+        #     axes_.set_yticks([0, 1])
+        # if l_idx == 1:
+        #     axes_.set_yticks([6, 10, 14])
+        # if l_idx == 2:
+        #     axes_.set_yticks([0, 0.1, 0.2])
+        # if l_idx == 3:
+        #     axes_.set_yticks([0, 1e-6, 2e-6], ['0', '1e-6', '2e-6'])
 
         # Remove y-ticks
         # axes_.set_yticks([])
@@ -122,7 +122,7 @@ def compute_WSI_DivT(firing_rates, dt, divt_threshold=0.1, divt_window=0.02):
                 if torch.all(fr_window > max_diff * divt_threshold):
                     divt_results[i_layer, i_coh] = (t_i - 100) * dt
                     break
-    plot_WSI_DivT_layer_shifted(wsi_results, divt_results, firing_rates)
+    plot_WSI_DivT(wsi_results, divt_results, firing_rates)
 
 def plot_WSI_DivT(wsi_results, divt_results, firing_rates):
 
@@ -158,7 +158,7 @@ def plot_WSI_DivT(wsi_results, divt_results, firing_rates):
     plt.xticks(np.arange(4), ['L2/3', 'L4', 'L5', 'L6'], fontsize=14)
     plt.yticks([0.0, 0.005, 0.01, 0.015], ['0', '5', '10', '15'], fontsize=10)
     plt.xlim([-0.5, 3.5])
-    plt.ylim([0.0, 0.016])
+    # plt.ylim([0.0, 0.016])
     plt.ylabel('Divergence timing (ms)', fontsize=14)
     plt.show()
 
@@ -338,8 +338,10 @@ def interpolation_plot_wsi(wsi, divt):
 
 
 if __name__ == '__main__':
-    # fn = '../trained_wta_models/wta_full_pops_new.pkl'
-    fn = '../wta_trained_model.pkl'
+    # fn = '../trained_wta_models/wta_10_seeds/wta_seed_1.pkl'
+    # fn = '../trained_wta_models/wta_adjust_seeds/wta_adjust_seed_4.pkl'
+    # fn = '../trained_wta_models/wta_scrambled_01.pkl'
+    fn = '../trained_wta_models/wta_scrambled_1.pkl'
 
     wta_rainbow_plots(fn)
 

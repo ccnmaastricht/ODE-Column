@@ -106,16 +106,16 @@ def huber_loss_wta(pred_states, true, network):
     '''
     Computes Huber loss, a loss function suited for trajectories.
     '''
-    mem_pred, adap_pred = pred_states[:, :, :16], pred_states[:, :, 16:32]
-    fr_pred = compute_firing_rate(mem_pred - adap_pred)
-    fr_pred_A = fr_pred[:, :, :8]
-    fr_pred_B = fr_pred[:, :, 8:]
+    num_columns = true.shape[2]
 
-    fr_pred_A_sum = torch.sum(fr_pred_A * network.output_weights, dim=2)
-    fr_pred_B_sum = torch.sum(fr_pred_B * network.output_weights, dim=2)
-    fr_pred_sum = torch.stack([fr_pred_A_sum, fr_pred_B_sum], dim=2)
-
-    # Compute loss between ode prediction and WangWong simulated data
-    hub_loss = torch.nn.SmoothL1Loss(beta=1.0)
     true_reshaped = true.transpose(0, 1).contiguous()
-    return hub_loss(fr_pred_sum, true_reshaped)
+    pred_reshaped = torch.zeros_like(true_reshaped)
+
+    for i_col in range(num_columns):
+        fr_pred_col = pred_states[:, :, i_col*8 : (i_col+1)*8]
+        fr_pred_col_sum = torch.sum(fr_pred_col * network.output_weights, dim=2)
+        pred_reshaped[:, :, i_col] = fr_pred_col_sum
+
+    # Compute loss between model prediction and WangWong simulated data
+    hub_loss = torch.nn.SmoothL1Loss(beta=1.0)
+    return hub_loss(pred_reshaped, true_reshaped)

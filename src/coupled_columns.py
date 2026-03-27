@@ -7,16 +7,16 @@ from src.utils import *
 
 class ColumnArea(torch.nn.Module):
 
-    def __init__(self, column_parameters, area, num_columns, small_network=False):
+    def __init__(self, column_parameters, area, num_columns):
         super().__init__()
 
         self.num_columns = num_columns
         self.area = area.lower()
 
         self._intialize_basic_parameters(column_parameters)
-        self._initilize_population_parameters(column_parameters, small_network)
+        self._initilize_population_parameters(column_parameters)
         self._initialize_connection_probabilities(column_parameters)
-        self._initialize_synapses(column_parameters, small_network)
+        self._initialize_synapses(column_parameters)
 
         self._build_all_weights()
 
@@ -36,7 +36,7 @@ class ColumnArea(torch.nn.Module):
         resistance = self.time_constants['membrane'] / column_parameters['capacitance']
         self.register_buffer("resistance", torch.tensor(resistance, dtype=torch.float32))  # device
 
-    def _initilize_population_parameters(self, column_parameters, small_network):
+    def _initilize_population_parameters(self, column_parameters):
         """
         Initialize the population sizes for the columns.
         """
@@ -60,16 +60,12 @@ class ColumnArea(torch.nn.Module):
         blocks = [self.internal_connection_probabilities] * self.num_columns
         self.connection_probabilities = block_diag(*blocks)
 
-    def _initialize_synapses(self, column_parameters, small_network):
+    def _initialize_synapses(self, column_parameters):
         """
         Initialize the synapse counts and synaptic strengths for the columns.
         """
-        if small_network:  # for training XOR and WTA
-            self.background_synapse_counts = torch.tensor([2510, 2510, 2510, 2510, 2510, 2510, 2510, 2510])
-        else:  # for training larger networks
-            self.background_synapse_counts = torch.tensor(
+        self.background_synapse_counts = torch.tensor(
                 column_parameters['synapse_counts']['background'])
-
         self.feedforward_synapse_counts = torch.tensor(
             column_parameters['synapse_counts']['feedforward'])
 

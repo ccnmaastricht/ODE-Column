@@ -114,8 +114,9 @@ def wta_timecourse(fn):
 
         # Layout adjustment
         plt.tight_layout()
-        plt.savefig('../wta_timecourse')
-        plt.close(fig)
+        # plt.savefig('../wta_timecourse')
+        # plt.close(fig)
+        plt.show()
 
 
 def xor_timecourse():
@@ -210,10 +211,9 @@ if __name__ == '__main__':
 
     set_seed(1)
 
-    # WTA time course showing WTA and bistable perception - used for CCN poster
-    fn_wta = '../wta_trained_model.pkl'
-    # fn_wta = '../trained_wta_models/wta_full_pops_new.pkl'
+    # WTA time course showing WTA and bistable perception
+    fn_wta = '../trained_wta_models/wta_seed_5.pkl'
     wta_timecourse(fn_wta)
 
     # XOR time course - used for CCN poster
-    xor_timecourse()
+    # xor_timecourse()

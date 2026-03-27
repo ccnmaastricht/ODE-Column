@@ -16,26 +16,31 @@ class ColumnAreaWTA(ColumnArea):
     self-excitation connections.
     '''
 
-    def __init__(self, column_parameters, area):
-        super().__init__(column_parameters, area, 2, small_network=True)
+    def __init__(self, column_parameters, area, num_columns):
+        super().__init__(column_parameters, area, num_columns)
 
         self.noise_type = "diagonal"  # sde params
         self.sde_type = "ito"
 
-        self._make_lat_in_mask()
+        self._make_lat_in_mask(column_parameters, num_columns)
 
         self._initialize_lat_in_weights()
-        self._initialize_output_weights()
+        self._initialize_output_weights(column_parameters)
 
-        self.constrain_recurr_matrix()
+        self.constrain_recurr_weights()
 
-    def _make_lat_in_mask(self):
+    def _make_lat_in_mask(self, column_parameters, num_columns):
         '''
-        Mask to select lateral inhibition connections between L2/3 layers.
+        Mask to select lateral inhibition connections between columns and
+        self-excitation connections within columns.
         '''
-        lat_in_mask = torch.zeros((self.num_populations, self.num_populations))
-        lat_in_mask[1, 8], lat_in_mask[9, 0] = 1.0, 1.0  # lateral inhibition
-        lat_in_mask[0, 0], lat_in_mask[8, 8] = 1.0, 1.0  # self excitation
+        self_excitation = torch.tensor(column_parameters['masks']['self_excitation'])
+        self_excitation_tiled = torch.tile(self_excitation, (num_columns, num_columns))
+
+        lateral_inhibition = torch.tensor(column_parameters['masks']['lateral_inhibition'])
+        lateral_inhibition_tiled = torch.tile(lateral_inhibition, (num_columns, num_columns))
+
+        lat_in_mask = (self_excitation_tiled * self.internal_mask) + (lateral_inhibition_tiled * self.external_mask)
         self.register_buffer("lat_in_mask", lat_in_mask)
 
     def _initialize_lat_in_weights(self):
@@ -45,15 +50,14 @@ class ColumnAreaWTA(ColumnArea):
         connections are learnable.
         '''
         zero_weights = torch.zeros_like(self.recurrent_weights)
-        std_W = 0.01
+        std_W = 1.0
         rand_weights = abs(torch.normal(mean=zero_weights, std=std_W))
         lat_in_weights = rand_weights * self.lat_in_mask
 
         self.lat_in_weights = nn.Parameter(lat_in_weights, requires_grad=True)
 
-    def _initialize_output_weights(self):
-        output_weights = torch.tensor([1.0000, 0.0000, 0.0000, 0.0000,
-                                       0.0000, 0.0000, 0.0000, 0.0000])
+    def _initialize_output_weights(self, column_parameters):
+        output_weights = torch.tensor(column_parameters['masks']['output'])
         self.register_buffer("output_weights", output_weights)
 
     def initialize_recurrent_weights(self):
@@ -88,7 +92,7 @@ class ColumnAreaWTA(ColumnArea):
 
     def enforce_pos_neg(self, W):
         '''
-        Add excitatory/inhibitory constraints to the recurrent matrix
+        Add excitatory/inhibitory constraints to the weights matrix
         '''
         cols = torch.arange(W.size(1)).to(self.get_device())
 
@@ -98,7 +102,7 @@ class ColumnAreaWTA(ColumnArea):
         W = torch.where(cols % 2 == 1, W_neg, W_pos)
         return W
 
-    def constrain_recurr_matrix(self):
+    def constrain_recurr_weights(self):
         '''
         Add recurrent (inner) weights and lateral inhibition weights and
         constrain weights matrix.
@@ -162,3 +166,100 @@ class ColumnAreaWTA(ColumnArea):
         g[:, :n] = 3.0
 
         return g
+
+
+
+class ColumnAreaContextWTA(ColumnAreaWTA):
+
+    '''
+    description
+    '''
+
+    def __init__(self, column_parameters, area, num_columns):
+        super().__init__(column_parameters, area, num_columns)
+
+        self._init_feedback_weights(column_parameters, num_columns)
+
+    def _init_feedback_weights(self, column_parameters, num_columns):
+        '''
+        Initialize learnable feedback weights.
+        '''
+        fb_mask = torch.tensor(column_parameters['masks']['feedback'])
+        fb_mask = torch.tile(fb_mask, (num_columns,))
+        self.register_buffer('fb_mask', fb_mask)
+
+        fb_init = torch.tensor(column_parameters['connection_inits']['feedback'])
+        fb_init = torch.tile(fb_init, (num_columns,))
+
+        std_W = 0.01
+        rand_fb_weights = abs(torch.normal(mean=fb_init, std=std_W))
+        rand_fb_weights *= fb_mask
+
+        self.fb_weights = nn.Parameter(rand_fb_weights, requires_grad=True)
+
+    def constrain_weights(self):
+        '''
+        Constrain recurrent weights and feedback weights.
+        '''
+        W = (self.recurrent_weights * self.internal_mask) + (self.lat_in_weights * self.lat_in_mask)
+        self.W = self.enforce_pos_neg(W)
+
+        # TODO: see if there is a better way to constrain weights
+        self.feedback_weights = torch.relu(self.fb_weights * self.fb_mask)  # constrain all weights to be positive
+
+    def set_stim_and_context(self, stim, context, three_phases=True):
+        '''
+        Set the stimulus and context as a mutable attribute. This is necessary
+        because torchsde does not allow any extra parameters other than t, y0.
+        Also specify whether the stimulus should be presented in three phases,
+        i.e. off, on, off instead of presenting it for the full time interval.
+        '''
+        self.stim = stim.to(self.get_device())
+        self.context = context.to(self.get_device())
+        self.three_stim_phases = three_phases
+
+    def present_stim(self, t):
+        '''
+        Presents the stimulus and context based on the current time in the
+        form of feedforward rate and feedback_rate.
+        '''
+        if self.three_stim_phases:
+            feedforward_rate = torch.zeros_like(self.stim)
+            feedback_rate = torch.zeros_like(self.context)
+            if t > self.time_vec[len(self.time_vec)//3] and t < self.time_vec[len(self.time_vec)//3 * 2]:
+                feedforward_rate = self.stim
+                feedback_rate = self.context
+        else:
+            feedforward_rate = self.stim
+            feedback_rate = self.context
+        return feedforward_rate, feedback_rate
+
+    def forward(self, t, state):
+        '''
+        State dynamics the ODE uses
+        '''
+        # Prepare the state (membrane, adaptation)
+        mem_adap_split = state.shape[1] // 2
+        membrane_potential, adaptation = state[:, :mem_adap_split], state[:, mem_adap_split:]
+
+        # Compute new firing rate from membrane and adaptation
+        firing_rate = compute_firing_rate(membrane_potential - adaptation)
+
+        # Present the stimulus
+        feedforward_rate, feedback_rate = self.present_stim(t)
+
+        # Compute current coming from feedforward, background, recurrent and feedback sources
+        feedforward_current = feedforward_rate * self.feedforward_weights
+        background_current = torch.tile(self.background_drive, (state.shape[0], 1)) * self.background_weights
+        recurrent_current = torch.matmul(firing_rate, self.W.T)
+        feedback_current = feedback_rate * self.feedback_weights
+
+        total_current = (feedforward_current + background_current + recurrent_current + feedback_current) * self.synapse_time_constant
+
+        # State derivatives
+        delta_membrane_potential = (-membrane_potential + total_current * self.resistance) / self.membrane_time_constant
+        delta_adaptation = (-adaptation + self.adaptation_strength * firing_rate) / self.adapt_time_constant
+
+        state = torch.concat((delta_membrane_potential, delta_adaptation), dim=1)
+        return state
+

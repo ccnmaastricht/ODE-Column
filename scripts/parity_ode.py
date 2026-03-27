@@ -15,13 +15,10 @@ from src.utils import *
 
 
 
-def visualize_results(network, firing_rates, stims, loss, train_iter, batch_size, target_trajectory, two_output_cols):
+def visualize_results(network, firing_rates, stims, loss, train_iter, batch_size, target_trajectory, two_output_cols, seed):
     '''
     Visualize the firing rates of the last few columns while training.
     '''
-    if not os.path.exists('../results/png'):
-        os.makedirs('../results/png')
-
     nr_samples = batch_size  # how many samples to visualize
 
     firing_rates_cpu = firing_rates.cpu().numpy()
@@ -45,21 +42,25 @@ def visualize_results(network, firing_rates, stims, loss, train_iter, batch_size
         axes[0, 2].plot(firing_rates_cpu[:, i, idx_col1 + 4] * 0.1, label='L5e')
         axes[0, 2].plot(firing_rates_cpu[:, i, idx_col1 + 6], label='L6e')
 
-        idx_col1 = 64 + 32
-        axes[0, 3].plot(firing_rates_cpu[:, i, idx_col1 + 0], label='L23e')
-        axes[0, 3].plot(firing_rates_cpu[:, i, idx_col1 + 4] * 0.1, label='L5e')
-        axes[0, 3].plot(firing_rates_cpu[:, i, idx_col1 + 6], label='L6e')
-        fig.legend(loc="upper left")
-
-        idx_col1 = 64 + 40
-        axes[1, 0].plot(firing_rates_cpu[:, i, idx_col1 + 0], label='L23e')
-        axes[1, 0].plot(firing_rates_cpu[:, i, idx_col1 + 4] * 0.1, label='L5e')
-        axes[1, 0].plot(firing_rates_cpu[:, i, idx_col1 + 6], label='L6e')
-
-        idx_col1 = 64 + 48
-        axes[1, 1].plot(firing_rates_cpu[:, i, idx_col1 + 0], label='L23e')
-        axes[1, 1].plot(firing_rates_cpu[:, i, idx_col1 + 4] * 0.1, label='L5e')
-        axes[1, 1].plot(firing_rates_cpu[:, i, idx_col1 + 6], label='L6e')
+        # idx_col1 = 64 + 24
+        # axes[0, 3].plot(firing_rates_cpu[:, i, idx_col1 + 0], label='L23e')
+        # axes[0, 3].plot(firing_rates_cpu[:, i, idx_col1 + 4] * 0.1, label='L5e')
+        # axes[0, 3].plot(firing_rates_cpu[:, i, idx_col1 + 6], label='L6e')
+        #
+        # idx_col1 = 64 + 32
+        # axes[1, 0].plot(firing_rates_cpu[:, i, idx_col1 + 0], label='L23e')
+        # axes[1, 0].plot(firing_rates_cpu[:, i, idx_col1 + 4] * 0.1, label='L5e')
+        # axes[1, 0].plot(firing_rates_cpu[:, i, idx_col1 + 6], label='L6e')
+        #
+        # idx_col1 = 64 + 40
+        # axes[1, 1].plot(firing_rates_cpu[:, i, idx_col1 + 0], label='L23e')
+        # axes[1, 1].plot(firing_rates_cpu[:, i, idx_col1 + 4] * 0.1, label='L5e')
+        # axes[1, 1].plot(firing_rates_cpu[:, i, idx_col1 + 6], label='L6e')
+        #
+        # idx_col1 = 64 + 48
+        # axes[1, 2].plot(firing_rates_cpu[:, i, idx_col1 + 0], label='L23e')
+        # axes[1, 2].plot(firing_rates_cpu[:, i, idx_col1 + 4] * 0.1, label='L5e')
+        # axes[1, 2].plot(firing_rates_cpu[:, i, idx_col1 + 6], label='L6e')
 
         # Final column
         if two_output_cols:
@@ -83,7 +84,7 @@ def visualize_results(network, firing_rates, stims, loss, train_iter, batch_size
 
         plt.tight_layout(pad=3.0)
         fig.subplots_adjust(left=0.15)
-        plt.savefig('../results/png/firing_rates_{:02d}_{:1d}'.format(train_iter + 1, i))
+        plt.savefig('../results/parity_seed_{}/firing_rates_{:02d}_{:1d}'.format(seed, train_iter + 1, i))
         plt.close(fig)
 
         # Also plot the first eight columns
@@ -105,17 +106,14 @@ def visualize_results(network, firing_rates, stims, loss, train_iter, batch_size
 
         plt.tight_layout(pad=3.0)
         fig.subplots_adjust(left=0.15)
-        plt.savefig('../results/png/firing_rates_first8_{:02d}_{:1d}'.format(train_iter + 1, i))
+        plt.savefig('../results/parity_seed_{}/firing_rates_first8_{:02d}_{:1d}'.format(seed, train_iter + 1, i))
         plt.close(fig)
 
-def visualize_weights(network, train_iter):
+def visualize_weights(network, train_iter, seed):
     '''
     Visualize the learnable weights (ff and lateral)
     during training.
     '''
-    if not os.path.exists('../results/png'):
-        os.makedirs('../results/png')
-
     for name, param in network.named_parameters():
         param_data = param.detach().cpu().numpy()
 
@@ -134,7 +132,7 @@ def visualize_weights(network, train_iter):
 
             # Clean filename (remove problematic characters)
             clean_name = name.replace('.', '_')
-            plt.savefig('../results/png/{}_{:02d}'.format(clean_name, train_iter + 1))
+            plt.savefig('../results/parity_seed_{}/{}_{:02d}'.format(seed, clean_name, train_iter + 1))
             plt.close(fig)
 
 def make_ds(batch_size):
@@ -151,6 +149,15 @@ def make_ds(batch_size):
                                      [0., 1., 1., 1., 1., 1., 1., 1.],
                                      [1., 1., 1., 1., 1., 1., 1., 1.],
                                     ], dtype=torch.float32)
+    # all_combinations = torch.tensor([[0., 0., 0., 0., 0., 0., 0., 1.],
+    #                                  [0., 0., 0., 0., 0., 0., 1., 1.],
+    #                                  [0., 0., 0., 0., 0., 1., 1., 1.],
+    #                                  [0., 0., 0., 0., 1., 1., 1., 1.],
+    #                                  [0., 0., 0., 0., 0., 0., 0., 1.],
+    #                                  [0., 0., 0., 0., 0., 0., 1., 1.],
+    #                                  [0., 0., 0., 0., 0., 1., 1., 1.],
+    #                                  [0., 0., 0., 0., 1., 1., 1., 1.]
+    #                                 ], dtype=torch.float32)
     all_combinations *= 15.
 
     train_set = all_combinations[torch.randperm(all_combinations.size(0))][:batch_size]
@@ -182,9 +189,9 @@ def init_network(device, nr_inputs, batch_size, two_output_cols):
                          'nr_columns_per_area': [8, 2, 2],
                          'nr_input_units': nr_inputs}
     else:
-        network_architecture = {'nr_areas': 4,
-                         'areas': ['mt', 'mt', 'mt', 'mt'],
-                         'nr_columns_per_area': [8, 4, 2, 1],
+        network_architecture = {'nr_areas': 3,
+                         'areas': ['mt', 'mt', 'mt'],
+                         'nr_columns_per_area': [8, 2, 1],
                          'nr_input_units': nr_inputs}
     network = ColumnNetwork(col_params, network_architecture)
     num_columns = sum(network_architecture['nr_columns_per_area'])
@@ -222,14 +229,15 @@ def train_parity_ode(nr_inputs,
                      nr_samples,
                      batch_size,
                      device,
+                     seed,
                      trajectory_based,
                      two_output_cols):
     '''
     Train a network to perform parity classification (even/odd)
     using a neural ODE to train feedforward and lateral weights.
     '''
-    if not os.path.exists('../results/png'):
-        os.makedirs('../results/png')
+    if not os.path.exists(f'../results/parity_seed_{seed}'):
+        os.makedirs(f'../results/parity_seed_{seed}')
 
     network, time_vec, initial_state = init_network(device, nr_inputs, batch_size, two_output_cols)
 
@@ -237,9 +245,10 @@ def train_parity_ode(nr_inputs,
     # network = load_pkl_file('../results/parity_pre_training.pkl')
 
     # Save the network pre-training
-    save_pkl_file('../results/png/parity_pre_training.pkl', network)
+    save_pkl_file(f'../results/parity_seed_{seed}/parity_pre_training.pkl', network)
 
     optimizer = torch.optim.Adam(network.parameters(), lr=0.1, betas=(0.9, 0.999), eps=1e-08)
+    criterion = torch.nn.BCEWithLogitsLoss()
     nr_batches = int(nr_samples/batch_size)
 
     # Load trajectory and define huber loss for trajectory training
@@ -305,8 +314,11 @@ def train_parity_ode(nr_inputs,
             parity_targets = (train_set.sum(dim=1) % 30 == 0).float()
             parity_targets = parity_targets * 20.  # training target
 
-            parity_targets = parity_targets
+            # MAE
             loss = torch.mean(abs(final_fr_summed - parity_targets))
+
+            ### CE
+            # loss = criterion(final_fr_summed, (parity_targets // 20))
 
         loss.backward()
 
@@ -320,37 +332,37 @@ def train_parity_ode(nr_inputs,
 
         print('Iter {:02d} | Total Loss {:.5f}'.format(batch_itr + 1, loss.item()))
         losses[batch_itr] = loss.item()
-        save_pkl_file('../results/png/losses.pkl', losses)
+        save_pkl_file(f'../results/parity_seed_{seed}/losses.pkl', losses)
 
         # Every five batches, visualize training and save the current network
         with torch.no_grad():
             if batch_itr % 5 == 0:
-                visualize_results(network, firing_rates, train_set, loss.item(), batch_itr, batch_size, target_trajectory, two_output_cols)
-                visualize_weights(network, batch_itr)
-                save_pkl_file('../results/png/parity_post_training.pkl', network)
+                visualize_results(network, firing_rates, train_set, loss.item(), batch_itr, batch_size, target_trajectory, two_output_cols, seed)
+                visualize_weights(network, batch_itr, seed)
+                save_pkl_file(f'../results/parity_seed_{seed}/parity_post_training.pkl', network)
     pprint(losses)
 
 
 
 if __name__ == '__main__':
 
-    seed = 1
-    device = torch.device("cpu")
-    trajectory_based = False
-    two_output_cols = False
+    for seed in range(1, 11, 1):
+        device = torch.device("cpu")
+        trajectory_based = False
+        two_output_cols = False
 
-    set_seed(seed)
-    train_parity_ode(nr_inputs=8,
-                     nr_samples=6400,
-                     batch_size=8,
-                     device=device,
-                     trajectory_based=trajectory_based,
-                     two_output_cols=two_output_cols)
+        set_seed(seed)
+        train_parity_ode(nr_inputs=8,
+                         nr_samples=6400,
+                         batch_size=8,
+                         device=device,
+                         seed=seed,
+                         trajectory_based=trajectory_based,
+                         two_output_cols=two_output_cols)
 
 
 '''
 8 bits
-8-4-2-1
+8-2-1
 fixed output weights
-
 '''

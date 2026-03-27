@@ -134,11 +134,12 @@ class ColumnNetwork(torch.nn.Module):
         input_init = torch.tensor(model_parameters['connection_inits']['input'])
         input_init = torch.tile(input_init, (size_target, size_source))
 
-        std_W = 3.0
+        std_W = 0.3 # 0.1 # 1.0 # 3.0
         rand_input_weights = abs(torch.normal(mean=input_init, std=std_W)) * self.feedforward_scale
         rand_input_weights *= 0.8
 
         input_mask = torch.tile(self.input_mask, (size_target, size_source))
+        # input_mask = self.make_mask_fan_in(input_mask, 4, 4)
         input_mask = self.make_mask_fan_in(input_mask, 8, 4)
         input_mask[32:64, :] = input_mask[0:32, :]
         # input_mask[0:32, 1:8] = input_mask[0:32, 0:7].clone()  # SHIFTING RFS
@@ -169,9 +170,9 @@ class ColumnNetwork(torch.nn.Module):
                 ff_init = torch.tensor(model_parameters['connection_inits']['feedforward'])
                 ff_init = torch.tile(ff_init, (size_target, size_source))
 
-                std_W = 1.0
+                std_W = 0.1 # 0.5 # 1.0
                 rand_ff_weights = abs(torch.normal(mean=ff_init, std=std_W)) * self.feedforward_scale
-                rand_ff_weights *= 8.0 # 4.0
+                rand_ff_weights *= 4.0
 
                 ff_mask = torch.tile(self.feedforward_mask, (size_target, size_source))
                 if int(area_idx) < (self.nr_areas - 1):  # last area should be fully connected
