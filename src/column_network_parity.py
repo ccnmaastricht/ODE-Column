@@ -134,7 +134,7 @@ class ColumnNetwork(torch.nn.Module):
         input_init = torch.tensor(model_parameters['connection_inits']['input'])
         input_init = torch.tile(input_init, (size_target, size_source))
 
-        std_W = 0.3 # 0.1 # 1.0 # 3.0
+        std_W = 1.0 # 0.1 # 1.0 # 3.0
         rand_input_weights = abs(torch.normal(mean=input_init, std=std_W)) * self.feedforward_scale
         rand_input_weights *= 0.8
 
