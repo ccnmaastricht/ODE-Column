@@ -185,11 +185,11 @@ class ColumnAreaContextWTA(ColumnAreaWTA):
         Initialize learnable feedback weights.
         '''
         fb_mask = torch.tensor(column_parameters['masks']['feedback'])
-        fb_mask = torch.tile(fb_mask, (num_columns,))
+        fb_mask = torch.tile(fb_mask, (2, num_columns))  # 2 comes from two contexts
         self.register_buffer('fb_mask', fb_mask)
 
         fb_init = torch.tensor(column_parameters['connection_inits']['feedback'])
-        fb_init = torch.tile(fb_init, (num_columns,))
+        fb_init = torch.tile(fb_init, (2, num_columns))  # 2 comes from two contexts
 
         std_W = 0.01
         rand_fb_weights = abs(torch.normal(mean=fb_init, std=std_W))
@@ -204,8 +204,8 @@ class ColumnAreaContextWTA(ColumnAreaWTA):
         W = (self.recurrent_weights * self.internal_mask) + (self.lat_in_weights * self.lat_in_mask)
         self.W = self.enforce_pos_neg(W)
 
-        # TODO: see if there is a better way to constrain weights
         self.feedback_weights = torch.relu(self.fb_weights * self.fb_mask)  # constrain all weights to be positive
+        # self.feedback_weights = torch.clamp(self.fb_weights * self.fb_mask, min=0.0, max=80.0)
 
     def set_stim_and_context(self, stim, context, three_phases=True):
         '''
@@ -252,7 +252,10 @@ class ColumnAreaContextWTA(ColumnAreaWTA):
         feedforward_current = feedforward_rate * self.feedforward_weights
         background_current = torch.tile(self.background_drive, (state.shape[0], 1)) * self.background_weights
         recurrent_current = torch.matmul(firing_rate, self.W.T)
-        feedback_current = feedback_rate * self.feedback_weights
+        feedback_current = torch.sum(feedback_rate * self.feedback_weights, dim=1)  # sum of feedback sources
+
+        if t > 0.05:
+            stop = 0
 
         total_current = (feedforward_current + background_current + recurrent_current + feedback_current) * self.synapse_time_constant
 

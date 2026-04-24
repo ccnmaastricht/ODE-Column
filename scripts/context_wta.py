@@ -18,8 +18,8 @@ def visualize_results(pred_raw, true, stim, context, network, train_loss, test_l
     '''
     Visualize the firing rates of L23e and the weights during training.
     '''
-    if not os.path.exists(f'../results/png'):
-        os.makedirs(f'../results/png')
+    if not os.path.exists(f'../results/context_seed_{seed}'):
+        os.makedirs(f'../results/context_seed_{seed}')
     fig, axes = plt.subplots(2, 3, figsize=(12, 8))
     axes_indices = [(0,0), (0,1), (1,0), (1,1)]
 
@@ -29,7 +29,7 @@ def visualize_results(pred_raw, true, stim, context, network, train_loss, test_l
     for i in range(4):
         axes[axes_indices[i]].plot(pred[:, i*8], label='pred')
         axes[axes_indices[i]].plot(true[:, i], '--', label='true')
-        axes[axes_indices[i]].set_title(f'FR column {i}, input={stim[i].item():.1f}, context={context[i].item():.1f}')
+        axes[axes_indices[i]].set_title(f'FR column {i}, input={stim[i].item():.1f}, context={context[0 if i < 2 else 1].item():.1f}')
         axes[axes_indices[i]].set_ylim(0.0, 1.5)
     axes[axes_indices[0]].legend()
 
@@ -41,7 +41,7 @@ def visualize_results(pred_raw, true, stim, context, network, train_loss, test_l
 
     # Plot feedback weights
     fb_weights_vec = network.feedback_weights.detach().numpy()
-    fb_weights = np.reshape(fb_weights_vec, (4, 8))
+    fb_weights = np.reshape(fb_weights_vec, (8, 8))
     heatmap1 = axes[1, 2].imshow(fb_weights, cmap="viridis", interpolation="nearest")
     fig.colorbar(heatmap1, ax=axes[1, 2])
     axes[1, 2].set_title("Feedback weights")
@@ -52,7 +52,7 @@ def visualize_results(pred_raw, true, stim, context, network, train_loss, test_l
 
     plt.tight_layout(pad=3.0)
     fig.subplots_adjust(left=0.15)
-    plt.savefig(f'../results/png/{iter:02d}')
+    plt.savefig(f'../results/context_seed_{seed}/{iter:02d}')
     plt.close(fig)
 
 def get_data(nr_samples, batch_size, time_steps, fn):
@@ -60,7 +60,13 @@ def get_data(nr_samples, batch_size, time_steps, fn):
     Gets the training dataset made with Wang-Wong model.
     '''
     raw_states, raw_stims = make_ds_ww(fn, nr_samples, time_steps)
-    raw_states, raw_stims = raw_states[:nr_samples], raw_stims[:nr_samples]
+
+    # In case nr_samples is higher than nr of samples in saved file, duplicate the dataset
+    if len(raw_states) >= nr_samples:
+        raw_states, raw_stims = raw_states[:nr_samples], raw_stims[:nr_samples]
+    elif len(raw_states) < nr_samples:
+        nr_epochs = int(np.ceil(nr_samples / len(raw_states)))
+        raw_states, raw_stims = torch.tile(raw_states, (nr_epochs, 1, 1)), torch.tile(raw_stims, (nr_epochs, 1))
 
     raw_states = raw_states / 30.  # scale down wang-wong firing rates to match with our L23
 
@@ -97,7 +103,7 @@ def get_data(nr_samples, batch_size, time_steps, fn):
         # Context encoding (one-hot)
         context_vec = torch.zeros(2)
         context_vec[context] = 5.0
-        context_vec = torch.repeat_interleave(context_vec, repeats=2)
+        # context_vec = torch.repeat_interleave(context_vec, repeats=2)
         contexts.append(context_vec)
 
     states = torch.stack(states)
@@ -106,7 +112,7 @@ def get_data(nr_samples, batch_size, time_steps, fn):
 
     # Store all data in a dataloader
     ds = TensorDataset(states, stims, contexts)
-    data_loader = DataLoader(ds, batch_size=batch_size, shuffle=False, drop_last=True)
+    data_loader = DataLoader(ds, batch_size=batch_size, shuffle=True, drop_last=True)
     return data_loader
 
 def run_sample(network, time_vec, initial_state, stim_raw, context_raw, with_noise):
@@ -114,7 +120,7 @@ def run_sample(network, time_vec, initial_state, stim_raw, context_raw, with_noi
     Runs one stimulus sample through the network
     '''
     stim    = set_stim_whole_column(stim_raw)
-    context = set_stim_whole_column(context_raw)
+    context = context_raw.unsqueeze(-1).expand(-1, -1, network.num_populations)  # set 2D context vector for all populations
     network.set_stim_and_context(stim, context)
 
     if with_noise:
@@ -166,13 +172,37 @@ def train_context_wta(nr_samples,
         # Compute loss between pred and true
         firing_rates = compute_firing_rate(pred_states[:, :, :32] - pred_states[:, :, 32:])
         hub_loss = huber_loss_wta(firing_rates, true_states[:-1], network)
-        loss = hub_loss
+
+        # Add regularization term
+        fb_reg = 5e-6 * (network.feedback_weights ** 2).mean()  # L2 on feedback weights
+        fb_reg += 1e-6 * (network.lat_in_weights ** 2).mean()  # L2 on lateral weights
+        # fb_reg = 1e-8 * (network.feedback_weights.sum(dim=1) ** 2).mean()  # column-wise constraints
+        # fb_reg = 1e-3 * (firing_rates ** 2).mean()  # L2 on firing rates
+        loss = hub_loss + fb_reg
 
         print('Iter {:02d} | Total Loss {:.5f}'.format(iter + 1, loss.item()))
 
         loss.backward()
+
+        # if iter > 180:
+        #
+        #     for i in range(10):
+        #         plt.plot(firing_rates[:, i, :].detach().numpy())
+        #         plt.show()
+        #
+        #     # for i in range(firing_rates.shape[1]):
+        #     #     print(i, torch.max(firing_rates[:, i, :]).item())
+        #
+        #     idx = torch.argmax(firing_rates)
+        #     coords = torch.unravel_index(idx, firing_rates.shape)
+        #     print(coords, torch.max(firing_rates).item())
+        #
+        #     for name, param in network.named_parameters():
+        #         if param.requires_grad:
+        #             print(name, torch.max(param.grad))
+
         optimizer.step()
-        scheduler.step()
+        # scheduler.step()
 
         # Validate network and visualize results
         with torch.no_grad():
@@ -198,18 +228,19 @@ def train_context_wta(nr_samples,
 
 if __name__ == '__main__':
 
-    seed = 1
+    # for seed in range(1, 11, 1):
+    seed = 2
     set_seed(seed)
     device = torch.device('cpu')
-    ds_target = '../data/ds_wta_6000_15_35_5_10.pkl'
+    ds_target = '../data/ds_wta_NEW.pkl'
 
-    network = train_context_wta(nr_samples=6000,
-                                batch_size=16,
+    network = train_context_wta(nr_samples=12000,
+                                batch_size=32,
                                 fn=ds_target,
                                 device=device,
                                 seed=seed,
-                                with_noise=False
+                                with_noise=True
                                 )
 
-    save_pkl_file(f'../trained_wta_models/wta_model.pkl', network)
+    save_pkl_file(f'../trained_wta_models/wta_model_seed_{seed}.pkl', network)
 
