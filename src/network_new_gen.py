@@ -1,26 +1,34 @@
 import torch
 import numpy as np
+from contourpy.array import concat_points_or_none
 from scipy.linalg import block_diag
-from src.utils import compute_firing_rate
+import matplotlib.pyplot as plt
+
+from torchdiffeq import odeint, odeint_adjoint
+from torchsde import sdeint, sdeint_adjoint
+
+from src.utils import compute_firing_rate, load_config
 
 
 
 class BrainArea(torch.nn.Module):
 
     """
-    ...
+    Areas denote groups of columns with the same column parameters (e.g. population counts,
+    background synapse counts, etc). The recurrent activity profile determines the column-
+    intrinsic dynamics.
     """
 
-    def __init__(self, params, area_name, num_columns, unique_name):
+    def __init__(self, col_params, area_name, num_columns, unique_name):
         super().__init__()
 
         self.num_columns = num_columns
         self.area_name = area_name
         self.name = unique_name
 
-        self._initialize_population_parameters(params)
-        self._initialize_connection_probabilities(params)
-        self._initialize_synapses(params)
+        self._initialize_population_parameters(col_params)
+        self._initialize_connection_probabilities(col_params)
+        self._initialize_synapses(col_params)
         self._build_all_weights()
 
     def _initialize_population_parameters(self, column_parameters):
@@ -117,154 +125,147 @@ class BrainArea(torch.nn.Module):
 
 
 
-class Projection(torch.nn.Module):
+class Connection(torch.nn.Module):
 
     """
-    ...
+    Connections allow source activity to influence target areas (between areas) or
+    target populations (within areas). Connections include recurrent (intrinsic),
+    background, feedforward, feedback, lateral and input.
     """
 
-    def __init__(self,
-                 type,
-                 source,
-                 target,
-                 trainable,
-                 params,
-                 init=None,
-                 mask=None,
-                 std=None,
-                 scale=None):
+    def __init__(self, conn_type, source, target, trainable):
         super().__init__()
 
-        self.type = type
-        self.source_obj = source
-        self.target_obj = target
-        self.source = source.name
-        self.target = target.name
+        self.conn_type = conn_type
+        self.source = source
+        self.target = target
         self.trainable = trainable
 
-        # TODO: should also set mask
-
-        if type == 'recurrent':
-            weights = self._initialize_recurrent_projection(params)
-        elif type == 'background':
-            weights = self._initialize_background_projection(params)
-        elif type == 'feedforward':
-            weights = self._initialize_feedforward_weights(params, init, mask, std, scale)
-        elif type == 'feedback':
-            weights = self._initialize_feedback_weights(params, init, mask, std, scale)
-        elif type == 'lateral':
-            weights = self._initialize_lateral_weights(params, init, mask, std, scale)
-
-        if trainable:
-            self.weights = torch.nn.Parameter(weights, requires_grad=True)
-        else:
-            self.weights = torch.nn.Parameter(weights, requires_grad=False)
+        self.weights = None
+        self.mask = None
 
     def get_name(self):
-        """
-        Returns the unique string specifying the projection.
-        """
-        return f'{self.type}_{self.source}_{self.target}'
+        """ Returns the unique string specifying the connection."""
+        return f'{self.conn_type}_{self.source}_{self.target}'
 
-    def _initialize_recurrent_projection(self, params):
-        return self.source_obj.recurrent_weights
+    def initialize_recurrent_weights(self, area):
+        """ Initialize recurrent (i.e. column-intrinsic) weights within the same area."""
+        self.weights = torch.nn.Parameter(area.recurrent_weights, requires_grad=self.trainable)
 
-    def _initialize_background_projection(self, params):
-        return self.source_obj.background_weights
+    def initialize_background_weights(self, area):
+        """ Initialize background weights within an area."""
+        self.weights = torch.nn.Parameter(area.background_weights, requires_grad=self.trainable)
 
-    def _initialize_feedforward_weights(self, params, init, mask, std, scale):
+    def initialize_feedforward_weights(self, params, source_area, target_area, std, scale):
         """
         Initialize feedforward weights between source area and target area.
         """
-        size_source = self.source_obj.num_columns
-        size_target = self.target_obj.num_columns
+        size_source = source_area.num_columns
+        size_target = target_area.num_columns
 
-        if init is None:
-            init = torch.tensor(params['connection_inits']['feedforward'])
-        init *= params['synaptic_strength']['baseline']
+        init = torch.tensor(params['model']['connection_inits']['feedforward'])
+        init *= params['column']['synaptic_strength']['baseline']
         init = torch.tile(init, (size_target, size_source))
 
         rand_weights = abs(torch.normal(mean=init, std=std))
         rand_weights *= scale
 
-        if mask is None:
-            mask = torch.tensor(params['connection_masks']['feedforward'])
+        mask = torch.tensor(params['model']['connection_masks']['feedforward'])
         mask = torch.tile(mask, (size_target, size_source))
 
         weights = rand_weights * mask
-        return weights
+        self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
 
-    def _initialize_feedback_weights(self, params, init, mask, std, scale):
+    def initialize_feedback_weights(self, params, source_area, target_area, std, scale):
         """
         Initialize feedback weights between source area and target area.
         """
-        size_source = self.source_obj.num_columns
-        size_target = self.target_obj.num_columns
+        size_source = source_area.num_columns
+        size_target = target_area.num_columns
 
-        if init is None:
-            init = torch.tensor(params['connection_inits']['feedback'])
-        init *= params['synaptic_strength']['baseline']
+        init = torch.tensor(params['model']['connection_inits']['feedback'])
+        init *= params['column']['synaptic_strength']['baseline']
         init = torch.tile(init, (size_target, size_source))
 
         rand_weights = abs(torch.normal(mean=init, std=std))
         rand_weights *= scale
 
-        if mask is None:
-            mask = torch.tensor(params['connection_masks']['feedback'])
+        mask = torch.tensor(params['model']['connection_masks']['feedback'])
         mask = torch.tile(mask, (size_target, size_source))
 
         weights = rand_weights * mask
-        return weights
+        self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
 
-    def _initialize_lateral_weights(self, params, init, mask, std, scale):
+    def initialize_lateral_weights(self, params, area, std, scale):
         """
-        Initialize lateral weights
+        Initialize lateral weights within an area.
         """
-        size_area = self.source_obj.num_columns
+        size_area = area.num_columns
 
-        if init is None:
-            init = torch.tensor(params['connection_inits']['lateral'])
-        init *= params['synaptic_strength']['baseline']
+        init = torch.tensor(params['model']['connection_inits']['lateral'])
+        init *= params['column']['synaptic_strength']['baseline']
         init = torch.tile(init, (size_area, size_area))
 
         rand_weights = abs(torch.normal(mean=init, std=std))
         rand_weights *= scale
 
-        if mask is None:
-            mask = torch.tensor(params['connection_masks']['lateral'])
-        mask = torch.tile(mask, (size_area, size_area)) * self.source_obj.external_mask  # This is unique to the lateral weights!
+        mask = torch.tensor(params['model']['connection_masks']['lateral'])
+        mask = torch.tile(mask, (size_area, size_area)) * area.external_mask
 
         weights = rand_weights * mask
-        return weights
+        self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
+
+    def initialize_input_weights(self, params, size_input, target_area, std, scale):
+        """
+        Initialize input weights targeting an area.
+        """
+        size_target_area = target_area.num_columns
+
+        init = torch.tensor(params['model']['connection_inits']['input'])
+        init *= params['column']['synaptic_strength']['baseline']
+        init = torch.tile(init, (size_target_area, size_input))
+
+        rand_weights = abs(torch.normal(mean=init, std=std))
+        rand_weights *= scale
+
+        mask = torch.tensor(params['model']['connection_masks']['input'])
+        mask = torch.tile(mask, (size_target_area, size_input))
+
+        weights = rand_weights * mask
+        self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
 
 
 
 class BrainNetwork(torch.nn.Module):
 
     """
-    ...
+    Network class that allows the initialization of BrainArea objects, and Connection objects.
+    Contains the dynamics to simulate network activity.
     """
 
-    def __init__(self, params):
+    def __init__(self):
         super().__init__()
 
-        self.noise_type = "diagonal"  # sde params
-        self.sde_type = "ito"
+        col_params = load_config('../config/column_params.toml')
+        model_params = load_config('../config/model_params.toml')
 
-        self.params = params
+        self.params = {"column": col_params, "model": model_params}
+
+        self.simulator = NetworkSimulator(self, model_params)
 
         self.num_populations    = None
         self.num_columns        = None
         self.area_slices        = {}
         self.areas              = torch.nn.ModuleDict({})
-        self.projections        = torch.nn.ModuleDict({})
+        self.connections        = torch.nn.ModuleDict({})
 
-        self._initialize_basic_parameters(params)
+        self._initialize_basic_parameters(col_params)
 
     def _initialize_basic_parameters(self, params):
         """
         Initialize basic parameters that apply for the entire network
         """
+        # TODO: Handle background drive as source of input?
         # Basic parameters
         self.register_buffer("background_drive", torch.tensor(params['background_drive'], dtype=torch.float32))
         self.register_buffer("adaptation_strength", torch.tensor(params['adaptation_strength'], dtype=torch.float32))
@@ -284,7 +285,7 @@ class BrainNetwork(torch.nn.Module):
                  intrinsic_trainable=False,
                  background_trainable=False):
         """
-        Initialize the specified area and its recurrent and background projections.
+        Initialize the specified area and its recurrent and background connections.
 
         Params:
         area_name (str):                The name of the to-be-modeled area, as specified in the .toml file (e.g. 'v1', 'v2', etc).
@@ -295,43 +296,30 @@ class BrainNetwork(torch.nn.Module):
         background_trainable (bool):    If True, the background connections can be updated during training.
         """
         area_name = area_name.lower()
-        assert area_name in self.params['population_size'], f"Population sizes of '{area_name}' not found in .toml file. "
-        assert area_name in self.params['background_synapse_counts'], f"Background synapse counts of '{area_name}' not found in .toml file. "
+        assert area_name in self.params['column']['population_size'], f"Population sizes of '{area_name}' not found in .toml file. "
+        assert area_name in self.params['column']['background_synapse_counts'], f"Background synapse counts of '{area_name}' not found in .toml file. "
 
         if unique_name is None:
             unique_name = area_name
 
-        area = BrainArea(self.params, area_name, size, unique_name)
+        area = BrainArea(self.params['column'], area_name, size, unique_name)
         self.areas[area_name] = area
 
-        # Add recurrent connectivity and background connectivity as projections
-        recurrent_projection = Projection('recurrent', area, area, intrinsic_trainable, self.params)
-        self.projections[recurrent_projection.get_name()] = recurrent_projection
-        background_projection = Projection('background', area, area, background_trainable, self.params)
-        self.projections[background_projection.get_name()] = background_projection
+        # Add recurrent connectivity and background connectivity as connections
+        recurrent_connection = Connection('recurrent', area_name, area_name, intrinsic_trainable)
+        recurrent_connection.initialize_recurrent_weights(area)
+        self.connections[recurrent_connection.get_name()] = recurrent_connection
 
-    def add_projection(self,
-                       source,
-                       target,
-                       type,
-                       trainable=True,
-                       mask=None,
-                       init=None,
-                       std=0.1,
-                       scale=1.0):
-        """
-        Initialize the specified projection between the source and target area.
+        background_connection = Connection('background', area_name, area_name, background_trainable)
+        background_connection.initialize_background_weights(area)
+        self.connections[background_connection.get_name()] = background_connection
 
-        Params:
-        source (str):       The source area of the projection.
-        target (str):       The target area of the projection.
-        type (str):         The projection type; feedforward, feedback or lateral.
-        trainable (bool):   If True, the projection weights can be adjusted during training.
-        mask (tensor):      Optional user-specified mask for the projection.
-        init (tensor):      Optional user-specified initialization for the projection.
-        std (float):        The standard deviation for the weight initialization of the projection.
-        scale (float):      The scale of the initialization of the projection.
-        """
+    def add_feedforward_connection(self,
+                                   source,
+                                   target,
+                                   trainable=True,
+                                   std=0.1,
+                                   scale=1.0):
         source, target = source.lower(), target.lower()
         assert source in self.areas.keys(), f"Source area '{source}' is not yet initialized. Please use BrainNetwork.add_area(name, size)."
         assert target in self.areas.keys(), f"Target area '{target}' is not yet initialized. Please use BrainNetwork.add_area(name, size)."
@@ -339,28 +327,65 @@ class BrainNetwork(torch.nn.Module):
         source_area = self.areas[source]
         target_area = self.areas[target]
 
-        assert type in ['feedforward', 'feedback', 'lateral'], (f"The projection type '{type}' does not exist. Acceptable types are 'feedforward', 'feedback' and 'lateral'. "
-                                                                f"If you want to establish recurrent or background projections, note that these are established automatically with BrainNetwork.add_area(name, size). ")
-        if type == 'feedforward':
-            assert source != target, f"Feedforward projections can only be established between two non-identical areas."
-        elif type == 'feedback':
-            assert source != target, f"Feedback projections can only be established between two non-identical areas."
-        elif type == 'lateral':
-            assert source == target, f"Lateral projections can only be established within the same area (source_area == target_area)."
+        connection = Connection('feedforward', source, target, trainable)
+        connection.initialize_feedforward_weights(self.params, source_area, target_area, std, scale)
+        self.connections[connection.get_name()] = connection
 
-        projection = Projection(type, source_area, target_area, trainable, self.params, mask, init, std, scale)
-        self.projections[projection.get_name()] = projection
+    def add_feedback_connection(self,
+                                source,
+                                target,
+                                trainable=True,
+                                std=0.1,
+                                scale=1.0):
+        source, target = source.lower(), target.lower()
+        assert source in self.areas.keys(), f"Source area '{source}' is not yet initialized. Please use BrainNetwork.add_area(name, size)."
+        assert target in self.areas.keys(), f"Target area '{target}' is not yet initialized. Please use BrainNetwork.add_area(name, size)."
 
-    def finalize(self, dt, sim_time, batch_size=1):
+        source_area = self.areas[source]
+        target_area = self.areas[target]
+
+        connection = Connection('feedback', source, target, trainable)
+        connection.initialize_feedback_weights(self.params, source_area, target_area, std, scale)
+        self.connections[connection.get_name()] = connection
+
+    def add_lateral_connection(self,
+                               area_name,
+                               trainable=True,
+                               std=0.1,
+                               scale=1.0):
+        area_name = area_name.lower()
+        assert area_name in self.areas.keys(), f"Area '{area_name}' is not yet initialized. Please use BrainNetwork.add_area(name, size)."
+        area = self.areas[area_name]
+
+        connection = Connection('lateral', area_name, area_name, trainable)
+        connection.initialize_lateral_weights(self.params, area, std, scale)
+        self.connections[connection.get_name()] = connection
+
+    def add_input_connection(self,
+                             target_area,
+                             input_size,
+                             trainable=True,
+                             unique_name=None,
+                             std=0.1,
+                             scale=1.0):
+        target_area = target_area.lower()
+        assert target_area in self.areas.keys(), f"Area '{target_area}' is not yet initialized. Please use BrainNetwork.add_area(name, size)."
+        area = self.areas[target_area]
+
+        input_name = 'input'
+        if unique_name is not None:
+            input_name = unique_name
+
+        connection = Connection('input', input_name, target_area, trainable)
+        connection.initialize_input_weights(self.params, input_size, area, std, scale)
+        self.connections[connection.get_name()] = connection
+
+    def finalize(self):
         """
-        Finalizes the network after initializing all areas and projections.
-        Returns the initial state for all modelled neuronal populations and
-        the time vector.
+        Finalizes the network after initializing all areas and connections by setting
+        the total number of populations and columns, and setting slices to index the
+        activity of each area.
         """
-        # Time vector
-        time_steps = int(sim_time / dt)
-        time_vec = torch.linspace(0., time_steps * dt, time_steps)
-
         # Population counts: total and slices per area
         self.num_populations = sum(area.num_populations for area in self.areas.values())
         self.num_columns = self.num_populations // 8
@@ -370,37 +395,44 @@ class BrainNetwork(torch.nn.Module):
             self.area_slices[area_name] = slice(idx, idx + area.num_populations)
             idx += area.num_populations
 
-        # Initial state for simulation
-        initial_state = torch.zeros(batch_size, self.num_populations * 2)  # *2 state variables
-        return initial_state, time_vec
-
     # TODO: constraining function
 
-    def compute_currents(self, fr_per_area):
-        # TODO: introduce external input
+    def compute_currents(self, t, firing_rates, ext_input, input_windows):
+        """
+        For each area, compute the current based on all incoming connections.
+        """
+        fr_per_area = {area_name: firing_rates[:, area_slice]
+                       for area_name, area_slice in self.area_slices.items()}
 
-        currents = {area_name: torch.zeros_like(fr_per_area[area_name])
-                    for area_name in self.areas}
+        activities = {}
+        if ext_input is not None:
+            for input_name, x in ext_input.items():
+                # Present input if t is in input window
+                start, end = input_windows[input_name]
+                if start <= t < end:
+                    activities[input_name] = x
+                else:
+                    activities[input_name] = torch.zeros_like(x)
+        activities.update(fr_per_area)
 
-        for projection in self.projections.values():
-            type = projection.type
-            if projection.type == 'background':
-                batch_size = fr_per_area[projection.source].shape[0]
-                current = torch.tile(self.background_drive, (batch_size, 1)) * projection.weights
-                currents[projection.target] += current
+        currents = {area_name: torch.zeros(firing_rates.shape[0], area.num_populations, device=firing_rates.device)
+                    for area_name, area in self.areas.items()}
+
+        for connection in self.connections.values():
+            conn_type = connection.conn_type
+            if connection.conn_type == 'background':
+                batch_size = activities[connection.source].shape[0]
+                current = torch.tile(self.background_drive, (batch_size, 1)) * connection.weights
             else:
-                source_fr = fr_per_area[projection.source]
-                current = source_fr @ projection.weights.T
-                currents[projection.target] += current
+                source_fr = activities[connection.source]
+                current = source_fr @ connection.weights.T
+            currents[connection.target] += current * self.synapse_time_constant
             stop = 0
-
-        for area_name, area in self.areas.items():
-            currents[area_name] *= self.synapse_time_constant
 
         total_current = torch.cat([currents[name] for name in self.areas], dim=1)
         return total_current
 
-    def forward(self, t, state):
+    def dynamics(self, t, state, ext_input, input_windows):
         """
         State dynamics computing the derivative of the membrane potential and adaptation at time t.
         """
@@ -411,9 +443,7 @@ class BrainNetwork(torch.nn.Module):
         firing_rate = compute_firing_rate(membrane_potential - adaptation)
 
         # Compute current
-        fr_per_area = {area_name: firing_rate[:, area_slice]
-                       for area_name, area_slice in self.area_slices.items()}
-        total_current = self.compute_currents(fr_per_area)
+        total_current = self.compute_currents(t, firing_rate, ext_input, input_windows)
 
         # Compute derivative membrane potential and adaptation
         delta_membrane_potential = (-membrane_potential +
@@ -424,5 +454,225 @@ class BrainNetwork(torch.nn.Module):
         state = torch.concat((delta_membrane_potential, delta_adaptation), dim=1)
         return state
 
+    def diffusion(self, t, state):
+        '''
+        Diffusion function used by SDE, noise is only applied to membrane potential.
+        '''
+        g = torch.zeros_like(state)
+        n = self.num_populations
+        g[:, :n] = 3.0
+        return g
 
-# TODO: NetworkWrapperODE()
+    def run(self, ext_input=None, input_window=None, adjoint=False, stochastic=False, device="cpu"):
+        """
+        Delegates running the network to the simulation engine.
+        """
+        return self.simulator.run(
+            ext_input=ext_input,
+            input_window=input_window,
+            adjoint=adjoint,
+            stochastic=stochastic,
+            device=device)
+
+
+
+class NetworkSimulator:
+
+    """
+    Handles the simulation of the network activity.
+    """
+
+    def __init__(self, network, model_params):
+
+        self.network        = network
+
+        self.dt             = model_params['time_params']['dt']
+        self.sim_time       = model_params['time_params']['sim_time']
+        self.input_window   = model_params['time_params']['input_window']
+
+    def _infer_batch_size(self, ext_input):
+        """
+        Infer the batch size from the shape of the input tensors.
+        """
+        first_input = next(iter(ext_input.values()))
+        return first_input.shape[0]
+
+    def _validate_input_shapes(self, ext_input):
+        """
+        Check if input tensors have the same shape in the first dimension (i.e. same number of input samples.
+        """
+        batch_sizes = {tensor.shape[0]
+                       for tensor in ext_input.values()}
+        assert len(batch_sizes) == 1, f"Input tensors have inconsistent batch sizes: {batch_sizes}"
+
+    def _make_input_dict(self, input_var):
+        """
+        Convert the input variable to a dictionary.
+        """
+        if not isinstance(input_var, dict):
+            input_var = {"input": input_var}
+        return input_var
+
+    def _convert_to_tensors(self, ext_input, device):
+        """
+        Convert each input tensor to a tensor and put them on the specified device.
+        """
+        return {name: (
+                tensor.to(device)
+                if torch.is_tensor(tensor)
+                else torch.tensor(tensor,dtype=torch.float32, device=device))
+                for name, tensor in ext_input.items()}
+
+    def _validate_network_inputs(self, ext_input):
+        """
+        Check if the inputs have an assigned connection that targets an area and if the
+        input tensor has the correct shape in the second dimension (should match with connection.weights)
+        """
+        input_connections = {conn.source: conn
+                         for conn in self.network.connections.values()
+                         if conn.conn_type == "input"}
+
+        assert ext_input.keys() == input_connections.keys(), (f"Mismatch found between specified inputs ({list(ext_input.keys())}) "
+                                                              f"and specified input connection sources ({list(input_connections.keys())}).")
+
+        for source, connection in input_connections.items():
+            assert ext_input[source].shape[1] == connection.weights.shape[1], (f"Input tensor '{source}' shape (x, {ext_input[source].shape[1]}) "
+                                                                               f"does not match with input weights shape (x, {connection.weights.shape[1]}).")
+
+    def _validate_input_windows(self, input_window):
+        """
+        Check if input window does not exceed the simulation time.
+        """
+        for window_i, window_tuple in input_window.items():
+            start = window_tuple[0]
+            end = window_tuple[1]
+            assert start <= self.sim_time and end <= self.sim_time, (f"The input time window ({start}s, {end}s) "
+                                                                     f"exceeds total simulation time ({self.sim_time}s)")
+
+    def _prepare_input_for_sim(self, ext_input, input_window, device):
+        """
+        Prepare the input samples and the input time window for simulation:
+        they need to be formatted as dictionaries, inputs as tensors and on the device,
+        check if compatible with network architecture.
+        """
+        if ext_input is None:
+            return None, None, 1
+
+        if input_window is None:
+            input_window = self.input_window
+
+        ext_input = self._make_input_dict(ext_input)
+        input_window = self._make_input_dict(input_window)
+
+        ext_input = self._convert_to_tensors(ext_input, device)
+
+        self._validate_input_shapes(ext_input)
+        self._validate_network_inputs(ext_input)
+        self._validate_input_windows(input_window)
+
+        assert ext_input.keys() == input_window.keys(), (f"Mismatch found between dictionaries of inputs ({list(ext_input.keys())}) "
+                                                         f"and their time windows ({list(input_window.keys())}).")
+
+        batch_size = self._infer_batch_size(ext_input)
+        return ext_input, input_window, batch_size
+
+    def _init_state(self, batch_size, device):
+        """
+        Set initial state of network as zeros; size = (batch_size, total_nr_populations * 2 state variables).
+        """
+        initial_state = torch.zeros(batch_size, self.network.num_populations * 2)
+        return initial_state.to(device)
+
+    def run(self, ext_input, input_window, adjoint, stochastic, device):
+        """
+        Runs the network simulation.
+        """
+        ext_input, input_window, batch_size = self._prepare_input_for_sim(ext_input, input_window, device)
+
+        self.network = self.network.to(device)
+        self.network.finalize()
+
+        time_vec = torch.arange(0, self.sim_time, self.dt, device=device)
+        initial_state = self._init_state(batch_size, device)
+        sim_wrapper = NetworkOdeWrapper(self.network, ext_input, input_window)
+
+        if not adjoint and not stochastic:
+            return odeint(sim_wrapper, initial_state, time_vec)
+
+        elif adjoint and not stochastic:
+            return odeint_adjoint(sim_wrapper, initial_state, time_vec)
+
+        elif not adjoint and stochastic:
+            return sdeint(sim_wrapper, initial_state, time_vec,
+                            names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
+
+        elif adjoint and stochastic:
+            return sdeint_adjoint(sim_wrapper, initial_state, time_vec,
+                                    names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
+
+
+
+
+class NetworkOdeWrapper(torch.nn.Module):
+
+    """
+    Sets the external input with initialization and gets called by odeint/sdeint.
+    """
+
+    noise_type = "diagonal"  # sde params
+    sde_type = "ito"
+
+    def __init__(self, network, ext_input, input_windows):
+        super().__init__()
+
+        self.network = network
+        self.ext_input = ext_input
+        self.input_windows = input_windows
+
+    def forward(self, t, state):
+        return self.network.dynamics(
+            t,
+            state,
+            self.ext_input,
+            self.input_windows)
+
+    def diffusion(self, t, state):
+        return self.network.diffusion(
+            t,
+            state)
+
+
+
+class NetworkAnalyzer:
+
+    def __init__(self, network):
+        self.network = network
+        self.layers = ['L23e, L23i', 'L4e', 'L4i', 'L5e', 'L5i', 'L6e', 'L6i']
+
+    def get_firing_rates(self, raw_state, area=None, return_as_np_array=True):
+        """
+        Compute the firing rate from the raw state (= [membrane_potential, adaptation])
+        Return as np.array unless specified otherwise.
+        """
+        # TODO: refine (layer indices?)
+        split = self.network.num_populations
+        firing_rates = compute_firing_rate(raw_state[:, :, :split] - raw_state[:, :, split:(split * 2)])
+
+        if area is not None:
+            area_slices = self.network.area_slices[area]
+            firing_rates = firing_rates[:, :, area_slices]
+
+        if return_as_np_array:
+            return firing_rates.detach().cpu().numpy()
+        return firing_rates
+
+    def plot_firing_rates(self, firing_rates):
+        """
+        Plot firing rates, separately for each sample
+        """
+        # TODO: refine (more plotting options)
+        for i in range(firing_rates.shape[1]):
+            for j in range(firing_rates.shape[-1]):
+                plt.plot(firing_rates[:, i, j])
+            plt.show()
+
