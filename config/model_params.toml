@@ -1,8 +1,9 @@
 
 [time_params]
-dt              = 1e-3
-sim_time        = 1.0
-input_window    = [0.5, 1.0]
+dt           			= 1e-3
+sim_time        		= 1.0
+input_window    		= [0.5, 1.0]
+classification_window 	= [0.9, 1.0]
 
 
 [area_sizes]

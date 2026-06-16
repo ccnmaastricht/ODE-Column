@@ -230,11 +230,12 @@ class ColumnNetwork(torch.nn.Module):
 
         output_init = torch.tensor(model_parameters['connection_inits']['output'])
         output_init = torch.tile(output_init, (size_source,))
-        self.output_mask = torch.tile(self.output_mask, (size_source,))
+        output_mask = torch.tile(self.output_mask, (size_source,))
+        self.register_buffer('output_mask_full', output_mask)
 
         # std_W = 1.0
         # rand_output_weights = abs(torch.normal(mean=output_init, std=std_W))
-        # rand_output_weights *= self.output_mask
+        # rand_output_weights *= output_mask
         # rand_output_weights *= self.output_scale
 
         self.output_weights = nn.Parameter(output_init, requires_grad=False)
@@ -260,18 +261,6 @@ class ColumnNetwork(torch.nn.Module):
         '''
         return self.areas['0'].input_weights.device
 
-    def enforce_pos_neg(self, W):
-        '''
-        Add excitatory/inhibitory constraints to the matrix
-        '''
-        cols = torch.arange(W.size(1)).to(self.get_device())
-
-        W_pos = torch.relu(W)  # ≥ 0, all excitatory projections are positive
-        W_neg = -torch.relu(-W)  # ≤ 0, all inhibitory projections are negative
-
-        W = torch.where(cols % 2 == 1, W_neg, W_pos)
-        return W
-
     def constrain(self):
         '''
         Constrain all learnable weights so no illegal updates can be made
@@ -285,11 +274,11 @@ class ColumnNetwork(torch.nn.Module):
             # Feedforward weights
             elif area_idx > '0':
                 ff_weights = area.feedforward_weights * area.feedforward_mask
-                area.F = self.enforce_pos_neg(ff_weights)
+                area.F = torch.relu(ff_weights)
 
             # Lateral weights
             lat_weights = area.lateral_weights * area.lateral_mask
-            area.L = self.enforce_pos_neg(lat_weights)
+            area.L = torch.relu(lat_weights)
 
     def partition_firing_rates(self, firing_rate):
         '''
@@ -378,6 +367,6 @@ class ColumnNetwork(torch.nn.Module):
         '''
         g = torch.zeros_like(y)
         n = y.shape[1] // 2
-        g[:, :n] = 2.0  # sigma_H
+        g[:, :n] = 3.0  # sigma_H
         return g
 

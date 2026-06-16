@@ -173,8 +173,7 @@ def plot_WSI_DivT_train_iterations(wsi_results, divt_results):
 
     return mean_wsi, mean_divt
 
-def interpolation_plot_wsi(wsi, divt):
-
+def interpolation_plot_wsi(wsi_list, divt_list):
     population_sizes = np.array([60606, 28202, 14176, 15837])
 
     x_axis = []
@@ -184,19 +183,26 @@ def interpolation_plot_wsi(wsi, divt):
         x_axis.append(prev_pop_sizes + (curr_pop_size // 2))
     x_axis = np.array(x_axis)
 
-    # --------- CSI ---------
-    # Fit polynomial
-    coeffs = np.polyfit(x_axis, wsi, deg=3)
-    poly = np.poly1d(coeffs)
-
     # Smooth x for plotting
     x_smooth = np.linspace(0, population_sizes.sum(), 500)
-    y_smooth = poly(x_smooth)
-    # y_smooth = np.clip(poly(x_smooth), None, 1.0)
 
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(x_axis, wsi, 'o', color='black', label='Layer values')
-    ax.plot(x_smooth, y_smooth, '-', color='black', linewidth=2, label='Cubic fit')
+
+    # Color map (automatically spreads colors)
+    colors = plt.cm.tab10(np.linspace(0, 1, len(wsi_list)))
+
+    for i, wsi in enumerate(wsi_list):
+        # Fit polynomial
+        coeffs = np.polyfit(x_axis, wsi, deg=3)
+        poly = np.poly1d(coeffs)
+        y_smooth = poly(x_smooth)
+
+        # Plot points
+        ax.plot(x_axis, wsi, 'o', color=colors[i])
+
+        # Plot smooth curve
+        ax.plot(x_smooth, y_smooth, '-', color=colors[i], linewidth=2)
+
     ax.set_xlim(0, population_sizes.sum())
     ax.set_xticks(x_axis, ['L2/3', 'L4', 'L5', 'L6'], fontsize=14)
     ax.set_ylim([-0.1, 1.1])
@@ -213,26 +219,29 @@ def interpolation_plot_wsi(wsi, divt):
     ax_top.grid(True, axis='x', linestyle='--', alpha=1.0)
     ax_top.spines['top'].set_visible(False)
     ax_top.tick_params(top=False)
+
     plt.tight_layout()
     plt.show()
 
     # --------- DivT ---------
-    # Fit polynomial
-    coeffs = np.polyfit(x_axis, divt, deg=3)
-    poly = np.poly1d(coeffs)
-
-    # Smooth x for plotting
-    x_smooth = np.linspace(0, population_sizes.sum(), 500)
-    y_smooth = poly(x_smooth)
-    # y_smooth = np.clip(poly(x_smooth), 0.0, None)
-
-    # Plot DivT
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(x_axis, divt, 'o', color='black', label='Layer values')
-    ax.plot(x_smooth, y_smooth, '-', color='black', linewidth=2, label='Cubic fit')
+
+    for i, divt in enumerate(divt_list):
+        # Fit polynomial
+        coeffs = np.polyfit(x_axis, divt, deg=3)
+        poly = np.poly1d(coeffs)
+        y_smooth = poly(x_smooth)
+
+        # Plot raw points
+        ax.plot(x_axis, divt, 'o', color=colors[i])
+
+        # Plot smooth curve
+        ax.plot(x_smooth, y_smooth, '-', color=colors[i], linewidth=2)
+
     ax.set_xlim(0, population_sizes.sum())
     ax.set_xticks(x_axis, ['L2/3', 'L4', 'L5', 'L6'], fontsize=14)
-    ax.set_ylim([-0.001, 0.015])
+    # ax.set_ylim([-0.001, 0.015])
+    ax.set_ylim([-0.005, 0.02])
     ax.set_yticks([0.0, 0.005, 0.01, 0.015], ['0', '5', '10', '15'])
     ax.set_ylabel('Divergence timing (ms)', fontsize=14)
     ax.grid(True, axis='y', linestyle='--', alpha=1.0)
@@ -246,6 +255,7 @@ def interpolation_plot_wsi(wsi, divt):
     ax_top.grid(True, axis='x', linestyle='--', alpha=1.0)
     ax_top.spines['top'].set_visible(False)
     ax_top.tick_params(top=False)
+
     plt.tight_layout()
     plt.show()
 
@@ -431,8 +441,17 @@ def results_multiple_models(fn_list):
         wsi_all_models[:, i] = torch.mean(wsi_results, dim=1)
         divt_all_models[:, i] = torch.mean(divt_results, dim=1)
 
+    #     plt.plot(torch.mean(wsi_results_1, dim=1), color='blue')
+    #     plt.plot(torch.mean(wsi_results_2, dim=1), color='red')
+    #
+    #     # plt.plot(torch.mean(divt_results_1, dim=1), color='blue')
+    #     # plt.plot(torch.mean(divt_results_2, dim=1), color='red')
+    #
+    # plt.show()
+
     mean_wsi, mean_divt = plot_WSI_DivT_train_iterations(wsi_all_models, divt_all_models)
-    interpolation_plot_wsi(abs(mean_wsi), mean_divt)
+    # interpolation_plot_wsi(abs(mean_wsi), mean_divt)
+    interpolation_plot_wsi(abs(wsi_all_models.T), divt_all_models.T)
 
 
 def compute_mae_between_original_and_learned(baseline_fn, learned_fn):
@@ -449,10 +468,7 @@ def compute_mae_between_original_and_learned(baseline_fn, learned_fn):
 
 
 if __name__ == '__main__':
-    fn = '../trained_wta_models/wta_10_seeds/wta_seed_1.pkl'
-    # # fn = '../trained_wta_models/wta_adjust_seeds/wta_adjust_seed_6.pkl'
-    # # fn = '../trained_wta_models/wta_scrambled_01.pkl'
-    # # fn = '../trained_wta_models/wta_scrambled_1.pkl'
+    # fn = '../trained_wta_models/wta_seed_1.pkl'
     #
     # results_one_model(fn)
 
@@ -470,16 +486,16 @@ if __name__ == '__main__':
     # ]
 
     # fn_list = [  # adjusted
-    #     '../trained_wta_models/wta_adjust_seeds/wta_adjust_seed_1.pkl',
-    #     '../trained_wta_models/wta_adjust_seeds/wta_adjust_seed_2.pkl',
-    #     '../trained_wta_models/wta_adjust_seeds/wta_adjust_seed_3.pkl',
-    #     '../trained_wta_models/wta_adjust_seeds/wta_adjust_seed_4.pkl',
-    #     '../trained_wta_models/wta_adjust_seeds/wta_adjust_seed_5.pkl',
-    #     '../trained_wta_models/wta_adjust_seeds/wta_adjust_seed_6.pkl',
-    #     '../trained_wta_models/wta_adjust_seeds/wta_adjust_seed_7.pkl',
-    #     '../trained_wta_models/wta_adjust_seeds/wta_adjust_seed_8.pkl',
-    #     '../trained_wta_models/wta_adjust_seeds/wta_adjust_seed_9.pkl',
-    #     '../trained_wta_models/wta_adjust_seeds/wta_adjust_seed_10.pkl'
+    #     '../trained_wta_models/wta_adjust_seeds/wta_seed_1.pkl',
+    #     '../trained_wta_models/wta_adjust_seeds/wta_seed_2.pkl',
+    #     '../trained_wta_models/wta_adjust_seeds/wta_seed_3.pkl',
+    #     '../trained_wta_models/wta_adjust_seeds/wta_seed_4.pkl',
+    #     '../trained_wta_models/wta_adjust_seeds/wta_seed_5.pkl',
+    #     '../trained_wta_models/wta_adjust_seeds/wta_seed_6.pkl',
+    #     '../trained_wta_models/wta_adjust_seeds/wta_seed_7.pkl',
+    #     '../trained_wta_models/wta_adjust_seeds/wta_seed_8.pkl',
+    #     '../trained_wta_models/wta_adjust_seeds/wta_seed_9.pkl',
+    #     '../trained_wta_models/wta_adjust_seeds/wta_seed_10.pkl'
     # ]
 
     # fn_list = [  # scrambled_01
@@ -492,13 +508,14 @@ if __name__ == '__main__':
     #     '../trained_wta_models/wta_scrambled_01_seeds/wta_scrambled_seed_10.pkl'
     # ]
 
-    fn_list = [  # scrambled_1
+    fn_list = [  # scrambled_05
         '../trained_wta_models/wta_scrambled_05_seeds/wta_scrambled_seed_3.pkl',
         '../trained_wta_models/wta_scrambled_05_seeds/wta_scrambled_seed_4.pkl',
         # '../trained_wta_models/wta_scrambled_05_seeds/wta_scrambled_seed_5.pkl',  # crashes!
         '../trained_wta_models/wta_scrambled_05_seeds/wta_scrambled_seed_9.pkl',
         '../trained_wta_models/wta_scrambled_05_seeds/wta_scrambled_seed_10.pkl'
     ]
+
 
     # for fn_i in fn_list:
     #     compute_mae_between_original_and_learned(fn, fn_i)

@@ -40,7 +40,13 @@ class ColumnAreaWTA(ColumnArea):
         lateral_inhibition = torch.tensor(column_parameters['masks']['lateral_inhibition'])
         lateral_inhibition_tiled = torch.tile(lateral_inhibition, (num_columns, num_columns))
 
-        lat_in_mask = (self_excitation_tiled * self.internal_mask) + (lateral_inhibition_tiled * self.external_mask)
+        n = self.num_populations
+        block = 8 * 2  # two columns in one hyper-column
+        lateral_hyper_column_mask = torch.eye(n // block).repeat_interleave(block, dim=0).repeat_interleave(block, dim=1)
+        lat_in_hyper_column = lateral_inhibition_tiled * lateral_hyper_column_mask
+
+        lat_in_mask = (self_excitation_tiled * self.internal_mask) + (lat_in_hyper_column * self.external_mask)
+        # lat_in_mask = torch.zeros(8, 8)
         self.register_buffer("lat_in_mask", lat_in_mask)
 
     def _initialize_lat_in_weights(self):

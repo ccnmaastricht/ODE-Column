@@ -146,7 +146,7 @@ def train_context_wta(nr_samples,
     description
     '''
     # Initialize network, initial state and time vector
-    network, initial_state, time_vec = init_network(ColumnAreaContextWTA, 4, batch_size, device)
+    network, initial_state, time_vec = init_network(ColumnAreaContextWTA, 'mt', 4, batch_size, device)
     time_steps = len(time_vec)
     network.set_time_vec(time_vec)
 
@@ -174,33 +174,25 @@ def train_context_wta(nr_samples,
         hub_loss = huber_loss_wta(firing_rates, true_states[:-1], network)
 
         # Add regularization term
-        fb_reg = 5e-6 * (network.feedback_weights ** 2).mean()  # L2 on feedback weights
-        fb_reg += 1e-6 * (network.lat_in_weights ** 2).mean()  # L2 on lateral weights
+        # fb_reg = 5e-6 * (network.feedback_weights ** 2).mean()  # L2 on feedback weights
+        # fb_reg += 1e-6 * (network.lat_in_weights ** 2).mean()  # L2 on lateral weights
         # fb_reg = 1e-8 * (network.feedback_weights.sum(dim=1) ** 2).mean()  # column-wise constraints
-        # fb_reg = 1e-3 * (firing_rates ** 2).mean()  # L2 on firing rates
-        loss = hub_loss + fb_reg
+        # fr_reg_max = 1e-7 * (firing_rates ** 2).max()  # L2 on firing rates (max)
+
+        fr_reg = 1e-6 * (firing_rates ** 4).mean()  # L2 on firing rates (mean)
+
+        # print()
+        # print('Huber loss: ', hub_loss.item())
+        # print('FR reg: ', fr_reg.item())
+        # print('FR reg (max): ', fr_reg_max.item())
+        # print('FR max: ', firing_rates.max().item())
+        # print('FR argmax: ', torch.unravel_index(firing_rates.argmax(), firing_rates.shape))
+
+        loss = hub_loss + fr_reg
 
         print('Iter {:02d} | Total Loss {:.5f}'.format(iter + 1, loss.item()))
 
         loss.backward()
-
-        # if iter > 180:
-        #
-        #     for i in range(10):
-        #         plt.plot(firing_rates[:, i, :].detach().numpy())
-        #         plt.show()
-        #
-        #     # for i in range(firing_rates.shape[1]):
-        #     #     print(i, torch.max(firing_rates[:, i, :]).item())
-        #
-        #     idx = torch.argmax(firing_rates)
-        #     coords = torch.unravel_index(idx, firing_rates.shape)
-        #     print(coords, torch.max(firing_rates).item())
-        #
-        #     for name, param in network.named_parameters():
-        #         if param.requires_grad:
-        #             print(name, torch.max(param.grad))
-
         optimizer.step()
         # scheduler.step()
 
@@ -228,19 +220,18 @@ def train_context_wta(nr_samples,
 
 if __name__ == '__main__':
 
-    # for seed in range(1, 11, 1):
-    seed = 2
-    set_seed(seed)
-    device = torch.device('cpu')
-    ds_target = '../data/ds_wta_NEW.pkl'
+    for seed in range(1, 11, 1):
+        set_seed(seed)
+        device = torch.device('cpu')
+        ds_target = '../data/ds_wta_NEW.pkl'
 
-    network = train_context_wta(nr_samples=12000,
-                                batch_size=32,
-                                fn=ds_target,
-                                device=device,
-                                seed=seed,
-                                with_noise=True
-                                )
+        network = train_context_wta(nr_samples=12000,
+                                    batch_size=32,
+                                    fn=ds_target,
+                                    device=device,
+                                    seed=seed,
+                                    with_noise=True
+                                    )
 
-    save_pkl_file(f'../trained_wta_models/wta_model_seed_{seed}.pkl', network)
+        save_pkl_file(f'../trained_wta_models/wta_model_seed_{seed}.pkl', network)
 

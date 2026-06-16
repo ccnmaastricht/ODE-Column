@@ -6,6 +6,7 @@ import pickle
 import torch
 from pprint import pprint
 import numpy as np
+from sklearn.metrics import d2_pinball_score
 
 from torchsde import sdeint, sdeint_adjoint
 from torchdiffeq import odeint, odeint_adjoint
@@ -135,7 +136,7 @@ def visualize_weights(network, train_iter, seed):
             plt.savefig('../results/parity_seed_{}/{}_{:02d}'.format(seed, clean_name, train_iter + 1))
             plt.close(fig)
 
-def make_ds(batch_size):
+def make_ds(ds_size, tile=1):
     '''
     Make a dataset of all possible combinations. Either with fixed position,
     or position-invariant (i.e. all possible
@@ -149,20 +150,11 @@ def make_ds(batch_size):
                                      [0., 1., 1., 1., 1., 1., 1., 1.],
                                      [1., 1., 1., 1., 1., 1., 1., 1.],
                                     ], dtype=torch.float32)
-    # all_combinations = torch.tensor([[0., 0., 0., 0., 0., 0., 0., 1.],
-    #                                  [0., 0., 0., 0., 0., 0., 1., 1.],
-    #                                  [0., 0., 0., 0., 0., 1., 1., 1.],
-    #                                  [0., 0., 0., 0., 1., 1., 1., 1.],
-    #                                  [0., 0., 0., 0., 0., 0., 0., 1.],
-    #                                  [0., 0., 0., 0., 0., 0., 1., 1.],
-    #                                  [0., 0., 0., 0., 0., 1., 1., 1.],
-    #                                  [0., 0., 0., 0., 1., 1., 1., 1.]
-    #                                 ], dtype=torch.float32)
     all_combinations *= 15.
 
-    train_set = all_combinations[torch.randperm(all_combinations.size(0))][:batch_size]
-    test_set = all_combinations[torch.randperm(all_combinations.size(0))][:1]
-    return train_set, test_set
+    combinations_tiled = torch.tile(all_combinations, (tile, 1))
+    ds = combinations_tiled[torch.randperm(combinations_tiled.size(0))][:ds_size*tile]
+    return ds
 
 def prep_parity_stim(stim_raw, time_vec, num_columns):
     '''
@@ -210,20 +202,57 @@ def init_network(device, nr_inputs, batch_size, two_output_cols):
 
     return network.to(device), time_vec.to(device), initial_state.to(device)
 
-def mask_weights(network):
-    '''
-    Apply mask to grad to make sure no illegal updates are made.
-    '''
-    # network.output_weights.grad *= network.output_mask  # output weights
+def evaluate_parity(network,
+                    test_set,
+                    initial_state,
+                    time_vec,
+                    noise_std=0.0):
 
-    network.areas['0'].input_weights.grad *= network.areas['0'].input_mask  # input weights
+    with torch.no_grad():
+        test_input = test_set.clone()
 
-    for area_idx in range(1, network.nr_areas):  # feedforward weights, skip first area
-        network.areas[str(area_idx)].feedforward_weights.grad *= network.areas[str(area_idx)].feedforward_mask
+        if noise_std > 0:
+            mask = (test_input == 15.0).float()
+            noise = torch.normal(
+                mean=0.0,
+                std=noise_std,
+                size=test_input.shape,
+                device=test_input.device
+            )
+            test_input = test_input + noise * mask
 
-    for area_idx in range(network.nr_areas):
-        if network.areas[str(area_idx)].num_columns > 1:  # areas with fewer than 1 column have no lateral connections
-            network.areas[str(area_idx)].lateral_weights.grad *= network.areas[str(area_idx)].lateral_mask
+        network.set_stim(test_input)
+
+        ode_output = odeint_adjoint(
+            network,
+            initial_state,
+            time_vec
+        )
+
+        split = network.network_as_area.num_populations
+        firing_rates = compute_firing_rate(
+            ode_output[:, :, :split]
+            - ode_output[:, :, split:(split * 2)]
+        )
+        final_fr = firing_rates[-100:, :, -8:]
+        final_fr_mean = torch.mean(final_fr, dim=0)
+        final_fr_summed = torch.sum(
+            final_fr_mean *
+            (network.output_weights * network.output_mask_full),
+            dim=-1
+        )
+
+        parity_targets = (
+            test_set.sum(dim=1) % 30 == 0
+        ).float()
+
+        predictions = (final_fr_summed > 10).float()
+
+        accuracy = (
+            predictions == parity_targets
+        ).float().mean()
+
+        return accuracy.item()
 
 def train_parity_ode(nr_inputs,
                      nr_samples,
@@ -244,6 +273,12 @@ def train_parity_ode(nr_inputs,
     # # Load existing network
     # network = load_pkl_file('../results/parity_pre_training.pkl')
 
+    # Make a test set
+    test_set = make_ds(batch_size, tile=4)
+    test_set = test_set.to(device)
+    test_set_clean = test_set.clone()
+    test_initial_state = torch.tile(initial_state, (4, 1))
+
     # Save the network pre-training
     save_pkl_file(f'../results/parity_seed_{seed}/parity_pre_training.pkl', network)
 
@@ -261,12 +296,16 @@ def train_parity_ode(nr_inputs,
         optimizer.zero_grad()
         network.constrain()
 
-        train_set, _ = make_ds(batch_size)
+        train_set = make_ds(batch_size)
         train_set = train_set.to(device)
-        network.set_stim(train_set)
+
+        mask = (train_set == 15.0).float()
+        noise = torch.normal(mean=0.0, std=1.0, size=train_set.shape, device=device)
+        train_set_perturbed = train_set + noise * mask
+        network.set_stim(train_set_perturbed)
 
         # Run neural ODE on train samples
-        ode_output = odeint(network, initial_state, time_vec).to(device)
+        ode_output = odeint_adjoint(network, initial_state, time_vec).to(device)
 
         split = network.network_as_area.num_populations
         firing_rates = compute_firing_rate(ode_output[:, :, :split] - ode_output[:, :, split:(split * 2)])
@@ -309,7 +348,7 @@ def train_parity_ode(nr_inputs,
             # Training on classification
             final_fr = firing_rates[-100:, :, -8:]  # final firing rates of output column
             final_fr_mean = torch.mean(final_fr, dim=0)  # mean firing rate over last 100 time steps
-            final_fr_summed = torch.sum((final_fr_mean * (network.output_weights * network.output_mask)) , dim=-1)
+            final_fr_summed = torch.sum((final_fr_mean * (network.output_weights * network.output_mask_full)) , dim=-1)
 
             parity_targets = (train_set.sum(dim=1) % 30 == 0).float()
             parity_targets = parity_targets * 20.  # training target
@@ -321,26 +360,50 @@ def train_parity_ode(nr_inputs,
             # loss = criterion(final_fr_summed, (parity_targets // 20))
 
         loss.backward()
-
-        # Make sure no illegal updates are made before making the optimizer step
-        # mask_weights(network)
         optimizer.step()
 
-        # Clamp the weights to ensure the weights are not below zero after updating (or are not higher than zero)
-        for name, param in network.named_parameters():
-            param.data.clamp_(min=0.0)
-
-        print('Iter {:02d} | Total Loss {:.5f}'.format(batch_itr + 1, loss.item()))
+        # print('Iter {:02d} | Total Loss {:.5f}'.format(batch_itr + 1, loss.item()))
         losses[batch_itr] = loss.item()
         save_pkl_file(f'../results/parity_seed_{seed}/losses.pkl', losses)
 
         # Every five batches, visualize training and save the current network
         with torch.no_grad():
-            if batch_itr % 5 == 0:
+            if batch_itr % 50 == 0:
+                clean_acc = evaluate_parity(
+                    network,
+                    test_set_clean,
+                    test_initial_state,
+                    time_vec,
+                    noise_std=0.0
+                )
+                noisy_acc = evaluate_parity(
+                    network,
+                    test_set_clean,
+                    test_initial_state,
+                    time_vec,
+                    noise_std=1.0
+                )
+                strong_acc = evaluate_parity(
+                    network,
+                    test_set_clean,
+                    test_initial_state,
+                    time_vec,
+                    noise_std=3.0
+                )
+
                 visualize_results(network, firing_rates, train_set, loss.item(), batch_itr, batch_size, target_trajectory, two_output_cols, seed)
                 visualize_weights(network, batch_itr, seed)
                 save_pkl_file(f'../results/parity_seed_{seed}/parity_post_training.pkl', network)
-    pprint(losses)
+
+                print(
+                    f"Iter {batch_itr:04d} | "
+                    f"Loss {loss.item():.3f} | "
+                    f"Clean {clean_acc:.3f} | "
+                    f"Noisy {noisy_acc:.3f} | "
+                    f"Strong {strong_acc:.3f}"
+                )
+
+    # pprint(losses)
 
 
 
@@ -353,16 +416,10 @@ if __name__ == '__main__':
 
         set_seed(seed)
         train_parity_ode(nr_inputs=8,
-                         nr_samples=6400,
+                         nr_samples=8008,
                          batch_size=8,
                          device=device,
                          seed=seed,
                          trajectory_based=trajectory_based,
                          two_output_cols=two_output_cols)
 
-
-'''
-8 bits
-8-2-1
-fixed output weights
-'''

@@ -2,6 +2,7 @@ import numpy as np
 import os
 import pickle
 import matplotlib.pyplot as plt
+import pylab as pl
 from scipy.linalg import block_diag
 
 import torch
@@ -19,8 +20,8 @@ def visualize_results(pred, true, stim, network, train_loss, test_loss, weights,
     '''
     Visualize the firing rates of L23e during training.
     '''
-    if not os.path.exists(f'../results/wta_scrambled_seed_{seed}'):
-        os.makedirs(f'../results/wta_scrambled_seed_{seed}')
+    if not os.path.exists(f'../results/wta_seed_{seed}'):
+        os.makedirs(f'../results/wta_seed_{seed}')
     fig, axes = plt.subplots(1, 2, figsize=(9, 5))
 
     fig.text(0.2, 0.03, f"Input column 1: {stim[0]:.1f}", ha='center', fontsize=10, color='#1f77b4', fontweight='bold')
@@ -50,7 +51,7 @@ def visualize_results(pred, true, stim, network, train_loss, test_loss, weights,
 
     plt.tight_layout(pad=3.0)
     fig.subplots_adjust(left=0.15)
-    plt.savefig('../results/wta_scrambled_seed_{}/{:02d}'.format(seed, len(weights)))
+    plt.savefig('../results/wta_seed_{}/{:02d}'.format(seed, len(weights)))
     plt.close(fig)
 
 def random_input_pair():
@@ -64,6 +65,16 @@ def random_input_pair():
     np.random.shuffle(mu_vals)
     return mu_vals
 
+def make_input_pairs():
+    mu_values = np.linspace(15, 45, 100)
+
+    pairs = []
+    for a in mu_values:
+        for b in mu_values:
+            if 5 <= abs(a - b) <= 10:
+                pairs.append([a, b])
+    return pairs
+
 def make_ds_ww(ds_file, nr_samples, time_steps):
     '''
     Make a dataset of Wang-Wong training samples. If filename
@@ -76,6 +87,9 @@ def make_ds_ww(ds_file, nr_samples, time_steps):
             ds = pickle.load(f)
     else:
 
+        input_pairs = make_input_pairs()
+        nr_samples = len(input_pairs)
+
         ds = {
             'states': torch.Tensor(nr_samples, time_steps, 2),
             'stims': torch.Tensor(nr_samples, 2)
@@ -86,7 +100,8 @@ def make_ds_ww(ds_file, nr_samples, time_steps):
         for i in range(nr_samples):
 
             # Random input
-            muA, muB = random_input_pair()
+            # muA, muB = random_input_pair
+            muA, muB = input_pairs[i]
 
             R = dm.run_sim(muA, muB)
             R = R[:, ::10]  # only take every tenth time sample
@@ -103,15 +118,21 @@ def make_ds_ww(ds_file, nr_samples, time_steps):
 def get_data(nr_samples, batch_size, time_steps, fn):
     '''
     Gets the training dataset made with Wang-Wong model,
-    scales it down to match our L23 firing rates.
+    scales it down to match our L23e firing rates.
     '''
-    states, stims = make_ds_ww(fn, nr_samples+10, time_steps)
-    states, stims = states[:nr_samples+10], stims[:nr_samples+10]
+    states_raw, stims_raw = make_ds_ww(fn, nr_samples, time_steps)
 
-    states = states / 30.  # scale down wang-wong firing rates to match with our L23
+    # In case nr_samples is higher than nr of samples in saved file, duplicate the dataset
+    if len(states_raw) >= nr_samples:
+        states, stims = states_raw[:nr_samples], stims_raw[:nr_samples]
+    elif len(states_raw) < nr_samples:
+        nr_epochs = int(np.ceil(nr_samples / len(states_raw)))
+        states, stims = torch.tile(states_raw, (nr_epochs, 1, 1)), torch.tile(stims_raw, (nr_epochs, 1))
+
+    states = states / 30.  # scale down wang-wong firing rates to match with our L23e
 
     ds = TensorDataset(states, stims)
-    data_loader = DataLoader(ds, batch_size=batch_size, shuffle=False, drop_last=True)
+    data_loader = DataLoader(ds, batch_size=batch_size, shuffle=True, drop_last=True)
     return data_loader
 
 def set_stim_whole_column(raw_stim):
@@ -121,7 +142,7 @@ def set_stim_whole_column(raw_stim):
     stim = torch.repeat_interleave(raw_stim, repeats=8, dim=1)
     return stim
 
-def init_network(column_network, num_columns, batch_size, device):
+def init_network(column_network, area, num_columns, batch_size, device):
     '''
     Initialize the one area column network, initial state and time vector.
     '''
@@ -132,7 +153,7 @@ def init_network(column_network, num_columns, batch_size, device):
 
     # Column network setup
     col_params = load_config('../config/wta_params.toml')
-    network = column_network(col_params, area='mt', num_columns=num_columns)
+    network = column_network(col_params, area=area, num_columns=num_columns)
 
     # Initial state
     initial_state = torch.zeros(batch_size, num_columns*8*2)
@@ -143,7 +164,7 @@ def init_network(column_network, num_columns, batch_size, device):
     time_vec = torch.linspace(0., time_steps * dt, time_steps)
     return network.to(device), initial_state.to(device), time_vec.to(device)
 
-def run_sample(network, time_vec, initial_state, stim_raw, with_noise):
+def run_sample(network, time_vec, initial_state, stim_raw, device, with_noise):
     '''
     Runs one stimulus sample through the network
     '''
@@ -379,7 +400,7 @@ def train_wta(nr_samples,
     data from Wang-Wong (WTA dynamics) as a training target.
     '''
     # Initialize network, initial state and time vector
-    network, initial_state, time_vec = init_network(ColumnAreaWTA, 2, batch_size, device)
+    network, initial_state, time_vec = init_network(ColumnAreaWTA, 'mt', 2, batch_size, device)
     time_steps = len(time_vec)
     network.set_time_vec(time_vec)
 
@@ -406,12 +427,25 @@ def train_wta(nr_samples,
     # Store weights for visualization
     weights = []
 
+    # bias = 0
+
     for iter, (true_states, stim_batch) in enumerate(data_loader):
         optimizer.zero_grad()
         network.constrain_recurr_weights()
         true_states = true_states.to(device)
 
-        pred_states = run_sample(network, time_vec, initial_state[:-1], stim_batch[:-1], with_noise)
+        # bias_stim = 0
+        # for i in stim_batch:
+        #     if i[0] > i[1]:
+        #         bias_stim += 1
+        # print(bias_stim / len(stim_batch))
+        #
+        # mean_stims = torch.mean(stim_batch, dim=0)
+        # if mean_stims[0] - mean_stims[1] > 0:
+        #     bias += 1
+        #     stop = 0
+
+        pred_states = run_sample(network, time_vec, initial_state[:-1], stim_batch[:-1], device, with_noise)
 
         # Compute loss between pred and true
         firing_rates = compute_firing_rate(pred_states[:, :, :16] - pred_states[:, :, 16:32])
@@ -441,13 +475,15 @@ def train_wta(nr_samples,
             weights.append(curr_weights)
 
             # Run test sample
-            pred_state = run_sample(network, time_vec, initial_state[-1].unsqueeze(0), stim_batch[-1].unsqueeze(0), with_noise)
+            pred_state = run_sample(network, time_vec, initial_state[-1].unsqueeze(0), stim_batch[-1].unsqueeze(0), device, with_noise)
 
             # Visualize final test sample
             test_state = true_states[-1]
             pred_state_fr = compute_firing_rate(pred_state[:, 0, :16] - pred_state[:, 0, 16:32])
             test_loss = huber_loss_wta(pred_state_fr.unsqueeze(1), test_state.unsqueeze(0), network)
             visualize_results(pred_state_fr, test_state, stim_batch[-1], network, loss.item(), test_loss, weights, seed)
+
+    # print(bias/iter)
 
     return network
 
@@ -458,20 +494,20 @@ if __name__ == '__main__':
 
     for seed in range (1, 11, 1):
 
-        set_seed(seed)
         device = torch.device('cpu')
-        ds_target = '../data/ds_wta_6000_15_35_5_10.pkl'
+        # ds_target = '../data/ds_wta_6000_15_35_5_10.pkl'
+        ds_target = '../data/ds_wta_NEW.pkl'
 
-        network = train_wta(nr_samples=3000,
-                            batch_size=16,
+        network = train_wta(nr_samples=12000,
+                            batch_size=32,
                             fn=ds_target,
                             device=device,
                             seed=seed,
                             with_noise=True,
                             adjust_pd=False,
-                            scrambled_pd=True,
+                            scrambled_pd=False,
                             )
 
-        save_pkl_file(f'../trained_wta_models/wta_scrambled_seed_{seed}.pkl', network)
+        save_pkl_file(f'../trained_wta_models/wta_seed_{seed}.pkl', network)
 
-# Note: shuffle=False for dataloader
+# Note: shuffle=TRUE for dataloader

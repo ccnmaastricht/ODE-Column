@@ -144,6 +144,17 @@ class Connection(torch.nn.Module):
         self.weights = None
         self.mask = None
 
+    def _get_connection_params(self, params):
+        """
+        Obtains the relevant parameters from the params dict to establish
+        the connection.
+        """
+        init = torch.tensor(params['model']['connection_inits'][self.conn_type])
+        mask = torch.tensor(params['model']['connection_masks'][self.conn_type])
+
+        baseline_synaptic_strentgh = params['column']['synaptic_strength']['baseline']
+        return init, mask, baseline_synaptic_strentgh
+
     def get_name(self):
         """ Returns the unique string specifying the connection."""
         return f'{self.conn_type}_{self.source}_{self.target}'
@@ -154,25 +165,25 @@ class Connection(torch.nn.Module):
 
     def initialize_background_weights(self, area):
         """ Initialize background weights within an area."""
-        self.weights = torch.nn.Parameter(area.background_weights, requires_grad=self.trainable)
+        bg_weights = area.background_weights.unsqueeze(1)  # add extra dim
+        self.weights = torch.nn.Parameter(bg_weights, requires_grad=self.trainable)
 
     def initialize_feedforward_weights(self, params, source_area, target_area, std, scale):
         """
         Initialize feedforward weights between source area and target area.
         """
+        init, mask, synapse_strength = self._get_connection_params(params)
+
         size_source = source_area.num_columns
         size_target = target_area.num_columns
 
-        init = torch.tensor(params['model']['connection_inits']['feedforward'])
-        init *= params['column']['synaptic_strength']['baseline']
+        init *= synapse_strength
         init = torch.tile(init, (size_target, size_source))
 
         rand_weights = abs(torch.normal(mean=init, std=std))
         rand_weights *= scale
 
-        mask = torch.tensor(params['model']['connection_masks']['feedforward'])
         mask = torch.tile(mask, (size_target, size_source))
-
         weights = rand_weights * mask
         self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
 
@@ -180,19 +191,18 @@ class Connection(torch.nn.Module):
         """
         Initialize feedback weights between source area and target area.
         """
+        init, mask, synapse_strength = self._get_connection_params(params)
+
         size_source = source_area.num_columns
         size_target = target_area.num_columns
 
-        init = torch.tensor(params['model']['connection_inits']['feedback'])
-        init *= params['column']['synaptic_strength']['baseline']
+        init *= synapse_strength
         init = torch.tile(init, (size_target, size_source))
 
         rand_weights = abs(torch.normal(mean=init, std=std))
         rand_weights *= scale
 
-        mask = torch.tensor(params['model']['connection_masks']['feedback'])
         mask = torch.tile(mask, (size_target, size_source))
-
         weights = rand_weights * mask
         self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
 
@@ -200,18 +210,16 @@ class Connection(torch.nn.Module):
         """
         Initialize lateral weights within an area.
         """
+        init, mask, synapse_strength = self._get_connection_params(params)
         size_area = area.num_columns
 
-        init = torch.tensor(params['model']['connection_inits']['lateral'])
-        init *= params['column']['synaptic_strength']['baseline']
+        init *= synapse_strength
         init = torch.tile(init, (size_area, size_area))
 
         rand_weights = abs(torch.normal(mean=init, std=std))
         rand_weights *= scale
 
-        mask = torch.tensor(params['model']['connection_masks']['lateral'])
         mask = torch.tile(mask, (size_area, size_area)) * area.external_mask
-
         weights = rand_weights * mask
         self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
 
@@ -219,18 +227,32 @@ class Connection(torch.nn.Module):
         """
         Initialize input weights targeting an area.
         """
+        init, mask, synapse_strength = self._get_connection_params(params)
         size_target_area = target_area.num_columns
 
-        init = torch.tensor(params['model']['connection_inits']['input'])
-        init *= params['column']['synaptic_strength']['baseline']
+        init *= synapse_strength
         init = torch.tile(init, (size_target_area, size_input))
 
         rand_weights = abs(torch.normal(mean=init, std=std))
         rand_weights *= scale
 
-        mask = torch.tensor(params['model']['connection_masks']['input'])
         mask = torch.tile(mask, (size_target_area, size_input))
+        weights = rand_weights * mask
+        self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
 
+    def initialize_output_weights(self, params, source_area, std, scale):
+        """
+        Initialize output weights reading out activity from an area.
+        """
+        init, mask, _ = self._get_connection_params(params)
+        size_source_area = source_area.num_columns
+
+        init = torch.tile(init, (1, size_source_area))
+
+        rand_weights = abs(torch.normal(mean=init, std=std))
+        rand_weights *= scale
+
+        mask = torch.tile(mask, (1, size_source_area))
         weights = rand_weights * mask
         self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
 
@@ -258,6 +280,7 @@ class BrainNetwork(torch.nn.Module):
         self.area_slices        = {}
         self.areas              = torch.nn.ModuleDict({})
         self.connections        = torch.nn.ModuleDict({})
+        self.output_connections = torch.nn.ModuleDict({})
 
         self._initialize_basic_parameters(col_params)
 
@@ -265,18 +288,29 @@ class BrainNetwork(torch.nn.Module):
         """
         Initialize basic parameters that apply for the entire network
         """
-        # TODO: Handle background drive as source of input?
         # Basic parameters
-        self.register_buffer("background_drive", torch.tensor(params['background_drive'], dtype=torch.float32))
+        bg_drive = torch.tensor(params['background_drive'], dtype=torch.float32)
+        self.register_buffer("background_drive", bg_drive.unsqueeze(0))  # add extra dim
         self.register_buffer("adaptation_strength", torch.tensor(params['adaptation_strength'], dtype=torch.float32))
 
-        # Time constants and membrane resistance
+        # Time constants
         time_constants = params['time_constants']
         self.register_buffer("synapse_time_constant", torch.tensor(time_constants['synapse'], dtype=torch.float32))
         self.register_buffer("membrane_time_constant", torch.tensor(time_constants['membrane'], dtype=torch.float32))
         self.register_buffer("adapt_time_constant", torch.tensor(time_constants['adaptation'], dtype=torch.float32))
+
+        # Membrane resistance
         resistance = time_constants['membrane'] / params['capacitance']
         self.register_buffer("resistance", torch.tensor(resistance, dtype=torch.float32))
+
+    def _get_area(self, area_name):
+        """
+        Returns the Area object from the self.areas dict.
+        """
+        area_name = area_name.lower()
+        assert area_name in self.areas.keys(), f"Area '{area_name}' is not yet initialized. Please use BrainNetwork.add_area(name, size)."
+
+        return self.areas[area_name]
 
     def add_area(self,
                  area_name,
@@ -310,7 +344,7 @@ class BrainNetwork(torch.nn.Module):
         recurrent_connection.initialize_recurrent_weights(area)
         self.connections[recurrent_connection.get_name()] = recurrent_connection
 
-        background_connection = Connection('background', area_name, area_name, background_trainable)
+        background_connection = Connection('background', 'background', area_name, background_trainable)
         background_connection.initialize_background_weights(area)
         self.connections[background_connection.get_name()] = background_connection
 
@@ -320,12 +354,9 @@ class BrainNetwork(torch.nn.Module):
                                    trainable=True,
                                    std=0.1,
                                    scale=1.0):
-        source, target = source.lower(), target.lower()
-        assert source in self.areas.keys(), f"Source area '{source}' is not yet initialized. Please use BrainNetwork.add_area(name, size)."
-        assert target in self.areas.keys(), f"Target area '{target}' is not yet initialized. Please use BrainNetwork.add_area(name, size)."
 
-        source_area = self.areas[source]
-        target_area = self.areas[target]
+        source_area = self._get_area(source)
+        target_area = self._get_area(target)
 
         connection = Connection('feedforward', source, target, trainable)
         connection.initialize_feedforward_weights(self.params, source_area, target_area, std, scale)
@@ -337,12 +368,9 @@ class BrainNetwork(torch.nn.Module):
                                 trainable=True,
                                 std=0.1,
                                 scale=1.0):
-        source, target = source.lower(), target.lower()
-        assert source in self.areas.keys(), f"Source area '{source}' is not yet initialized. Please use BrainNetwork.add_area(name, size)."
-        assert target in self.areas.keys(), f"Target area '{target}' is not yet initialized. Please use BrainNetwork.add_area(name, size)."
 
-        source_area = self.areas[source]
-        target_area = self.areas[target]
+        source_area = self._get_area(source)
+        target_area = self._get_area(target)
 
         connection = Connection('feedback', source, target, trainable)
         connection.initialize_feedback_weights(self.params, source_area, target_area, std, scale)
@@ -353,9 +381,8 @@ class BrainNetwork(torch.nn.Module):
                                trainable=True,
                                std=0.1,
                                scale=1.0):
-        area_name = area_name.lower()
-        assert area_name in self.areas.keys(), f"Area '{area_name}' is not yet initialized. Please use BrainNetwork.add_area(name, size)."
-        area = self.areas[area_name]
+
+        area = self._get_area(area_name)
 
         connection = Connection('lateral', area_name, area_name, trainable)
         connection.initialize_lateral_weights(self.params, area, std, scale)
@@ -368,9 +395,8 @@ class BrainNetwork(torch.nn.Module):
                              unique_name=None,
                              std=0.1,
                              scale=1.0):
-        target_area = target_area.lower()
-        assert target_area in self.areas.keys(), f"Area '{target_area}' is not yet initialized. Please use BrainNetwork.add_area(name, size)."
-        area = self.areas[target_area]
+
+        area = self._get_area(target_area)
 
         input_name = 'input'
         if unique_name is not None:
@@ -380,22 +406,62 @@ class BrainNetwork(torch.nn.Module):
         connection.initialize_input_weights(self.params, input_size, area, std, scale)
         self.connections[connection.get_name()] = connection
 
+    def add_output_connection(self,
+                              source_area,
+                              trainable=True,
+                              unique_name=None,
+                              std=0.0,
+                              scale=1.0):
+
+        area = self._get_area(source_area)
+
+        output_name = 'output'
+        if unique_name is not None:
+            output_name = unique_name
+
+        connection = Connection('output', source_area, output_name, trainable)
+        connection.initialize_output_weights(self.params, area, std, scale)
+        self.output_connections[connection.get_name()] = connection
+
     def finalize(self):
         """
         Finalizes the network after initializing all areas and connections by setting
         the total number of populations and columns, and setting slices to index the
-        activity of each area.
+        activity of each area. Also extends adaptation strength to entire network.
         """
-        # Population counts: total and slices per area
         self.num_populations = sum(area.num_populations for area in self.areas.values())
         self.num_columns = self.num_populations // 8
 
+        # Slices per area
         idx = 0
         for area_name, area in self.areas.items():
             self.area_slices[area_name] = slice(idx, idx + area.num_populations)
             idx += area.num_populations
 
+        # Extend adaptation strength tensor to cover the entire network
+        self.register_buffer("adaptation_strength_full", torch.tile(self.adaptation_strength,(self.num_columns,)))
+
     # TODO: constraining function
+
+    def set_activities(self, t, fr_per_area, ext_input, input_windows):
+
+        # Add background drive
+        activities = {'background': self.background_drive}
+
+        # Add firing rates of all network areas
+        activities.update(fr_per_area)
+
+        # Add network-external input
+        if ext_input is not None:
+            for input_name, x in ext_input.items():
+                # Present input if t is in input window
+                start, end = input_windows[input_name]
+                if start <= float(t) < end:
+                    activities[input_name] = x
+                else:
+                    activities[input_name] = torch.zeros_like(x)
+
+        return activities
 
     def compute_currents(self, t, firing_rates, ext_input, input_windows):
         """
@@ -404,28 +470,15 @@ class BrainNetwork(torch.nn.Module):
         fr_per_area = {area_name: firing_rates[:, area_slice]
                        for area_name, area_slice in self.area_slices.items()}
 
-        activities = {}
-        if ext_input is not None:
-            for input_name, x in ext_input.items():
-                # Present input if t is in input window
-                start, end = input_windows[input_name]
-                if start <= t < end:
-                    activities[input_name] = x
-                else:
-                    activities[input_name] = torch.zeros_like(x)
-        activities.update(fr_per_area)
+        activities = self.set_activities(t, fr_per_area, ext_input, input_windows)
 
         currents = {area_name: torch.zeros(firing_rates.shape[0], area.num_populations, device=firing_rates.device)
                     for area_name, area in self.areas.items()}
 
         for connection in self.connections.values():
             conn_type = connection.conn_type
-            if connection.conn_type == 'background':
-                batch_size = activities[connection.source].shape[0]
-                current = torch.tile(self.background_drive, (batch_size, 1)) * connection.weights
-            else:
-                source_fr = activities[connection.source]
-                current = source_fr @ connection.weights.T
+            source_fr = activities[connection.source]
+            current = source_fr @ connection.weights.T
             currents[connection.target] += current * self.synapse_time_constant
             stop = 0
 
@@ -448,7 +501,7 @@ class BrainNetwork(torch.nn.Module):
         # Compute derivative membrane potential and adaptation
         delta_membrane_potential = (-membrane_potential +
             total_current * self.resistance) / self.membrane_time_constant
-        delta_adaptation = (-adaptation + torch.tile(self.adaptation_strength, (self.num_columns,)) *
+        delta_adaptation = (-adaptation + self.adaptation_strength_full *
                             firing_rate) / self.adapt_time_constant
 
         state = torch.concat((delta_membrane_potential, delta_adaptation), dim=1)
@@ -473,6 +526,72 @@ class BrainNetwork(torch.nn.Module):
             adjoint=adjoint,
             stochastic=stochastic,
             device=device)
+
+    def get_firing_rates(self, raw_state, area=None, return_as_np_array=True):
+        """
+        Compute the firing rate from the raw state (= [membrane_potential, adaptation])
+        Return as np.array unless specified otherwise.
+        """
+        # TODO: refine (layer indices?)
+        split = self.num_populations
+        firing_rates = compute_firing_rate(raw_state[:, :, :split] - raw_state[:, :, split:(split * 2)])
+
+        if area is not None:
+            area_slices = self.area_slices[area]
+            firing_rates = firing_rates[:, :, area_slices]
+
+        if return_as_np_array:
+            return firing_rates.detach().cpu().numpy()
+        return firing_rates
+
+    def classification_read_out(self, fr_full_sim_time):
+        """
+        Use a classification time window to average network activity over time.
+        """
+        time_params = self.params['model']['time_params']
+        assert 'classification_window' in time_params, (f"If mode is set to 'classification', please set "
+                                                        f"a classification_window in model_params.toml under [time_params].")
+
+        time_window     = time_params['classification_window']
+        sim_time        = time_params['sim_time']
+        dt              = time_params['dt']
+
+        start = time_window[0]
+        end = time_window[1]
+        assert start <= sim_time and end <= sim_time, (f"The input time window ({start}s, {end}s) "
+                                                       f"exceeds total simulation time ({sim_time}s)")
+
+        # Get time steps of classification window and slice the firing_rates
+        start, end = int(start / dt), int(end / dt)
+        fr_window_slice = fr_full_sim_time[start:end, :, :]
+
+        return torch.mean(fr_window_slice, dim=0)
+
+    def read_out(self, raw_output, mode, sum_per_col=True):
+        """
+        Read output from raw output; either return entire trajectory or last x time steps,
+        i.e. trajectory-based vs classification-based training procedure...
+        """
+        assert mode == 'trajectory' or mode == 'classification', f"Invalid mode for read-out. Acceptable modes are 'trajectory' or 'classification'."
+
+        read_outs = {}
+
+        for conn_name, output_conn in self.output_connections.items():
+            fr_output_area = self.get_firing_rates(raw_output, area=output_conn.source, return_as_np_array=False)
+            read_out = fr_output_area * output_conn.weights
+
+            if sum_per_col:
+                read_out_reshape = torch.reshape(read_out, (read_out.shape[0], read_out.shape[1], read_out.shape[2]//8, 8))
+                read_out = torch.sum(read_out_reshape, dim=-1)
+
+            if mode == 'classification':
+                read_out = self.classification_read_out(read_out)
+
+            if len(list(self.output_connections.keys())) == 1:
+                    return read_out
+
+            read_outs[conn_name] = read_out
+        return read_outs
 
 
 
