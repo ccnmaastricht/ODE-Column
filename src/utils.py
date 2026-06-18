@@ -32,6 +32,7 @@ def save_pkl_file(fn, data):
         pickle.dump(data, f)
 
 
+# TODO: look at ImageColumnModel for an updated version! Also, is soft clamp necessary?
 def compute_firing_rate(x):
     '''
     Compute the firing rates from (membrane potential - adaptation)

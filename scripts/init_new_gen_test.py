@@ -1,15 +1,10 @@
 from src.network_new_gen import BrainNetwork, NetworkAnalyzer
-import time
 
-
-# Try training
 
 
 if __name__ == '__main__':
 
-    start_time = time.time()
-
-    # Setting up
+    # Building the network
     network = BrainNetwork()
     analyzer = NetworkAnalyzer(network)
 
@@ -20,20 +15,18 @@ if __name__ == '__main__':
     network.add_feedback_connection(source='v2', target='v1', trainable=True)
     network.add_lateral_connection(area_name='v1', trainable=True)
 
-    network.add_input_connection(target_area='v1', input_size=2, trainable=False)
-    network.add_output_connection(source_area='v2', trainable=False)
+    network.add_input_connection(target_area='v1', input_size=2, trainable=True)
+    network.add_output_connection(source_area='v2', trainable=True)
 
-    # Stimulus
-    stim = [[20., 0.],
-            [0., 20.]]
+    # Stimulus batch (size = 3)
+    stim = [[20.,  0.],
+            [ 0., 20.],
+            [10., 10.]]
 
     # Run simulation
     output = network.run(stim, adjoint=False, stochastic=True, device='cpu')
     model_read_out = network.read_out(output, mode='classification')
 
-    print(time.time() - start_time)
-
-    # Plot firing rates
+    # Plot all firing rates
     firing_rates = network.get_firing_rates(output)
     analyzer.plot_firing_rates(firing_rates)
-

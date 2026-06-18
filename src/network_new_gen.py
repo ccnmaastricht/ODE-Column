@@ -1,6 +1,5 @@
 import torch
 import numpy as np
-from contourpy.array import concat_points_or_none
 from scipy.linalg import block_diag
 import matplotlib.pyplot as plt
 
@@ -136,13 +135,10 @@ class Connection(torch.nn.Module):
     def __init__(self, conn_type, source, target, trainable):
         super().__init__()
 
-        self.conn_type = conn_type
-        self.source = source
-        self.target = target
-        self.trainable = trainable
-
-        self.weights = None
-        self.mask = None
+        self.conn_type  = conn_type
+        self.source     = source
+        self.target     = target
+        self.trainable  = trainable
 
     def _get_connection_params(self, params):
         """
@@ -155,18 +151,46 @@ class Connection(torch.nn.Module):
         baseline_synaptic_strentgh = params['column']['synaptic_strength']['baseline']
         return init, mask, baseline_synaptic_strentgh
 
+    def _set_weights_and_mask(self, weights, mask):
+        """ ... """
+        self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
+        self.register_buffer("mask", mask)
+
     def get_name(self):
         """ Returns the unique string specifying the connection."""
         return f'{self.conn_type}_{self.source}_{self.target}'
 
+    def constrain(self, existing_areas):
+        """
+        Constrain the connection so no illegal connections can be used. Uses the
+        connection mask and, if the connection source is a BrainArea, it forces
+        excitatory connections to be non-negative and inhibitory ones to be non-positive.
+        """
+
+        masked = self.weights * self.mask
+
+        if self.source in existing_areas:
+
+            exc = torch.relu(masked[:, 0::2])
+            inh = -torch.relu(-masked[:, 1::2])
+
+            ex_in_masked = masked.clone()
+            ex_in_masked[:, 0::2] = exc
+            ex_in_masked[:, 1::2] = inh
+
+            self.W = masked
+        else:
+            self.W = torch.relu(masked)
+
     def initialize_recurrent_weights(self, area):
         """ Initialize recurrent (i.e. column-intrinsic) weights within the same area."""
-        self.weights = torch.nn.Parameter(area.recurrent_weights, requires_grad=self.trainable)
+        self._set_weights_and_mask(area.recurrent_weights, area.internal_mask)
 
     def initialize_background_weights(self, area):
         """ Initialize background weights within an area."""
         bg_weights = area.background_weights.unsqueeze(1)  # add extra dim
-        self.weights = torch.nn.Parameter(bg_weights, requires_grad=self.trainable)
+        mask = torch.ones_like(bg_weights)
+        self._set_weights_and_mask(bg_weights, mask)
 
     def initialize_feedforward_weights(self, params, source_area, target_area, std, scale):
         """
@@ -185,7 +209,7 @@ class Connection(torch.nn.Module):
 
         mask = torch.tile(mask, (size_target, size_source))
         weights = rand_weights * mask
-        self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
+        self._set_weights_and_mask(weights, mask)
 
     def initialize_feedback_weights(self, params, source_area, target_area, std, scale):
         """
@@ -204,7 +228,7 @@ class Connection(torch.nn.Module):
 
         mask = torch.tile(mask, (size_target, size_source))
         weights = rand_weights * mask
-        self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
+        self._set_weights_and_mask(weights, mask)
 
     def initialize_lateral_weights(self, params, area, std, scale):
         """
@@ -221,13 +245,15 @@ class Connection(torch.nn.Module):
 
         mask = torch.tile(mask, (size_area, size_area)) * area.external_mask
         weights = rand_weights * mask
-        self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
+        self._set_weights_and_mask(weights, mask)
 
     def initialize_input_weights(self, params, size_input, target_area, std, scale):
         """
         Initialize input weights targeting an area.
         """
         init, mask, synapse_strength = self._get_connection_params(params)
+        init = torch.transpose(init.unsqueeze(0), 0, 1)
+        mask = torch.transpose(mask.unsqueeze(0), 0, 1)
         size_target_area = target_area.num_columns
 
         init *= synapse_strength
@@ -238,7 +264,7 @@ class Connection(torch.nn.Module):
 
         mask = torch.tile(mask, (size_target_area, size_input))
         weights = rand_weights * mask
-        self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
+        self._set_weights_and_mask(weights, mask)
 
     def initialize_output_weights(self, params, source_area, std, scale):
         """
@@ -254,7 +280,7 @@ class Connection(torch.nn.Module):
 
         mask = torch.tile(mask, (1, size_source_area))
         weights = rand_weights * mask
-        self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
+        self._set_weights_and_mask(weights, mask)
 
 
 
@@ -325,7 +351,7 @@ class BrainNetwork(torch.nn.Module):
         area_name (str):                The name of the to-be-modeled area, as specified in the .toml file (e.g. 'v1', 'v2', etc).
         size (int):                     The number of columns of the area.
         unique_name (str):              An optional user-specified name for the area. Useful when the network should contain more
-                                        area modules with the same area configurations.
+                                        area modules with the same area configurations. # TODO: call this 'id' or something more intuitive?
         intrinsic_trainable (bool):     If True, the recurrent, column-intrinsic connections can be updated during training.
         background_trainable (bool):    If True, the background connections can be updated during training.
         """
@@ -337,14 +363,14 @@ class BrainNetwork(torch.nn.Module):
             unique_name = area_name
 
         area = BrainArea(self.params['column'], area_name, size, unique_name)
-        self.areas[area_name] = area
+        self.areas[unique_name] = area
 
         # Add recurrent connectivity and background connectivity as connections
-        recurrent_connection = Connection('recurrent', area_name, area_name, intrinsic_trainable)
+        recurrent_connection = Connection('recurrent', unique_name, unique_name, intrinsic_trainable)
         recurrent_connection.initialize_recurrent_weights(area)
         self.connections[recurrent_connection.get_name()] = recurrent_connection
 
-        background_connection = Connection('background', 'background', area_name, background_trainable)
+        background_connection = Connection('background', 'background', unique_name, background_trainable)
         background_connection.initialize_background_weights(area)
         self.connections[background_connection.get_name()] = background_connection
 
@@ -441,7 +467,15 @@ class BrainNetwork(torch.nn.Module):
         # Extend adaptation strength tensor to cover the entire network
         self.register_buffer("adaptation_strength_full", torch.tile(self.adaptation_strength,(self.num_columns,)))
 
-    # TODO: constraining function
+    def constrain_weights(self):
+        """
+        Constrain all connection weights to not use any illegal connections.
+        """
+        all_connections = (list(self.connections.values())
+                           + list(self.output_connections.values()))
+
+        for connection in all_connections:
+            connection.constrain(self.areas.keys())
 
     def set_activities(self, t, fr_per_area, ext_input, input_windows):
 
@@ -478,11 +512,11 @@ class BrainNetwork(torch.nn.Module):
         for connection in self.connections.values():
             conn_type = connection.conn_type
             source_fr = activities[connection.source]
-            current = source_fr @ connection.weights.T
+            current = source_fr @ connection.W.T
             currents[connection.target] += current * self.synapse_time_constant
             stop = 0
 
-        total_current = torch.cat([currents[name] for name in self.areas], dim=1)
+        total_current = torch.cat([currents[name] for name in self.areas], dim=1)  # TODO: check if there is no mess up of area order!
         return total_current
 
     def dynamics(self, t, state, ext_input, input_windows):
@@ -588,7 +622,7 @@ class BrainNetwork(torch.nn.Module):
                 read_out = self.classification_read_out(read_out)
 
             if len(list(self.output_connections.keys())) == 1:
-                    return read_out
+                return read_out
 
             read_outs[conn_name] = read_out
         return read_outs
@@ -608,6 +642,8 @@ class NetworkSimulator:
         self.dt             = model_params['time_params']['dt']
         self.sim_time       = model_params['time_params']['sim_time']
         self.input_window   = model_params['time_params']['input_window']
+
+        self.network_is_finalized = False
 
     def _infer_batch_size(self, ext_input):
         """
@@ -695,38 +731,51 @@ class NetworkSimulator:
         batch_size = self._infer_batch_size(ext_input)
         return ext_input, input_window, batch_size
 
-    def _init_state(self, batch_size, device):
+    def _extend_init_state(self, batch_size):
         """
-        Set initial state of network as zeros; size = (batch_size, total_nr_populations * 2 state variables).
+        Extend the initial state to fit with the batch size
         """
-        initial_state = torch.zeros(batch_size, self.network.num_populations * 2)
-        return initial_state.to(device)
+        return torch.tile(self.initial_state, (batch_size, 1))
+
+    def _finalize_network(self, device):
+        """
+        Finalizes the network and brings the network, time vector and initial state
+        to the specified device before the first batch is run through the network.
+        """
+        self.network = self.network.to(device)
+        self.network.finalize()
+
+        self.time_vec = torch.arange(0, self.sim_time, self.dt, device=device)
+        self.initial_state = torch.zeros(1, self.network.num_populations * 2, device=device)
+
+        self.network_is_finalized = True
 
     def run(self, ext_input, input_window, adjoint, stochastic, device):
         """
         Runs the network simulation.
         """
+        if self.network_is_finalized is False:
+            self._finalize_network(device)
+
         ext_input, input_window, batch_size = self._prepare_input_for_sim(ext_input, input_window, device)
-
-        self.network = self.network.to(device)
-        self.network.finalize()
-
-        time_vec = torch.arange(0, self.sim_time, self.dt, device=device)
-        initial_state = self._init_state(batch_size, device)
         sim_wrapper = NetworkOdeWrapper(self.network, ext_input, input_window)
 
+        initial_state = self._extend_init_state(batch_size)
+
+        self.network.constrain_weights()
+
         if not adjoint and not stochastic:
-            return odeint(sim_wrapper, initial_state, time_vec)
+            return odeint(sim_wrapper, initial_state, self.time_vec)
 
         elif adjoint and not stochastic:
-            return odeint_adjoint(sim_wrapper, initial_state, time_vec)
+            return odeint_adjoint(sim_wrapper, initial_state, self.time_vec)
 
         elif not adjoint and stochastic:
-            return sdeint(sim_wrapper, initial_state, time_vec,
+            return sdeint(sim_wrapper, initial_state, self.time_vec,
                             names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
 
         elif adjoint and stochastic:
-            return sdeint_adjoint(sim_wrapper, initial_state, time_vec,
+            return sdeint_adjoint(sim_wrapper, initial_state, self.time_vec,
                                     names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
 
 
