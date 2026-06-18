@@ -1,19 +1,14 @@
-import numpy as np
 import os
-import pickle
-import matplotlib.pyplot as plt
-import pylab as pl
 from scipy.linalg import block_diag
 
-import torch
 from torch.utils.data import TensorDataset, DataLoader
 
-from torchsde import sdeint, sdeint_adjoint
-from torchdiffeq import odeint, odeint_adjoint
+from torchsde import sdeint_adjoint
+from torchdiffeq import odeint_adjoint
 
 from src.utils import *
 from src.ww_model import DM
-from src.column_network_wta import ColumnAreaWTA
+from temp_trash.column_network_wta import ColumnAreaWTA
 
 
 def visualize_results(pred, true, stim, network, train_loss, test_loss, weights, seed):

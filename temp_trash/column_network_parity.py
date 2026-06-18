@@ -1,8 +1,7 @@
-import torch
 import torch.nn as nn
 
 from src.utils import *
-from src.coupled_columns import ColumnArea
+from temp_trash.coupled_columns import ColumnArea
 
 
 class ColumnNetwork(torch.nn.Module):

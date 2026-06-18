@@ -1,19 +1,9 @@
-import pickle
-import torch
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-import matplotlib.colors as mcolors
-from matplotlib.ticker import MultipleLocator, FormatStrFormatter
-import numpy as np
 from pprint import pprint
 
-from sympy.printing.pretty.pretty_symbology import line_width
-from torchsde import sdeint, sdeint_adjoint
-from torchdiffeq import odeint, odeint_adjoint
+from torchsde import sdeint
 
 from src.utils import *
-from src.column_network_wta import ColumnAreaWTA
-from wta_ode import set_stim_whole_column
+from temp_trash.wta_ode import set_stim_whole_column
 
 
 

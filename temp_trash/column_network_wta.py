@@ -1,9 +1,7 @@
-import torch
 import torch.nn as nn
-from scipy.linalg import block_diag
 
 from src.utils import *
-from src.coupled_columns import ColumnArea
+from temp_trash.coupled_columns import ColumnArea
 
 
 

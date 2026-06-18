@@ -1,7 +1,8 @@
 import torch
 import time
 
-from src.network_new_gen import BrainNetwork, NetworkAnalyzer
+from src.utils.set_seed import set_seed
+from src.brain_network import BrainNetwork
 
 
 
@@ -31,9 +32,9 @@ def run_xor_batch(train_with_adjoint, train_with_noise, device):
 
     # print(time.time() - start)
 
-    # firing_rates = network.get_firing_rates(output, area='mtb')
-    # analyzer.plot_firing_rates(firing_rates)
-
+    # firing_rates = network.get_firing_rates(output, area='v1')
+    # network.analysis.plot_firing_rates(firing_rates)
+    #
     # print(model_read_out)
     # print(true_labels.unsqueeze(1))
 
@@ -52,7 +53,10 @@ if __name__ == '__main__':
     lr                      = 0.5
     train_with_adjoint      = False
     train_with_noise        = False
+    seed                    = 1
     device                  = torch.device('cpu')
+
+    set_seed(seed)
 
     # Building the network
     network = BrainNetwork()
@@ -66,7 +70,6 @@ if __name__ == '__main__':
 
     # Training setup
     optimizer = torch.optim.Adam(network.parameters(), lr=lr)
-    analyzer = NetworkAnalyzer(network)
 
 
     # Start training loop

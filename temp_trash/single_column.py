@@ -1,4 +1,4 @@
-from src.column_network_wta import ColumnAreaWTA
+from temp_trash.column_network_wta import ColumnAreaWTA
 from src.utils import *
 from torchdiffeq import odeint
 

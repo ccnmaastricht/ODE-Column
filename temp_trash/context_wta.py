@@ -1,14 +1,12 @@
-import torch
 from torch.utils.data import TensorDataset, DataLoader
-import numpy as np
 import os
 
-from torchsde import sdeint, sdeint_adjoint
-from torchdiffeq import odeint, odeint_adjoint
+from torchsde import sdeint_adjoint
+from torchdiffeq import odeint_adjoint
 
-from wta_ode import init_network, make_ds_ww, random_input_pair, set_stim_whole_column
+from temp_trash.wta_ode import init_network, make_ds_ww, random_input_pair, set_stim_whole_column
 from src.utils import *
-from src.column_network_wta import ColumnAreaContextWTA
+from temp_trash.column_network_wta import ColumnAreaContextWTA
 
 
 
