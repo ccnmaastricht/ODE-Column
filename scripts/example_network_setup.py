@@ -5,7 +5,8 @@ from src.brain_network import BrainNetwork
 if __name__ == '__main__':
 
     # Building the network
-    network = BrainNetwork()
+    config_path = '../config/example_params.toml'
+    network = BrainNetwork(config_path)
 
     # network.add_area(area_name='v1', unique_id='v1a', size=2)
     # network.add_area(area_name='v1', unique_id='v1b', size=1)

@@ -1,13 +1,21 @@
 import torch
+from datetime import datetime
 
 from src.utils.save_and_load import load_config
+
 from src.structure.brain_area import BrainArea
 from src.structure.connection import Connection
-from src.simulation.network_simulator import NetworkSimulator
-from src.analysis.network_analyzer import NetworkAnalyzer
 
 from src.dynamics.network_dynamics import NetworkDynamics
+from src.simulation.network_simulator import NetworkSimulator
+
+from src.analysis.network_analyzer import NetworkAnalyzer
 from src.analysis.network_readout import NetworkReadout
+from src.save_and_load.network_archiver import NetworkArchiver
+
+
+
+framework_version = '0.1.0'
 
 
 
@@ -18,23 +26,42 @@ class BrainNetwork(torch.nn.Module):
     Additionally, contains additional modules for network dynamics, simulation and analysis.
     """
 
-    def __init__(self):
+    def __init__(self, model_config_path, general_config_path=None):
         super().__init__()
 
-        col_params = load_config('../config/column_params.toml')
-        model_params = load_config('../config/model_params.toml')
+        model_params, general_params = self._load_params_from_configs(
+            model_config_path, general_config_path)
 
-        self.params = {"column": col_params, "model": model_params}
+        self.params = {"general": general_params, "model": model_params}
 
         self.num_populations    = None
         self.num_columns        = None
+        self.area_order         = []
         self.area_slices        = {}
         self.areas              = torch.nn.ModuleDict({})
         self.connections        = torch.nn.ModuleDict({})
         self.output_connections = torch.nn.ModuleDict({})
 
-        self._initialize_general_parameters(col_params)
+        self._initialize_general_parameters(general_params)
         self._initialize_additional_modules()
+
+        self.network_is_finalized = False
+
+    def _load_params_from_configs(self, model_config_path, general_config_path):
+        """
+        Load model-specific and general parameters from their respective
+        config files.
+        """
+        if general_config_path is None:
+            general_config_path = '../config/general_params.toml'
+
+        self.model_config_path = model_config_path
+        self.general_config_path = general_config_path
+
+        model_params = load_config(model_config_path)
+        general_params = load_config(general_config_path)
+
+        return model_params, general_params
 
     def _initialize_general_parameters(self, params):
         """
@@ -71,6 +98,7 @@ class BrainNetwork(torch.nn.Module):
         self.simulator  = NetworkSimulator(self)
         self.readout    = NetworkReadout(self)
         self.analysis   = NetworkAnalyzer(self)
+        self.archive    = NetworkArchiver(self)
 
     def _get_area(self, area_id):
         """
@@ -99,21 +127,34 @@ class BrainNetwork(torch.nn.Module):
         background_trainable (bool):    If True, the background connections can be updated during training.
         """
         area_name = area_name.lower()
-        assert area_name in self.params['column']['population_size'], f"Population sizes of '{area_name}' not found in .toml file. "
-        assert area_name in self.params['column']['background_synapse_counts'], f"Background synapse counts of '{area_name}' not found in .toml file. "
+        assert area_name in self.params['general']['population_size'], f"Population sizes of '{area_name}' not found in .toml file. "
+        assert area_name in self.params['general']['background_synapse_counts'], f"Background synapse counts of '{area_name}' not found in .toml file. "
 
         if unique_id is None:
             unique_id = area_name
 
-        area = BrainArea(self.params['column'], area_name, size, unique_id)
+        area = BrainArea(self.params['general'], area_name, size, unique_id)
         self.areas[unique_id] = area
 
         # Add recurrent connectivity and background connectivity as connections
-        recurrent_connection = Connection('recurrent', unique_id, unique_id, intrinsic_trainable)
+        self.add_recurrent_connection(area, unique_id, intrinsic_trainable)
+        self.add_background_connection(area, unique_id, background_trainable)
+
+    def add_recurrent_connection(self,
+                                 area,
+                                 unique_area_id,
+                                 trainable=True):
+
+        recurrent_connection = Connection('recurrent', unique_area_id, unique_area_id, trainable)
         recurrent_connection.initialize_recurrent_weights(area)
         self.connections[recurrent_connection.get_name()] = recurrent_connection
 
-        background_connection = Connection('background', 'background', unique_id, background_trainable)
+    def add_background_connection(self,
+                                  area,
+                                  unique_area_id,
+                                  trainable=True):
+
+        background_connection = Connection('background', 'background', unique_area_id, trainable)
         background_connection.initialize_background_weights(area)
         self.connections[background_connection.get_name()] = background_connection
 
@@ -198,17 +239,22 @@ class BrainNetwork(torch.nn.Module):
         the total number of populations and columns, and setting slices to index the
         activity of each area. Also extends adaptation strength to entire network.
         """
-        self.num_populations = sum(area.num_populations for area in self.areas.values())
-        self.num_columns = self.num_populations // 8
+        if not self.network_is_finalized:
 
-        # Slices per area
-        idx = 0
-        for area_id, area in self.areas.items():
-            self.area_slices[area_id] = slice(idx, idx + area.num_populations)
-            idx += area.num_populations
+            self.num_populations = sum(area.num_populations for area in self.areas.values())
+            self.num_columns = self.num_populations // 8
 
-        # Extend adaptation strength tensor to cover the entire network
-        self.register_buffer("adaptation_strength_full", torch.tile(self.adaptation_strength,(self.num_columns,)))
+            # Area order in state and slices per area
+            idx = 0
+            for area_id, area in self.areas.items():
+                self.area_order.append(area_id)
+                self.area_slices[area_id] = slice(idx, idx + area.num_populations)
+                idx += area.num_populations
+
+            # Extend adaptation strength tensor to cover the entire network
+            self.register_buffer("adaptation_strength_full", torch.tile(self.adaptation_strength,(self.num_columns,)))
+
+            self.network_is_finalized = True
 
     def constrain_weights(self):
         """
@@ -219,100 +265,6 @@ class BrainNetwork(torch.nn.Module):
 
         for connection in all_connections:
             connection.constrain(self.areas.keys())
-
-    # def compute_firing_rate(self, x):
-    #     """
-    #     Compute the firing rates from (membrane potential - adaptation).
-    #     """
-    #     # TODO: look at ImageColumnModel for an updated version! Also, is soft clamp necessary?
-    #
-    #     x_nom = self.gain * x - self.threshold
-    #     exp_input = -self.noise_factor * x_nom
-    #     # exp_input = soft_clamp(exp_input)
-    #     exp_term = torch.exp(exp_input)
-    #
-    #     denom = 1 - exp_term
-    #     x_activ = x_nom / denom
-    #     return x_activ
-    #
-    # def soft_clamp(self, x, max_val=80):
-    #     return max_val * torch.tanh(x / max_val)
-    #
-    # def set_activities(self, t, fr_per_area, ext_input, input_windows):
-    #     """
-    #     Gather all activities in a dict; that includes the firing rates
-    #     of all areas, background rate and external inputs.
-    #     """
-    #     # Add background drive
-    #     activities = {'background': self.background_drive}
-    #
-    #     # Add firing rates of all network areas
-    #     activities.update(fr_per_area)
-    #
-    #     # Add network-external input
-    #     if ext_input is not None:
-    #         for input_name, x in ext_input.items():
-    #             # Present input if t is in input window
-    #             start, end = input_windows[input_name]
-    #             if start <= float(t) < end:
-    #                 activities[input_name] = x
-    #             else:
-    #                 activities[input_name] = torch.zeros_like(x)
-    #
-    #     return activities
-    #
-    # def compute_currents(self, t, firing_rates, ext_input, input_windows):
-    #     """
-    #     For each area, compute the current based on all incoming connections.
-    #     """
-    #     fr_per_area = {area_id: firing_rates[:, area_slice]
-    #                    for area_id, area_slice in self.area_slices.items()}
-    #
-    #     activities = self.set_activities(t, fr_per_area, ext_input, input_windows)
-    #
-    #     currents = {area_id: torch.zeros(firing_rates.shape[0], area.num_populations, device=firing_rates.device)
-    #                 for area_id, area in self.areas.items()}
-    #
-    #     for connection in self.connections.values():
-    #         conn_type = connection.conn_type
-    #         source_fr = activities[connection.source_id]
-    #         current = source_fr @ connection.W.T
-    #         currents[connection.target_id] += current * self.synapse_time_constant
-    #         stop = 0
-    #
-    #     total_current = torch.cat([currents[area_id] for area_id in self.areas], dim=1)  # TODO: check if there is no mess up of area order!
-    #     return total_current
-    #
-    # def forward(self, t, state, ext_input, input_windows):
-    #     """
-    #     State dynamics computing the derivative of the membrane potential and adaptation at time t.
-    #     """
-    #     # Unpack the state (membrane, adaptation) and compute firing rate
-    #     mem_adap_split = self.num_populations
-    #     membrane_potential, adaptation = state[:, :mem_adap_split], state[:, mem_adap_split:]
-    #
-    #     firing_rate = self.compute_firing_rate(membrane_potential - adaptation)
-    #
-    #     # Compute current
-    #     total_current = self.compute_currents(t, firing_rate, ext_input, input_windows)
-    #
-    #     # Compute derivative membrane potential and adaptation
-    #     delta_membrane_potential = (-membrane_potential +
-    #         total_current * self.resistance) / self.membrane_time_constant
-    #     delta_adaptation = (-adaptation + self.adaptation_strength_full *
-    #                         firing_rate) / self.adapt_time_constant
-    #
-    #     state = torch.concat((delta_membrane_potential, delta_adaptation), dim=1)
-    #     return state
-    #
-    # def diffusion(self, t, state):
-    #     '''
-    #     Diffusion function used by SDE, noise is only applied to membrane potential.
-    #     '''
-    #     g = torch.zeros_like(state)
-    #     n = self.num_populations
-    #     g[:, :n] = 3.0
-    #     return g
 
     def run(self, ext_input=None, input_window=None, adjoint=False, stochastic=False, device="cpu"):
         """
@@ -348,68 +300,51 @@ class BrainNetwork(torch.nn.Module):
             mode=mode,
             sum_per_col=sum_per_col)
 
-    # def get_firing_rates(self, raw_state, area=None, return_as_np_array=True):
-    #     """
-    #     Compute the firing rate from the raw state (= [membrane_potential, adaptation])
-    #     Return as np.array unless specified otherwise.
-    #     """
-    #     # TODO: refine (layer indices?)
-    #     split = self.num_populations
-    #     firing_rates = self.compute_firing_rate(raw_state[:, :, :split] - raw_state[:, :, split:(split * 2)])
-    #
-    #     if area is not None:
-    #         area_slices = self.area_slices[area]
-    #         firing_rates = firing_rates[:, :, area_slices]
-    #
-    #     if return_as_np_array:
-    #         return firing_rates.detach().cpu().numpy()
-    #     return firing_rates
-    #
-    # def classification_read_out(self, fr_full_sim_time):
-    #     """
-    #     Use a classification time window to average network activity over time.
-    #     """
-    #     time_params = self.params['model']['time_params']
-    #     assert 'classification_window' in time_params, (f"If mode is set to 'classification', please set "
-    #                                                     f"a classification_window in model_params.toml under [time_params].")
-    #
-    #     time_window     = time_params['classification_window']
-    #     sim_time        = time_params['sim_time']
-    #     dt              = time_params['dt']
-    #
-    #     start = time_window[0]
-    #     end = time_window[1]
-    #     assert start <= sim_time and end <= sim_time, (f"The input time window ({start}s, {end}s) "
-    #                                                    f"exceeds total simulation time ({sim_time}s)")
-    #
-    #     # Get time steps of classification window and slice the firing_rates
-    #     start, end = int(start / dt), int(end / dt)
-    #     fr_window_slice = fr_full_sim_time[start:end, :, :]
-    #
-    #     return torch.mean(fr_window_slice, dim=0)
-    #
-    # def read_out(self, raw_output, mode, sum_per_col=True):
-    #     """
-    #     Read output from raw output; either return entire trajectory or last x time steps,
-    #     i.e. trajectory-based vs classification-based training procedure...
-    #     """
-    #     assert mode == 'trajectory' or mode == 'classification', f"Invalid mode for read-out. Acceptable modes are 'trajectory' or 'classification'."
-    #
-    #     read_outs = {}
-    #
-    #     for conn_name, output_conn in self.output_connections.items():
-    #         fr_output_area = self.get_firing_rates(raw_output, area=output_conn.source_id, return_as_np_array=False)
-    #         read_out = fr_output_area * output_conn.weights
-    #
-    #         if sum_per_col:
-    #             read_out_reshape = torch.reshape(read_out, (read_out.shape[0], read_out.shape[1], read_out.shape[2]//8, 8))
-    #             read_out = torch.sum(read_out_reshape, dim=-1)
-    #
-    #         if mode == 'classification':
-    #             read_out = self.classification_read_out(read_out)
-    #
-    #         if len(list(self.output_connections.keys())) == 1:
-    #             return read_out
-    #
-    #         read_outs[conn_name] = read_out
-    #     return read_outs
+    def _create_checkpoint(self):
+        """
+
+        """
+        return {"architecture": self.archive.export_architecture(),
+                "state_dict": self.state_dict(),
+
+                "model_params": str(self.params['model']),
+                "general_params": str(self.params['general']),
+
+                "model_config": str(self.model_config_path),
+                "general_config": str(self.general_config_path),
+
+                "framework_version": framework_version,
+                "date": str(datetime.today().strftime('%Y-%m-%d'))}
+
+    def save(self, path):
+        """
+
+        """
+        checkpoint = self._create_checkpoint()
+        torch.save(checkpoint, path)
+
+    @classmethod
+    def _from_checkpoint(cls, checkpoint, model_config_path, general_config_path):
+
+        # TODO: also have the option to pass existing parameters i.e. checkpoint['model_params'] and ['general_params']
+
+        # Create empty network
+        network = cls(model_config_path, general_config_path)
+
+        # Rebuild architecture
+        network.archive.import_architecture(checkpoint["architecture"])
+        network.finalize()
+
+        # Load learned weights
+        network.load_state_dict(
+            checkpoint["state_dict"])
+
+        return network
+
+    @classmethod
+    def load(cls, path, model_config_path=None, general_config_path=None):
+        """
+
+        """
+        checkpoint = torch.load(path)  # TODO: weights_only?
+        return cls._from_checkpoint(checkpoint, model_config_path, general_config_path)

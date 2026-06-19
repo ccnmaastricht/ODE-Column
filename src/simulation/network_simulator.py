@@ -21,7 +21,7 @@ class NetworkSimulator:
         self.sim_time       = time_params['sim_time']
         self.input_window   = time_params['input_window']
 
-        self.network_is_finalized = False
+        self.network_is_ready = False
 
     def _infer_batch_size(self, ext_input):
         """
@@ -115,7 +115,7 @@ class NetworkSimulator:
         """
         return torch.tile(self.initial_state, (batch_size, 1))
 
-    def _finalize_network(self, device):
+    def _prepare_network(self, device):
         """
         Finalizes the network and brings the network, time vector and initial state
         to the specified device before the first batch is run through the network.
@@ -126,14 +126,14 @@ class NetworkSimulator:
         self.time_vec = torch.arange(0, self.sim_time, self.dt, device=device)
         self.initial_state = torch.zeros(1, self.network.num_populations * 2, device=device)
 
-        self.network_is_finalized = True
+        self.network_is_ready = True
 
     def run(self, ext_input, input_window, adjoint, stochastic, device):
         """
         Runs the network simulation.
         """
-        if self.network_is_finalized is False:
-            self._finalize_network(device)
+        if not self.network_is_ready:
+            self._prepare_network(device)
 
         ext_input, input_window, batch_size = self._prepare_input_for_sim(ext_input, input_window, device)
         sim_wrapper = NetworkOdeWrapper(self.network, ext_input, input_window)

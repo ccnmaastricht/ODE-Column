@@ -67,13 +67,13 @@ class NetworkDynamics:
                     for area_id, area in self.network.areas.items()}
 
         for connection in self.network.connections.values():
-            conn_type = connection.conn_type
+            conn_name = connection.get_name()
             source_fr = activities[connection.source_id]
             current = source_fr @ connection.W.T
             currents[connection.target_id] += current * self.network.synapse_time_constant
             stop = 0
 
-        total_current = torch.cat([currents[area_id] for area_id in self.network.areas], dim=1)  # TODO: check if there is no mess up of area order!
+        total_current = torch.cat([currents[area_id] for area_id in self.network.area_order], dim=1)
         return total_current
 
     def forward(self, t, state, ext_input, input_windows):

@@ -16,7 +16,7 @@ def make_xor_ds():
     xor_shuffled = xor_combos[torch.randperm(xor_combos.size(0))]
 
     xor_targets = (xor_shuffled[:, 0] != xor_shuffled[:, 1]).float()
-    return xor_shuffled, xor_targets
+    return xor_shuffled, xor_targets.unsqueeze(1)
 
 def run_xor_batch(train_with_adjoint, train_with_noise, device):
     """ Runs one batch of XOR samples through the network and computes
@@ -30,17 +30,20 @@ def run_xor_batch(train_with_adjoint, train_with_noise, device):
     output = network.run(stim_batch, adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
     model_read_out = network.read_out(output, mode='classification')
 
+
+    # network.save('test.pt')
+
     # print(time.time() - start)
 
-    # firing_rates = network.get_firing_rates(output, area='v1')
-    # network.analysis.plot_firing_rates(firing_rates)
+    firing_rates = network.get_firing_rates(output, area='v1')
+    network.analysis.plot_firing_rates(firing_rates)
     #
     # print(model_read_out)
-    # print(true_labels.unsqueeze(1))
+    # print(true_labels)
 
     # Compute loss
-    # loss = torch.mean(torch.abs(model_read_out - true_labels.unsqueeze(1))) # mae
-    loss = ((model_read_out - true_labels.unsqueeze(1)) ** 2).mean() # mse
+    # loss = torch.mean(torch.abs(model_read_out - true_labels)) # mae
+    loss = ((model_read_out - true_labels) ** 2).mean() # mse
     return loss
 
 
@@ -58,15 +61,20 @@ if __name__ == '__main__':
 
     set_seed(seed)
 
-    # Building the network
-    network = BrainNetwork()
+    # Loading saved network
+    config_path = '../config/example_params.toml'
+    network = BrainNetwork.load('test.pt', config_path)
 
-    network.add_area(area_name='v1', size=2)
-    network.add_area(area_name='v2', size=1)
-
-    network.add_input_connection(target_area='v1', input_size=2, trainable=True)
-    network.add_feedforward_connection(source='v1', target='v2', trainable=True, scale=10.0)
-    network.add_output_connection(source_area='v2', trainable=False)
+    # # Building the network
+    # config_path = '../config/example_params.toml'
+    # network = BrainNetwork(config_path)
+    #
+    # network.add_area(area_name='v1', size=2)
+    # network.add_area(area_name='v2', size=1)
+    #
+    # network.add_input_connection(target_area='v1', input_size=2, trainable=True)
+    # network.add_feedforward_connection(source='v1', target='v2', trainable=True, scale=10.0)
+    # network.add_output_connection(source_area='v2', trainable=False)
 
     # Training setup
     optimizer = torch.optim.Adam(network.parameters(), lr=lr)
