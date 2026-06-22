@@ -1,5 +1,5 @@
 import torch
-from datetime import datetime
+from pathlib import Path
 
 from src.utils.save_and_load import load_config
 
@@ -15,7 +15,12 @@ from src.save_and_load.network_archiver import NetworkArchiver
 
 
 
-framework_version = '0.1.0'
+FRAMEWORK_VERSION = '0.1.0'
+
+DEFAULT_GENERAL_CONFIG = (
+    Path(__file__).parent.parent /
+    "config" /
+    "general_params.toml")
 
 
 
@@ -26,11 +31,8 @@ class BrainNetwork(torch.nn.Module):
     Additionally, contains additional modules for network dynamics, simulation and analysis.
     """
 
-    def __init__(self, model_config_path, general_config_path=None):
+    def __init__(self, model_params, general_params):
         super().__init__()
-
-        model_params, general_params = self._load_params_from_configs(
-            model_config_path, general_config_path)
 
         self.params = {"general": general_params, "model": model_params}
 
@@ -46,22 +48,62 @@ class BrainNetwork(torch.nn.Module):
         self._initialize_additional_modules()
 
         self.network_is_finalized = False
+        self.framework_version = FRAMEWORK_VERSION
 
-    def _load_params_from_configs(self, model_config_path, general_config_path):
+    @classmethod
+    def from_toml(cls, model_config_path, general_config_path=None):
+        """
+        Initialize a BrainNetwork object from .toml config files.
+        """
+        model_params, general_params = cls._load_params_from_configs(
+            model_config_path,
+            general_config_path)
+
+        return cls(
+            model_params=model_params,
+            general_params=general_params)
+
+    @staticmethod
+    def _load_params_from_configs(model_config_path, general_config_path):
         """
         Load model-specific and general parameters from their respective
         config files.
         """
         if general_config_path is None:
-            general_config_path = '../config/general_params.toml'
-
-        self.model_config_path = model_config_path
-        self.general_config_path = general_config_path
+            general_config_path = DEFAULT_GENERAL_CONFIG
 
         model_params = load_config(model_config_path)
         general_params = load_config(general_config_path)
 
         return model_params, general_params
+
+    @classmethod
+    def _from_checkpoint_DEAD(cls, checkpoint, model_config_path=None, general_config_path=None):
+        """
+        Reinstates the network from the saved checkpoint. If config_paths are specified,
+        overwrite the saved parameters with the parameters from the config file(s).
+        """
+        # Decide which parameters to use
+        if model_config_path is None:
+            model_params = checkpoint["model_params"]
+        else:
+            model_params = load_config(model_config_path)
+            print("Loading network with overridden model parameters instead of saved model parameters.")
+
+        if general_config_path is None:
+            general_params = checkpoint["general_params"]
+        else:
+            general_params = load_config(general_config_path)
+            print("Loading network with overridden general parameters instead of saved general parameters.")
+
+        network = cls(model_params, general_params)
+
+        network.archive.import_architecture(checkpoint["architecture"])
+        network.finalize()
+
+        network.load_state_dict(checkpoint["state_dict"])
+
+        return network
 
     def _initialize_general_parameters(self, params):
         """
@@ -289,8 +331,8 @@ class BrainNetwork(torch.nn.Module):
 
     def read_out(self, raw_output, mode, sum_per_col=True):
         """
-        Reads output from raw output; converts to firing rates and slices only
-        the area(s) that are identified as output sources.
+        Reads model output from raw output; converts to firing rates and slices
+        only the area(s) that are identified as output sources.
         Either returns entire trajectory (mode='trajectory') or average of
         last x time steps (mode='classification'), i.e. trajectory-based vs
         classification-based training procedure.
@@ -300,51 +342,24 @@ class BrainNetwork(torch.nn.Module):
             mode=mode,
             sum_per_col=sum_per_col)
 
-    def _create_checkpoint(self):
-        """
-
-        """
-        return {"architecture": self.archive.export_architecture(),
-                "state_dict": self.state_dict(),
-
-                "model_params": str(self.params['model']),
-                "general_params": str(self.params['general']),
-
-                "model_config": str(self.model_config_path),
-                "general_config": str(self.general_config_path),
-
-                "framework_version": framework_version,
-                "date": str(datetime.today().strftime('%Y-%m-%d'))}
-
     def save(self, path):
         """
-
+        Save the current network as a checkpoint, with its learned weights
+        and additional parameters.
         """
-        checkpoint = self._create_checkpoint()
+        checkpoint = self.archive.create_checkpoint()
         torch.save(checkpoint, path)
-
-    @classmethod
-    def _from_checkpoint(cls, checkpoint, model_config_path, general_config_path):
-
-        # TODO: also have the option to pass existing parameters i.e. checkpoint['model_params'] and ['general_params']
-
-        # Create empty network
-        network = cls(model_config_path, general_config_path)
-
-        # Rebuild architecture
-        network.archive.import_architecture(checkpoint["architecture"])
-        network.finalize()
-
-        # Load learned weights
-        network.load_state_dict(
-            checkpoint["state_dict"])
-
-        return network
 
     @classmethod
     def load(cls, path, model_config_path=None, general_config_path=None):
         """
-
+        Load a saved network checkpoint and reinstate the network with its
+        saved weights and parameters.
         """
-        checkpoint = torch.load(path)  # TODO: weights_only?
-        return cls._from_checkpoint(checkpoint, model_config_path, general_config_path)
+        checkpoint = torch.load(path, weights_only=False)
+
+        return NetworkArchiver.restore_checkpoint(
+            cls,
+            checkpoint,
+            model_config_path,
+            general_config_path)
