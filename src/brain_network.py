@@ -77,34 +77,6 @@ class BrainNetwork(torch.nn.Module):
 
         return model_params, general_params
 
-    @classmethod
-    def _from_checkpoint_DEAD(cls, checkpoint, model_config_path=None, general_config_path=None):
-        """
-        Reinstates the network from the saved checkpoint. If config_paths are specified,
-        overwrite the saved parameters with the parameters from the config file(s).
-        """
-        # Decide which parameters to use
-        if model_config_path is None:
-            model_params = checkpoint["model_params"]
-        else:
-            model_params = load_config(model_config_path)
-            print("Loading network with overridden model parameters instead of saved model parameters.")
-
-        if general_config_path is None:
-            general_params = checkpoint["general_params"]
-        else:
-            general_params = load_config(general_config_path)
-            print("Loading network with overridden general parameters instead of saved general parameters.")
-
-        network = cls(model_params, general_params)
-
-        network.archive.import_architecture(checkpoint["architecture"])
-        network.finalize()
-
-        network.load_state_dict(checkpoint["state_dict"])
-
-        return network
-
     def _initialize_general_parameters(self, params):
         """
         Initialize general parameters that apply for the entire network.
@@ -151,12 +123,41 @@ class BrainNetwork(torch.nn.Module):
 
         return self.areas[area_id]
 
-    def add_area(self,
-                 area_name,
-                 size,
-                 unique_id=None,
-                 intrinsic_trainable=False,
-                 background_trainable=False):
+    def _initialize_connection(
+            self,
+            connection_type,
+            source,
+            target,
+            initializer,
+            *initializer_args,
+            trainable=True,
+            output=False):
+        """
+        Initialize the specified connection as a Connection object and store it
+        in the appropriate dict.
+        """
+        connection = Connection(
+            connection_type,
+            source,
+            target,
+            trainable)
+
+        weights, mask = initializer(connection, *initializer_args)
+        connection.set_weights_and_mask(weights, mask)
+
+        registry = (self.output_connections
+                    if output
+                    else self.connections)
+
+        registry[connection.get_name()] = connection
+
+    def add_area(
+            self,
+            area_name,
+            size,
+            unique_id=None,
+            intrinsic_trainable=False,
+            background_trainable=False):
         """
         Initialize the specified area and its recurrent and background connections.
 
@@ -182,98 +183,188 @@ class BrainNetwork(torch.nn.Module):
         self.add_recurrent_connection(area, unique_id, intrinsic_trainable)
         self.add_background_connection(area, unique_id, background_trainable)
 
-    def add_recurrent_connection(self,
-                                 area,
-                                 unique_area_id,
-                                 trainable=True):
+    def add_recurrent_connection(
+            self,
+            area,
+            unique_area_id,
+            trainable=True):
 
-        recurrent_connection = Connection('recurrent', unique_area_id, unique_area_id, trainable)
-        recurrent_connection.initialize_recurrent_weights(area)
-        self.connections[recurrent_connection.get_name()] = recurrent_connection
+        self._initialize_connection(
+            'recurrent',
+            unique_area_id,
+            unique_area_id,
+            Connection.initialize_recurrent_weights,
+            area,
+            trainable=trainable)
 
-    def add_background_connection(self,
-                                  area,
-                                  unique_area_id,
-                                  trainable=True):
+    def add_background_connection(
+            self,
+            area,
+            unique_area_id,
+            trainable=True):
 
-        background_connection = Connection('background', 'background', unique_area_id, trainable)
-        background_connection.initialize_background_weights(area)
-        self.connections[background_connection.get_name()] = background_connection
+        self._initialize_connection(
+            'background',
+            'background',
+            unique_area_id,
+            Connection.initialize_background_weights,
+            area,
+            trainable=trainable)
 
-    def add_feedforward_connection(self,
-                                   source,
-                                   target,
-                                   trainable=True,
-                                   std=0.1,
-                                   scale=1.0):
+    def add_feedforward_connection(
+            self,
+            source,
+            target,
+            trainable=True,
+            receptive_field_size=None,
+            stride=1,
+            grid_organization=False,
+            std=0.1,
+            scale=1.0):
+        """
+        Add a feedforward connection to the network architecture.
+
+        Params:
+        source (str):                   Source area that the feedforward connection originates from.
+        target (str):                   Target area of the feedforward connection.
+        trainable (bool):               If True, the feedforward weights should be updated during training.
+                                        If False, the weights should remain static.
+        receptive_field_size (int):     Size of the receptive fields that constrain the input the target area
+                                        receives from the source area. Leave as None if the source and target
+                                        area should be fully connected.
+        stride (int):                   Stride (step size) of the receptive field window.
+        grid_organization (bool):       If True, the receptive field connectivity between the source and target
+                                        area will assume a two-dimensional (i.e. grid) organization.
+                                        If False, connectivity will assume a one-dimensional organization.
+        std (float):                    Standard deviation of the randomly initialized weights. Mean will be
+                                        determined from the user-specified .toml file.
+        scale (float):                  Scale of the initialized weights.
+        """
+        source_area = self._get_area(source)
+        target_area = self._get_area(target)
+
+        self._initialize_connection(
+            'feedforward',
+            source,
+            target,
+            Connection.initialize_feedforward_weights,
+            self.params,
+            source_area,
+            target_area,
+            receptive_field_size,
+            stride,
+            grid_organization,
+            std,
+            scale,
+            trainable=trainable)
+
+    def add_feedback_connection(
+            self,
+            source,
+            target,
+            trainable=True,
+            receptive_field_size=None,
+            stride=1,
+            grid_organization=False,
+            std=0.1,
+            scale=1.0):
 
         source_area = self._get_area(source)
         target_area = self._get_area(target)
 
-        connection = Connection('feedforward', source, target, trainable)
-        connection.initialize_feedforward_weights(self.params, source_area, target_area, std, scale)
-        self.connections[connection.get_name()] = connection
+        self._initialize_connection(
+            'feedback',
+            source,
+            target,
+            Connection.initialize_feedback_weights,
+            self.params,
+            source_area,
+            target_area,
+            receptive_field_size,
+            stride,
+            grid_organization,
+            std,
+            scale,
+            trainable=trainable)
 
-    def add_feedback_connection(self,
-                                source,
-                                target,
-                                trainable=True,
-                                std=0.1,
-                                scale=1.0):
-
-        source_area = self._get_area(source)
-        target_area = self._get_area(target)
-
-        connection = Connection('feedback', source, target, trainable)
-        connection.initialize_feedback_weights(self.params, source_area, target_area, std, scale)
-        self.connections[connection.get_name()] = connection
-
-    def add_lateral_connection(self,
-                               area_name,
-                               trainable=True,
-                               std=0.1,
-                               scale=1.0):
+    def add_lateral_connection(
+            self,
+            area_name,
+            trainable=True,
+            receptive_field_size=None,
+            stride=1,
+            grid_organization=False,
+            std=0.1,
+            scale=1.0):
 
         area = self._get_area(area_name)
 
-        connection = Connection('lateral', area_name, area_name, trainable)
-        connection.initialize_lateral_weights(self.params, area, std, scale)
-        self.connections[connection.get_name()] = connection
+        self._initialize_connection(
+            'lateral',
+            area_name,
+            area_name,
+            Connection.initialize_lateral_weights,
+            self.params,
+            area,
+            receptive_field_size,
+            stride,
+            grid_organization,
+            std,
+            scale,
+            trainable=trainable)
 
-    def add_input_connection(self,
-                             target_area,
-                             input_size,
-                             trainable=True,
-                             unique_id=None,
-                             std=0.1,
-                             scale=1.0):
+    def add_input_connection(
+            self,
+            target_area,
+            input_size,
+            trainable=True,
+            receptive_field_size=None,
+            stride=1,
+            grid_organization=False,
+            unique_id=None,
+            std=0.1,
+            scale=1.0):
 
         area = self._get_area(target_area)
+        input_name = unique_id or 'input'
 
-        input_name = 'input'
-        if unique_id is not None:
-            input_name = unique_id
+        self._initialize_connection(
+            'input',
+            input_name,
+            target_area,
+            Connection.initialize_input_weights,
+            self.params,
+            input_size,
+            area,
+            receptive_field_size,
+            stride,
+            grid_organization,
+            std,
+            scale,
+            trainable=trainable)
 
-        connection = Connection('input', input_name, target_area, trainable)
-        connection.initialize_input_weights(self.params, input_size, area, std, scale)
-        self.connections[connection.get_name()] = connection
-
-    def add_output_connection(self,
-                              source_area,
-                              trainable=True,
-                              unique_id=None,
-                              std=0.0,
-                              scale=1.0):
+    def add_output_connection(
+            self,
+            source_area,
+            trainable=True,
+            unique_id=None,
+            std=0.0,
+            scale=1.0):
 
         area = self._get_area(source_area)
+        output_name = unique_id or 'output'
 
-        output_name = 'output'
-        if unique_id is not None:
-            output_name = unique_id
-
-        connection = Connection('output', source_area, output_name, trainable)
-        connection.initialize_output_weights(self.params, area, std, scale)
-        self.output_connections[connection.get_name()] = connection
+        self._initialize_connection(
+            'output',
+            source_area,
+            output_name,
+            Connection.initialize_output_weights,
+            self.params,
+            area,
+            std,
+            scale,
+            trainable=trainable,
+            output=True)
 
     def finalize(self):
         """
