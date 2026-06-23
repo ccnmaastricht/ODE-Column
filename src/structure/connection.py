@@ -163,7 +163,7 @@ class Connection(torch.nn.Module):
         """
         weights, mask = self._initialize_connection_between_areas(params, area, area, receptive_field_size, stride, grid_organization, std, scale)
 
-        # Constrain mask and weights such that there are no column_intrinsic connetions
+        # Constrain mask and weights such that there are no column_intrinsic connections
         mask *= area.external_mask
         weights *= mask
 
