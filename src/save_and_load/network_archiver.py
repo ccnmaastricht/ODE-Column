@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from src.structure.connection import Connection
 from src.utils.save_and_load import load_config
 
 
@@ -32,10 +33,9 @@ class NetworkArchiver:
                 "conn_type": conn.conn_type,
                 "source_id": conn.source_id,
                 "target_id": conn.target_id,
+                "source_size": conn.source_size,
+                "target_size": conn.target_size,
                 "trainable": conn.trainable}
-
-            if conn.conn_type == 'input':
-                conn_dict["input_size"] = conn.size_input
 
             architecture["connections"].append(conn_dict)
 
@@ -45,6 +45,8 @@ class NetworkArchiver:
                 "conn_type": conn.conn_type,
                 "source_id": conn.source_id,
                 "target_id": conn.target_id,
+                "source_size": conn.source_size,
+                "target_size": conn.target_size,
                 "trainable": conn.trainable})
 
         return architecture
@@ -55,54 +57,37 @@ class NetworkArchiver:
         """
         for area in architecture["areas"]:
 
-            self.network.add_area(area_name=area["area_name"],
-                          size=area["size"],
-                          unique_id=area["id"])
+            self.network.add_area(
+                area_name=area["area_name"],
+                size=area["size"],
+                unique_id=area["id"],
+                initialize_recurrent_and_background=False)
 
         for conn in architecture["connections"]:
 
-            if conn["conn_type"] == "recurrent":
-                self.network.add_recurrent_connection(
-                    area=self.network.areas[conn["target_id"]],
-                    unique_area_id=conn["source_id"],
-                    trainable=conn["trainable"])
+            connection = Connection(
+                conn["conn_type"],
+                conn["source_id"],
+                conn["target_id"],
+                conn["trainable"],
+                conn["source_size"],
+                conn["target_size"],
+                initialize_weights_and_mask=True)
 
-            elif conn["conn_type"] == "background":
-                self.network.add_background_connection(
-                    area=self.network.areas[conn["target_id"]],
-                    unique_area_id=conn["target_id"],
-                    trainable=conn["trainable"])
-
-            elif conn["conn_type"] == "feedforward":
-                self.network.add_feedforward_connection(
-                    source=conn["source_id"],
-                    target=conn["target_id"],
-                    trainable=conn["trainable"])
-
-            elif conn["conn_type"] == "feedback":
-                self.network.add_feedback_connection(
-                    source=conn["source_id"],
-                    target=conn["target_id"],
-                    trainable=conn["trainable"])
-
-            elif conn["conn_type"] == "lateral":
-                self.network.add_lateral_connection(
-                    area_name=conn["source_id"],
-                    trainable=conn["trainable"])
-
-            elif conn["conn_type"] == "input":
-                self.network.add_input_connection(
-                    target_area=conn["target_id"],
-                    input_size=conn["input_size"],
-                    unique_id=conn["source_id"],
-                    trainable=conn["trainable"])
+            self.network.connections[connection.get_name()] = connection
 
         for conn in architecture["output_connections"]:
 
-            self.network.add_output_connection(
-                source_area=conn["source_id"],
-                unique_id=conn["target_id"],
-                trainable=conn["trainable"])
+            connection = Connection(
+                conn["conn_type"],
+                conn["source_id"],
+                conn["target_id"],
+                conn["trainable"],
+                conn["source_size"],
+                conn["target_size"],
+                initialize_weights_and_mask=True)
+
+            self.network.output_connections[connection.get_name()] = connection
 
     def create_checkpoint(self):
         """

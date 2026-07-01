@@ -124,7 +124,7 @@ class BrainNetwork(torch.nn.Module):
 
         return self.areas[area_id]
 
-    def _initialize_connection(
+    def _initialize_default_connection(
             self,
             connection_type,
             source,
@@ -134,7 +134,7 @@ class BrainNetwork(torch.nn.Module):
             trainable=True,
             output=False):
         """
-        Initialize the specified connection as a Connection object and store it
+        Initialize the specified default connection as a Connection object and store it
         in the appropriate dict.
 
         Params:
@@ -178,6 +178,8 @@ class BrainNetwork(torch.nn.Module):
             trainable)
 
         weights, mask = initializer(connection, *initializer_args)
+
+        connection.set_sizes(weights.shape[1], weights.shape[0])
         connection.set_weights_and_mask(weights, mask)
 
         registry = (self.output_connections
@@ -191,6 +193,7 @@ class BrainNetwork(torch.nn.Module):
             area_name,
             size,
             unique_id=None,
+            initialize_recurrent_and_background=True,
             intrinsic_trainable=False,
             background_trainable=False):
         """
@@ -201,6 +204,8 @@ class BrainNetwork(torch.nn.Module):
         size (int):                     The number of columns of the area.
         unique_id (str):                An optional user-specified id for the area. Useful when the network should contain more
                                         area modules with the same area configurations.
+        initialize_recurrent_and        If False, adding the area will not automatically add recurrent and background
+            _background (bool):         connections.
         intrinsic_trainable (bool):     If True, the recurrent (column-intrinsic) connections can be updated during training.
         background_trainable (bool):    If True, the background connections can be updated during training.
         """
@@ -215,8 +220,9 @@ class BrainNetwork(torch.nn.Module):
         self.areas[unique_id] = area
 
         # Add recurrent connectivity and background connectivity as connections
-        self.add_recurrent_connection(area, unique_id, intrinsic_trainable)
-        self.add_background_connection(area, unique_id, background_trainable)
+        if initialize_recurrent_and_background:
+            self.add_recurrent_connection(area, unique_id, intrinsic_trainable)
+            self.add_background_connection(area, unique_id, background_trainable)
 
     def add_recurrent_connection(
             self,
@@ -231,9 +237,9 @@ class BrainNetwork(torch.nn.Module):
         unique_area_id (str):           User-specified id for the area.
         trainable (bool):               If True, weights should be updated during training.
         ================================
-        See _initialize_connection() for more initialization options.
+        See _initialize_default_connection() for more initialization options.
         """
-        self._initialize_connection(
+        self._initialize_default_connection(
             'recurrent',
             unique_area_id,
             unique_area_id,
@@ -254,9 +260,9 @@ class BrainNetwork(torch.nn.Module):
         unique_area_id (str):           User-specified id for the area.
         trainable (bool):               If True, weights should be updated during training.
         ================================
-        See _initialize_connection() for more initialization options.
+        See _initialize_default_connection() for more initialization options.
         """
-        self._initialize_connection(
+        self._initialize_default_connection(
             'background',
             'background',
             unique_area_id,
@@ -282,12 +288,12 @@ class BrainNetwork(torch.nn.Module):
         target (str):                   Target area of the feedforward connection.
         trainable (bool):               If True, weights should be updated during training.
         ================================
-        See _initialize_connection() for more initialization options.
+        See _initialize_default_connection() for more initialization options.
         """
         source_area = self._get_area(source)
         target_area = self._get_area(target)
 
-        self._initialize_connection(
+        self._initialize_default_connection(
             'feedforward',
             source,
             target,
@@ -320,12 +326,12 @@ class BrainNetwork(torch.nn.Module):
         target (str):                   Target area of the feedback connection.
         trainable (bool):               If True, weights should be updated during training.
         ================================
-        See _initialize_connection() for more initialization options.
+        See _initialize_default_connection() for more initialization options.
         """
         source_area = self._get_area(source)
         target_area = self._get_area(target)
 
-        self._initialize_connection(
+        self._initialize_default_connection(
             'feedback',
             source,
             target,
@@ -356,11 +362,11 @@ class BrainNetwork(torch.nn.Module):
         area_name (str):                Area for which lateral connections should be initialized.
         trainable (bool):               If True, weights should be updated during training.
         ================================
-        See _initialize_connection() for more initialization options.
+        See _initialize_default_connection() for more initialization options.
         """
         area = self._get_area(area_name)
 
-        self._initialize_connection(
+        self._initialize_default_connection(
             'lateral',
             area_name,
             area_name,
@@ -396,12 +402,12 @@ class BrainNetwork(torch.nn.Module):
                                         should contain more than one input connection.
         trainable (bool):               If True, weights should be updated during training.
         ================================
-        See _initialize_connection() for more initialization options.
+        See _initialize_default_connection() for more initialization options.
         """
         area = self._get_area(target_area)
         input_name = unique_id or 'input'
 
-        self._initialize_connection(
+        self._initialize_default_connection(
             'input',
             input_name,
             target_area,
@@ -432,12 +438,12 @@ class BrainNetwork(torch.nn.Module):
                                         should contain more than one output connection.
         trainable (bool):               If True, weights should be updated during training.
         ================================
-        See _initialize_connection() for more initialization options.
+        See _initialize_default_connection() for more initialization options.
         """
         area = self._get_area(source_area)
         output_name = unique_id or 'output'
 
-        self._initialize_connection(
+        self._initialize_default_connection(
             'output',
             source_area,
             output_name,
@@ -498,6 +504,8 @@ class BrainNetwork(torch.nn.Module):
             'model_params': self.params['model']}
 
         weights, mask = initializer(init_dict, **initializer_args)
+
+        connection.set_sizes(weights.shape[1], weights.shape[0])
         connection.set_weights_and_mask(weights, mask)
 
         registry = (self.output_connections

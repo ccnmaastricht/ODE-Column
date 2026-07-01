@@ -11,14 +11,25 @@ class Connection(torch.nn.Module):
     background, feedforward, feedback, lateral and input.
     """
 
-    def __init__(self, conn_type, source, target, trainable):
+    def __init__(self, conn_type, source, target, trainable, source_size=None, target_size=None, initialize_weights_and_mask=False):
         super().__init__()
 
-        self.conn_type  = conn_type
-        self.source_id  = source
-        self.target_id  = target
-        self.trainable  = trainable
-        self.size_input = None
+        self.conn_type      = conn_type
+        self.source_id      = source
+        self.target_id      = target
+        self.source_size    = source_size
+        self.target_size    = target_size
+        self.trainable      = trainable
+
+        if initialize_weights_and_mask:
+
+            self.weights = torch.nn.Parameter(
+                torch.empty(target_size, source_size),
+                requires_grad=self.trainable)
+
+            self.register_buffer(
+                "mask",
+                torch.empty(target_size, source_size))
 
     def _get_connection_params(self, params):
         """
@@ -106,12 +117,23 @@ class Connection(torch.nn.Module):
         return weights, mask
 
     def set_weights_and_mask(self, weights, mask):
-        """ Set the connection weights and mask as object attributes. """
+        """
+        Set the connection weights and mask as object attributes.
+        """
         self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
         self.register_buffer("mask", mask)
 
+    def set_sizes(self, source_size, target_size):
+        """
+        Set the sizes (number of populations) of the source and target.
+        """
+        self.source_size = source_size
+        self.target_size = target_size
+
     def get_name(self):
-        """ Returns the unique string specifying the connection."""
+        """
+        Returns the unique string specifying the connection.
+        """
         return f'{self.conn_type}_{self.source_id}_{self.target_id}'
 
     def constrain(self, existing_areas):
@@ -136,11 +158,15 @@ class Connection(torch.nn.Module):
             self.W = torch.relu(masked)
 
     def initialize_recurrent_weights(self, area):
-        """ Initialize recurrent (i.e. column-intrinsic) weights within the same area."""
+        """
+        Initialize recurrent (i.e. column-intrinsic) weights within the same area.
+        """
         return area.recurrent_weights, area.internal_mask
 
     def initialize_background_weights(self, area):
-        """ Initialize background weights within an area."""
+        """
+        Initialize background weights within an area.
+        """
         bg_weights = area.background_weights.unsqueeze(1)  # add extra dim
         mask = torch.ones_like(bg_weights)
         return bg_weights, mask
@@ -173,8 +199,6 @@ class Connection(torch.nn.Module):
         """
         Initialize input weights targeting an area.
         """
-        self.size_input = size_input
-
         init, mask, synapse_strength = self._get_connection_params(params)
         init = torch.transpose(init.unsqueeze(0), 0, 1)
         mask = torch.transpose(mask.unsqueeze(0), 0, 1)
