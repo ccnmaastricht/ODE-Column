@@ -269,7 +269,6 @@ class BrainNetwork(torch.nn.Module):
             source,
             target,
             trainable=True,
-            initializer=Connection.initialize_feedforward_weights,
             receptive_field_size=None,
             stride=1,
             grid_organization=False,
@@ -292,7 +291,7 @@ class BrainNetwork(torch.nn.Module):
             'feedforward',
             source,
             target,
-            initializer,
+            Connection.initialize_feedforward_weights,
             self.params,
             source_area,
             target_area,
@@ -421,7 +420,7 @@ class BrainNetwork(torch.nn.Module):
             self,
             source_area,
             unique_id=None,
-            trainable=True,
+            trainable=False,
             std=0.0,
             scale=1.0):
         """
@@ -449,6 +448,63 @@ class BrainNetwork(torch.nn.Module):
             scale,
             trainable=trainable,
             output=True)
+
+    def add_custom_connection(
+            self,
+            connection_name,
+            source,
+            target,
+            initializer,
+            trainable=True,
+            is_output_connection=False,
+            **initializer_args):
+        """
+        Add a custom connection to the network architecture with a user-specified initializer function.
+
+        Params:
+        connection_name (str):          Name of the connection, can be anything (also 'feedforward', 'input', etc.)
+                                        as long as the {name}_{source}_{target} string is unique to the network.
+        source (str):                   Name of the source, can refer to an already initialized network area with
+                                        BrainNetwork.add_area(), or to a network-external source (i.e. 'input').
+        target (str):                   Name of the source, can refer to an already initialized network area with
+                                        BrainNetwork.add_area(), or to a network-external target (i.e. 'output').
+        initializer (func):             A user-specified function that initializes the connection weights and mask.
+                                        The function receives a dictionary with network parameters ('source', 'target',
+                                        'general_params' and 'model_params' as the first argument, and any optional
+                                        user-specified arguments. The function should return tensors (weights, mask)
+                                        both with the shape (target, source).
+        trainable (bool):               If True, weights should be updated during training.
+        is_output_connection (bool):    If True, the network will handle the connection as output (i.e. read-out) and
+                                        the connection itself has no influence on network dynamics. In this case,
+                                        the target should not refer to a brain area.
+        ** initializer_args:            Optional arguments to pass to the user-specified initializer function.
+        """
+        connection = Connection(
+            connection_name,
+            source,
+            target,
+            trainable)
+
+        # If source or target are initialized brain areas, get their BrainArea object
+        if source in self.areas.keys():
+            source = self.areas[source]
+        if target in self.areas.keys():
+            target = self.areas[target]
+
+        init_dict = {
+            'source': source,
+            'target': target,
+            'general_params': self.params['general'],
+            'model_params': self.params['model']}
+
+        weights, mask = initializer(init_dict, **initializer_args)
+        connection.set_weights_and_mask(weights, mask)
+
+        registry = (self.output_connections
+                    if is_output_connection
+                    else self.connections)
+
+        registry[connection.get_name()] = connection
 
     def finalize(self):
         """
