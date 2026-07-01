@@ -2,23 +2,15 @@ import torch
 
 
 
-def huber_loss_wta(pred_states, true, network):
+def huber_loss_wta(pred_states, true):
     """
     Computes Huber loss, a loss function suited for trajectories.
     """
-    num_columns = true.shape[2]
-
     true_reshaped = true.transpose(0, 1).contiguous()
-    pred_reshaped = torch.zeros_like(true_reshaped)
-
-    for i_col in range(num_columns):
-        fr_pred_col = pred_states[:, :, i_col*8 : (i_col+1)*8]
-        fr_pred_col_sum = torch.sum(fr_pred_col * network.output_weights, dim=2)
-        pred_reshaped[:, :, i_col] = fr_pred_col_sum
 
     # Compute loss between model prediction and WangWong simulated data
     hub_loss = torch.nn.SmoothL1Loss(beta=1.0)
-    return hub_loss(pred_reshaped, true_reshaped)
+    return hub_loss(pred_states, true_reshaped)
 
 def min_max(firing_rates):
     """
