@@ -32,7 +32,7 @@ class NetworkSimulator:
 
     def _validate_input_shapes(self, ext_input):
         """
-        Check if input tensors have the same shape in the first dimension (i.e. same number of input samples.
+        Check if input tensors have the same shape in the first dimension (i.e. batch size).
         """
         batch_sizes = {tensor.shape[0]
                        for tensor in ext_input.values()}
@@ -49,12 +49,22 @@ class NetworkSimulator:
     def _convert_to_tensors(self, ext_input, device):
         """
         Convert each input tensor to a tensor and put them on the specified device.
+        If an input tensor is one-dimensional (aka one sample in a batch), it adds
+        an extra dimension.
         """
-        return {name: (
-                tensor.to(device)
-                if torch.is_tensor(tensor)
-                else torch.tensor(tensor,dtype=torch.float32, device=device))
-                for name, tensor in ext_input.items()}
+        for name, input_var in ext_input.items():
+
+            if torch.is_tensor(input_var):
+                input_on_device = input_var.to(device)
+            else:
+                input_on_device = torch.tensor(input_var, dtype=torch.float32, device=device)
+
+            if input_on_device.ndim == 1:
+                input_on_device = input_on_device.unsqueeze(0)
+
+            ext_input[name] = input_on_device
+
+        return ext_input
 
     def _validate_network_inputs(self, ext_input):
         """
