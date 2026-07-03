@@ -21,6 +21,8 @@ class NetworkSimulator:
         self.sim_time       = time_params['sim_time']
         self.input_window   = time_params['input_window']
 
+        self.previous_network_state = None
+
         self.network_is_ready = False
 
     def _infer_batch_size(self, ext_input):
@@ -138,7 +140,14 @@ class NetworkSimulator:
 
         self.network_is_ready = True
 
-    def run(self, ext_input, input_window, adjoint, stochastic, device):
+    def _store_last_state(self, network_output):
+        """
+        Stores the last state of the network output to potentially use as initial state
+        for the next simulation, if user sets reset_state=False in the run command.
+        """
+        self.previous_network_state = network_output[-1]
+
+    def run(self, ext_input, input_window, adjoint, stochastic, reset_state, device):
         """
         Runs the network simulation.
         """
@@ -150,19 +159,25 @@ class NetworkSimulator:
 
         initial_state = self._extend_init_state(batch_size)
 
+        if not reset_state and self.previous_network_state is not None:  # Use the last state of the last simulation as the initial state
+            initial_state = self.previous_network_state
+
         self.network.constrain_weights()
 
         if not adjoint and not stochastic:
-            return odeint(sim_wrapper, initial_state, self.time_vec)
+            network_output = odeint(sim_wrapper, initial_state, self.time_vec)
 
         elif adjoint and not stochastic:
-            return odeint_adjoint(sim_wrapper, initial_state, self.time_vec)
+            network_output = odeint_adjoint(sim_wrapper, initial_state, self.time_vec)
 
         elif not adjoint and stochastic:
-            return sdeint(sim_wrapper, initial_state, self.time_vec,
+            network_output = sdeint(sim_wrapper, initial_state, self.time_vec,
                             names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
 
         elif adjoint and stochastic:
-            return sdeint_adjoint(sim_wrapper, initial_state, self.time_vec,
+            network_output = sdeint_adjoint(sim_wrapper, initial_state, self.time_vec,
                                     names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
 
+        self._store_last_state(network_output)
+
+        return network_output

@@ -547,15 +547,19 @@ class BrainNetwork(torch.nn.Module):
         for connection in all_connections:
             connection.constrain(self.areas.keys())
 
-    def run(self, ext_input=None, input_window=None, adjoint=False, stochastic=False, device="cpu"):
+    def run(self, ext_input=None, input_window=None, adjoint=False, stochastic=False, reset_state=True, device="cpu"):
         """
         Delegates running the network to the simulation engine.
+        Todo: add documentation
+        reset_state=False can only be done if the network has been simulated after
+        initialization and if the previous batch_size matches the current batch_size.
         """
         return self.simulator.run(
             ext_input=ext_input,
             input_window=input_window,
             adjoint=adjoint,
             stochastic=stochastic,
+            reset_state=reset_state,
             device=device)
 
     def get_firing_rates(self, raw_state, area=None, return_as_np_array=True):
