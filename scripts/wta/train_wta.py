@@ -3,7 +3,6 @@ import numpy as np
 import os
 import pickle
 
-from sympy.series.formal import exp_re
 from torch.utils.data import TensorDataset, DataLoader
 import matplotlib.pyplot as plt
 
@@ -123,7 +122,7 @@ if __name__ == '__main__':
     batch_size          = 32
     num_epochs          = 3
     test_freq           = 10
-    train_with_adjoint  = True
+    train_with_adjoint  = False
     train_with_noise    = True
     seed                = 1
     fn_target_data      = '../../data/ds_wta.pkl'
@@ -150,7 +149,12 @@ if __name__ == '__main__':
 
     # Prepare train and test data, and optimizer
     train_loader, test_states, test_stims = get_data(batch_size, network.params['model']['time_params'], fn_target_data)
+    test_states = test_states.to(device)
     optimizer = torch.optim.Adam(network.parameters(), lr=10.0) # torch.optim.RMSprop(network.parameters(), lr=10.0, alpha=0.9)
+
+    # Store losses
+    train_losses = []
+    test_losses = []
 
     # Start training loop
     for epoch in range(num_epochs):
@@ -183,13 +187,23 @@ if __name__ == '__main__':
 
                     print('Epoch {:02d} | Iter {:02d} | Train Loss {:.4f} | Test Loss {:.4f}'.format(epoch, itr//10, loss.item(), test_loss.item()))
 
+                    train_losses.append(loss.item())
+                    test_losses.append(test_loss.item())
 
-    weights = network.connections['recurrent_mt_mt'].weights + network.connections['lateral_mt_mt'].weights + network.connections[
-        'self_excitation_mt_mt'].weights
 
-    plt.imshow(weights.detach().numpy(), cmap="viridis", interpolation="nearest")
-    plt.show()
+    # Store training history and trained network
+    history = {'train_losses': train_losses,
+               'test_losses': test_losses}
 
+    torch.save(history, 'wta_history.pt')
+    network.save('wta.pt')
+
+
+    # weights = network.connections['recurrent_mt_mt'].weights + network.connections['lateral_mt_mt'].weights + network.connections[
+    #     'self_excitation_mt_mt'].weights
+    #
+    # plt.imshow(weights.detach().numpy(), cmap="viridis", interpolation="nearest")
+    # plt.show()
 
     # firing_rates = network.get_firing_rates(output)
     # # network.analysis.plot_firing_rates(firing_rates)

@@ -1,0 +1,7 @@
+
+adaptation_strength = [1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+[time_params]
+dt           			= 1e-3
+sim_time        		= 10.0
+input_window    		= [0.0, 10.0]
