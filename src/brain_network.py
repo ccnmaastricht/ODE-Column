@@ -562,15 +562,27 @@ class BrainNetwork(torch.nn.Module):
             reset_state=reset_state,
             device=device)
 
-    def get_firing_rates(self, raw_state, area=None, return_as_np_array=True):
+    def get_firing_rates(
+            self,
+            raw_state,
+            sample=None,
+            area=None,
+            column=None,
+            population=None,
+            return_as_np_array=True,
+            return_as_dict=False):
         """
         Computes the firing rate from the raw state (= [membrane_potential, adaptation])
         Returns as np.array unless specified otherwise.
         """
         return self.readout.get_firing_rates(
             raw_state=raw_state,
+            sample=sample,
             area=area,
-            return_as_np_array=return_as_np_array)
+            column=column,
+            population=population,
+            return_as_np_array=return_as_np_array,
+            return_as_dict=return_as_dict)
 
     def read_out(self, raw_output, mode, sum_per_col=True):
         """
