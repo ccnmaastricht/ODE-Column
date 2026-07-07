@@ -14,6 +14,7 @@ from src.utils.plotting.plotstyle import panel_label
 from src.utils.plotting.colors import *
 
 
+
 def finish_plot(fig, filename):
     fig.savefig(
         filename,
@@ -42,20 +43,17 @@ def plot_time_course(network_paths, sub_fig_top, sub_fig_bottom, network_to_plot
         for stim in [[0., 0.], [0., 0.], [10., 30.], [0., 0.], [30., 10.], [0., 0.], [20., 20.], [20., 20.], [20., 20.], [20., 20.], [0., 0.]]:
 
             output = network.run(stim, adjoint=False, stochastic=True, reset_state=False)
-            firing_rates = network.get_firing_rates(output, return_as_np_array=False)
+            firing_rates = network.get_firing_rates(output, population='L23e', return_as_np_array=False)
 
             # Store results
-            # TODO: get L2/3e firing rates immediately
-            firing_rates = firing_rates[:, 0, [0, 8]]
-
             stim_tensor = torch.tensor(stim)
             stim_over_time = torch.tile(stim_tensor, (len(firing_rates), 1))
 
             if i == 1:
-                time_course = firing_rates
+                time_course = firing_rates[:, 0, :]
                 stim_time_course = stim_over_time
             elif i > 1:
-                time_course = torch.concat([time_course, firing_rates], dim=0)
+                time_course = torch.concat([time_course, firing_rates[:, 0, :]], dim=0)
                 stim_time_course = torch.concat([stim_time_course, stim_over_time], dim=0)
             i += 1
 
@@ -66,7 +64,7 @@ def plot_time_course(network_paths, sub_fig_top, sub_fig_bottom, network_to_plot
     # Top plot: firing rates
     sub_fig_top.plot(total_time, time_course[:, 0], color=myred2, label='Column A')
     sub_fig_top.plot(total_time, time_course[:, 1], color=myblue2, label='Column B')
-    sub_fig_top.set_ylabel('L2/3e firing rates (Hz)')
+    sub_fig_top.set_ylabel('L2/3e firing rate (Hz)')
     sub_fig_top.set_xticks([])
     sub_fig_top.set_yticks([0.0, 0.5, 1.0])
     sub_fig_top.tick_params(labelbottom=False)
@@ -77,7 +75,7 @@ def plot_time_course(network_paths, sub_fig_top, sub_fig_bottom, network_to_plot
     sub_fig_bottom.plot(total_time, stim_time_course[:, 0], color=myred2, label='Input A', linewidth=1.0)
     sub_fig_bottom.plot(total_time, stim_time_course[:, 1], color=myblue2, label='Input B', linewidth=1.0, linestyle='--')
     sub_fig_bottom.set_xlabel('Time (s)')
-    sub_fig_bottom.set_ylabel('Input rates (Hz)')
+    sub_fig_bottom.set_ylabel('Input rate (Hz)')
     sub_fig_bottom.set_xticks(time_ticks)
     sub_fig_bottom.set_ylim(-5.0, 40.0)
     sub_fig_bottom.legend()
@@ -117,11 +115,6 @@ def dominance_time(A1, A2, dt=1e-4, cutoff=.1, thresh=0.0001, sliding_window=100
     A2_smooth = running_mean(A2, N=sliding_window)
     A_diff = A1_smooth - A2_smooth
 
-    # plt.plot(A1_smooth)
-    # plt.plot(A2_smooth)
-    # plt.plot(A_diff)
-    # plt.show()
-
     sign_diff = np.sign(A_diff)
     switch_inds = np.where(np.diff(sign_diff) != 0)[0]
     switch_times = switch_inds * dt
@@ -159,10 +152,7 @@ def run_bistable_perception(network_path):
         for i in range(5):  # 5 * 10s of simulation
 
             output = network.run(input_grid, adjoint=False, stochastic=True, reset_state=False)
-            firing_rates = network.get_firing_rates(output)
-
-            # TODO: get L2/3e firing rates immediately
-            firing_rates = firing_rates[:, :, [0, 8]]
+            firing_rates = network.get_firing_rates(output, population='L23e')
 
             if i == 0:
                 total_firing_rates = firing_rates
@@ -181,13 +171,6 @@ def run_bistable_perception(network_path):
 
             dom_dur.append(np.round(np.sum(dom), 2))
 
-            # print(input_grid[sample])
-            # print(dom)
-            # plt.plot(total_firing_rates[:, sample, 0])
-            # plt.plot(total_firing_rates[:, sample, 1])
-            # plt.show()
-
-
         dom_dur = np.reshape(dom_dur, (21, 21))
 
         return dom_dur
@@ -196,7 +179,9 @@ def run_bistable_perception(network_path):
 def plot_bistable_perception(network_paths, sub_fig, network_to_plot=0):
     idx_path = network_paths[network_to_plot]
 
-    dominance_duration = run_bistable_perception(idx_path)
+    # dominance_duration = run_bistable_perception(idx_path)
+
+    dominance_duration = torch.rand((21, 21))
 
     colors = [myred2, myyellow, myblue2]
 
@@ -273,28 +258,185 @@ def plot_firing_rates_per_layer(firing_rates, coherences, fig, sub_fig, sub_fig_
         # Set x-ticks
         xticks = np.arange(0, 601, 100)
         sub_sub_fig.set_xticks(xticks)
-        if l_idx == 0 or l_idx == 2:  # Remove x-ticks for top subplots
+        if l_idx < 3:  # Remove x-ticks for top subplots
             sub_sub_fig.set_xticklabels([])
         else:  # For bottom subplots: relabel x-axis from 0–600 to -100–500
             xlabels = xticks - 100  # Shift labels
             xlabels = xlabels // 10
             sub_sub_fig.set_xticklabels(xlabels)
+            sub_sub_fig.set_xlabel('Time (ms)')
         sub_sub_fig.set_xlim(0, 600)
 
-    # sub_fig.set_xlabel('Time (ms)', labelpad=20)
-    # sub_fig.set_ylabel('Firing rates (Hz)', labelpad=20)
+    # fig.text(0.72, 0.60, "Time (ms)", ha="center", va="center", fontsize=6)
+    # fig.text(0.47, 0.77, "Firing rate (Hz)", rotation="vertical", ha="center", va="center", fontsize=6)
 
-    # Color bar
-    cbar = fig.colorbar(sm, ax=list(sub_fig_dict.values()), orientation='horizontal', location='top', fraction=0.04, pad=0.1)
-    cbar.set_label('Relative evidence in Hz')
-    cbar.set_ticks([min(coherences), max(coherences)])
-    cbar.set_ticklabels([f'{min(coherences):.2f}', f'{max(coherences):.2f}'])
+    # # Color bar
+    # cbar = fig.colorbar(sm, ax=list(sub_fig_dict.values()), orientation='horizontal', location='top', fraction=0.04, pad=0.1)
+    # cbar.set_label('Relative evidence in Hz')
+    # cbar.set_ticks([min(coherences), max(coherences)])
+    # cbar.set_ticklabels([f'{min(coherences):.2f}', f'{max(coherences):.2f}'])
 
 
-def plot_layer_results(network_paths, fig, overlay_fig_4, sub_fig_4_dict, sub_fig_5,
-                       sub_fig_6, sub_fig_7, sub_fig_8, network_to_plot=0):
-    wsi_all_models = torch.zeros((4, len(network_paths)))  # shape = (4 columns, N models)
-    divt_all_models = torch.zeros((4, len(network_paths)))
+def compute_wsi_and_divt(firing_rates, dt, winner_idx, divt_threshold=0.1, divt_window=0.02):
+    divt_window = int(divt_window / dt)  # convert from seconds to timesteps
+
+    wsi_results = torch.zeros((firing_rates.shape[0], firing_rates.shape[2]))
+    divt_results = torch.zeros((firing_rates.shape[0], firing_rates.shape[2]))
+
+    for i_layer in range(firing_rates.shape[0]):
+        for i_coh in range(0, firing_rates.shape[2]):
+            winner_column = firing_rates[i_layer, :, i_coh, winner_idx]
+            loser_column = firing_rates[i_layer, :, i_coh, (1 - winner_idx)]
+
+            # Compute WSI (winner-selectivity index)
+            wsi = (winner_column - loser_column) / (winner_column + loser_column)
+            wsi_mean = torch.mean(wsi)
+            wsi_results[i_layer, i_coh] = wsi_mean
+
+            # Compute divergence time
+            max_diff = torch.max(torch.abs(firing_rates[i_layer, :, :, 0] - firing_rates[i_layer, :, :, 1]))  # max difference of all coherence levels
+            abs_difference = torch.abs(winner_column - loser_column)
+            for t_i in range(len(abs_difference) - divt_window):
+                fr_window = abs_difference[t_i:t_i+divt_window]
+                if torch.all(fr_window > max_diff * divt_threshold):
+                    divt_results[i_layer, i_coh] = (t_i - 100) * dt
+                    break
+
+    # Ensure non-negative divergence timings (happens when trajectories never intersect and thus never diverge)
+    divt_results = torch.clamp(divt_results, min=0.0)
+    return wsi_results, divt_results
+
+
+def plot_wsi_and_divt(wsi_results, divt_results, sub_fig_wsi, sub_fig_divt, linewidth_mean=1.0):
+    x = np.arange(4)
+
+    # ----- WSI -----
+    mean_wsi = torch.mean(wsi_results, dim=1)
+    sd_wsi = torch.std(wsi_results, dim=1)
+
+    sub_fig_wsi.plot(mean_wsi, color='black', marker='o', markersize=linewidth_mean*2, linewidth=linewidth_mean)
+    sub_fig_wsi.errorbar(np.arange(4), mean_wsi, yerr=sd_wsi, ecolor='black', elinewidth=linewidth_mean,
+                         capthick=linewidth_mean, capsize=linewidth_mean*3, barsabove=True)
+
+    # Plotting per coherence level (rainbow)
+    colors = plt.get_cmap('rainbow', wsi_results.shape[1])
+    for i_coh in range(0, wsi_results.shape[1]):
+        color = colors(i_coh)
+        sub_fig_wsi.plot(wsi_results[:, i_coh], color=color, zorder=1)
+
+    sub_fig_wsi.grid(True, linestyle="--", alpha=0.5)
+    sub_fig_wsi.set_xticks(x)
+    sub_fig_wsi.set_xticklabels(["L2/3", "L4", "L5", "L6"])
+    sub_fig_wsi.set_yticks([-0.6, 0.0, 0.6])
+    sub_fig_wsi.set_xlim(-0.5, 3.5)
+    sub_fig_wsi.set_ylim(-0.8, 1.0)
+    sub_fig_wsi.set_ylabel("Winner selectivity index")
+
+    # ----- DivT -----
+    mean_divt = torch.mean(divt_results, dim=1)
+    sd_divt = torch.std(divt_results, dim=1)
+
+    sub_fig_divt.plot(mean_divt, color='black', marker='o', markersize=linewidth_mean*2, linewidth=linewidth_mean)
+    sub_fig_divt.errorbar(np.arange(4), mean_divt, yerr=sd_divt, ecolor='black', elinewidth=linewidth_mean,
+                         capthick=linewidth_mean, capsize=linewidth_mean*3, barsabove=True)
+
+    # Plotting per coherence level (rainbow)
+    colors = plt.get_cmap('rainbow', divt_results.shape[1])
+    for i_coh in range(0, divt_results.shape[1]):
+        color = colors(i_coh)
+        sub_fig_divt.plot(divt_results[:, i_coh], color=color, zorder=1)
+
+    sub_fig_divt.grid(True, linestyle="--", alpha=0.5)
+    sub_fig_divt.set_xticks(x)
+    sub_fig_divt.set_xticklabels(["L2/3", "L4", "L5", "L6"])
+    sub_fig_divt.set_yticks([0.0, 0.005, 0.01, 0.015])
+    sub_fig_divt.set_yticklabels(["0", "5", "10", "15"])
+    sub_fig_divt.set_xlim(-0.5, 3.5)
+    sub_fig_divt.set_ylabel("Divergence timing (ms)")
+
+
+def plot_interp_wsi_and_divt(wsi_list, divt_list, sub_fig_wsi, sub_fig_divt, linewidth_mean=1.0):
+    population_sizes = np.array([60606, 28202, 14176, 15837])
+
+    x_axis = []
+    for i in range(len(population_sizes)):
+        curr_pop_size = population_sizes[i]
+        prev_pop_sizes = sum(population_sizes[:i])
+        x_axis.append(prev_pop_sizes + (curr_pop_size // 2))
+    x_axis = np.array(x_axis)
+
+    # Smooth x for plotting
+    x_smooth = np.linspace(0, population_sizes.sum(), 500)
+
+    # Color map (automatically spreads colors)
+    colors = plt.cm.tab10(np.linspace(0, 1, len(wsi_list)))
+
+    # ----- WSI -----
+    for i, wsi in enumerate(wsi_list):
+        # Fit polynomial
+        coeffs = np.polyfit(x_axis, wsi, deg=3)
+        poly = np.poly1d(coeffs)
+        y_smooth = poly(x_smooth)
+
+        # Plot points
+        sub_fig_wsi.plot(x_axis, wsi, color='black', marker='o', markersize=linewidth_mean*2, ls='')
+
+        # Plot smooth curve
+        sub_fig_wsi.plot(x_smooth, y_smooth, '-', color='black')
+
+    sub_fig_wsi.set_xlim(0, population_sizes.sum())
+    sub_fig_wsi.set_xticks(x_axis, ['L2/3', 'L4', 'L5', 'L6'])
+    sub_fig_wsi.set_ylim([-0.1, 1.1])
+    sub_fig_wsi.set_yticks([0.0, 0.5, 1.0])
+    sub_fig_wsi.set_ylabel('Choice Selectivity Index')
+    sub_fig_wsi.grid(True, axis='y', linestyle='--', alpha=0.5)
+
+    # x-axis grid lines
+    ax_top = sub_fig_wsi.twiny()
+    ax_top.set_xlim(sub_fig_wsi.get_xlim())
+    boundaries = np.concatenate([[0], np.cumsum(population_sizes)])
+    ax_top.set_xticks(boundaries)
+    ax_top.set_xticklabels([])
+    ax_top.grid(True, axis='x', linestyle='--', alpha=0.5)
+    ax_top.spines['top'].set_visible(False)
+    ax_top.tick_params(top=False)
+
+    # --------- DivT ---------
+    for i, divt in enumerate(divt_list):
+        # Fit polynomial
+        coeffs = np.polyfit(x_axis, divt, deg=3)
+        poly = np.poly1d(coeffs)
+        y_smooth = poly(x_smooth)
+
+        # Plot raw points
+        sub_fig_divt.plot(x_axis, divt, color='black', marker='o', markersize=linewidth_mean*2, ls='')
+
+        # Plot smooth curve
+        sub_fig_divt.plot(x_smooth, y_smooth, '-', color='black')
+
+    sub_fig_divt.set_xlim(0, population_sizes.sum())
+    sub_fig_divt.set_xticks(x_axis, ['L2/3', 'L4', 'L5', 'L6'])
+    # sub_fig_divt.set_ylim([-0.001, 0.015])
+    sub_fig_divt.set_ylim([-0.005, 0.02])
+    sub_fig_divt.set_yticks([0.0, 0.005, 0.01, 0.015], ['0', '5', '10', '15'])
+    sub_fig_divt.set_ylabel('Divergence timing (ms)')
+    sub_fig_divt.grid(True, axis='y', linestyle='--', alpha=0.5)
+
+    # x-axis grid lines
+    ax_top = sub_fig_divt.twiny()
+    ax_top.set_xlim(sub_fig_divt.get_xlim())
+    boundaries = np.concatenate([[0], np.cumsum(population_sizes)])
+    ax_top.set_xticks(boundaries)
+    ax_top.set_xticklabels([])
+    ax_top.grid(True, axis='x', linestyle='--', alpha=0.5)
+    ax_top.spines['top'].set_visible(False)
+    ax_top.tick_params(top=False)
+
+
+def plot_layer_results(network_paths, fig, sub_fig_fr, sub_fig_fr_dict, sub_fig_wsi,
+                       sub_fig_wsi_interp, sub_fig_divt, sub_fig_divt_interp, network_to_plot=0):
+    wsi_all_models = torch.zeros((4, 2, len(network_paths)))  # shape = (4 populations, 2 columns, N models)
+    divt_all_models = torch.zeros((4, 2, len(network_paths)))
 
     for network_i, network_fn in enumerate(network_paths):
 
@@ -323,7 +465,6 @@ def plot_layer_results(network_paths, fig, overlay_fig_4, sub_fig_4_dict, sub_fi
                 resting_state = network.run(empty_stims, adjoint=False, stochastic=False)
                 output = network.run(stims, adjoint=False, stochastic=False, reset_state=False)
 
-                # Todo: get the correct layers right away!
                 firing_rates = network.get_firing_rates(output, return_as_np_array=False)
 
                 fr_results = torch.Tensor(4, 600, len(coherences), 2)
@@ -332,116 +473,187 @@ def plot_layer_results(network_paths, fig, overlay_fig_4, sub_fig_4_dict, sub_fi
                 fr_results[2, :, :, :] = firing_rates[400:1000, :, [4, 12]]  # layer 5e
                 fr_results[3, :, :, :] = firing_rates[400:1000, :, [6, 14]]  # layer 6e
 
-                # Plot layer-wise firing rates; only for the specified network and winner=A
+                # Compute winner-selectivity and divergence timing
+                wsi, divt = compute_wsi_and_divt(fr_results, network.simulator.dt, winner_idx)
+                wsi_all_models[:, winner_idx, network_i] = torch.mean(wsi, dim=1)
+                divt_all_models[:, winner_idx, network_i] = torch.mean(divt, dim=1)
+
+                # Plot layer-wise firing rates and profile; only for the specified network and winner=A
                 if network_i == network_to_plot and winner_idx == 0:
-                    plot_firing_rates_per_layer(fr_results, coherences, fig, overlay_fig_4, sub_fig_4_dict)
+                    plot_firing_rates_per_layer(fr_results, coherences, fig, sub_fig_fr, sub_fig_fr_dict)
+                    plot_wsi_and_divt(wsi, divt, sub_fig_wsi, sub_fig_divt)
+
+    # Plot selectivity index and divergence timing for all models
+    wsi_all_models = torch.mean(wsi_all_models, dim=1)  # average over winner id
+    divt_all_models = torch.mean(divt_all_models, dim=1)
+    plot_interp_wsi_and_divt(abs(wsi_all_models).T, divt_all_models.T, sub_fig_wsi_interp, sub_fig_divt_interp)
 
 
-def plot_network_architecture(sub_fig_1):
-    img = plt.imread("column WTA.png")
-    sub_fig_1.imshow(img, interpolation="none")
-    sub_fig_1.axis("off")
+def plot_network_architecture(sub_fig):
+    img = plt.imread("wta_network_image.png")
+    sub_fig.imshow(img)
+    sub_fig.axis("off")
 
 
-def create_wta_results_fig(network_paths, seed=1):
+def plot_training_history(history_paths):
+    train_histories = []
+    test_histories = []
+
+    # Load histories
+    for path in history_paths:
+        history = torch.load(path, weights_only=False)
+
+        train_histories.append(np.asarray(history["train_losses"]))
+        test_histories.append(np.asarray(history["test_losses"]))
+
+    # Ensure equal number of epochs
+    train = np.stack(train_histories)
+    test = np.stack(test_histories)
+
+    epochs = np.arange(train.shape[1])
+
+    train_mean = train.mean(axis=0)
+    test_mean = test.mean(axis=0)
+
+    fig, axes = plt.subplots(
+        1, 2,
+        figsize=(4, 4),
+        sharex=True,
+        constrained_layout=True,
+    )
+
+    # ------------------------
+    # Training loss
+    # ------------------------
+    ax = axes[0]
+
+    for run in train:
+        ax.plot(
+            epochs,
+            run,
+            color="C0",
+            alpha=0.15,
+            linewidth=1,
+        )
+
+    ax.plot(
+        epochs,
+        train_mean,
+        color="C0",
+        linewidth=3,
+        label="Mean",
+    )
+
+    ax.set_title("Training loss")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss")
+
+    # ------------------------
+    # Test loss
+    # ------------------------
+    ax = axes[1]
+
+    for run in test:
+        ax.plot(
+            epochs,
+            run,
+            color="C1",
+            alpha=0.15,
+            linewidth=1,
+        )
+
+    ax.plot(
+        epochs,
+        test_mean,
+        color="C1",
+        linewidth=3,
+        label="Mean",
+    )
+
+    ax.set_title("Test loss")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss")
+
+    plt.show()
+
+
+def plot_learned_weights(network_paths, sub_fig):
+
+    weights = []
+
+    for path in network_paths:
+        network = BrainNetwork.load(path)
+
+        self_excitation_weights = network.connections['self_excitation_mt_mt'].weights.detach().numpy()
+        intrinsic_weights = network.connections['recurrent_mt_mt'].weights.detach().numpy()
+        lateral_weights = network.connections['lateral_mt_mt'].weights.detach().numpy()
+
+        weights.append([
+            (self_excitation_weights[0, 0] + intrinsic_weights[0, 0]),
+            (self_excitation_weights[8, 8] + intrinsic_weights[8, 8]),
+            lateral_weights[9, 0],
+            lateral_weights[1, 8]])
+
+    weight_labels = ['self excitation column A', 'self excitation column B', 'lateral inhibition column A', 'lateral inhibition column B']
+
+    weights = np.asarray(weights)
+    n_runs, n_weights = weights.shape
+
+    means = weights.mean(axis=0)
+    stds = weights.std(axis=0)
+
+    rng = np.random.default_rng(42)
+
+    for i in range(n_weights):
+
+        # Small horizontal jitter
+        x = i + rng.uniform(-0.08, 0.08, size=n_runs)
+
+        # Individual learned weights
+        sub_fig.scatter(x, weights[:, i], color=f"C{i}", alpha=0.6, s=30, zorder=2)
+
+        # Mean ± SD
+        sub_fig.errorbar(i, means[i], yerr=stds[i], fmt="o", color="black", capsize=5, markersize=8, linewidth=2.5, zorder=3)
+
+    sub_fig.set_xticks(range(n_weights))
+    sub_fig.set_xticklabels(weight_labels)
+
+    sub_fig.set_ylabel("Learned weight")
+
+
+def create_wta_general_results_fig(network_paths, seed=1):
 
     set_seed(seed)
 
-    # fig = plt.figure(figsize=(17 / 2.54, 13 / 2.54))
-    # fig.subplots_adjust(
-    #     left=0.07,
-    #     right=0.98,
-    #     bottom=0.08,
-    #     top=0.95,
-    #     wspace=0.4,
-    #     hspace=0.4)
-    #
-    # gs = fig.add_gridspec(nrows=3, ncols=3, width_ratios=[1.4, 1.1, 1.1], height_ratios=[1.0, 0.8, 0.8])
-    #
-    # sub_fig_1 = fig.add_subplot(gs[0, 0])
-    #
-    # sub_fig_2 = gs[1, 0].subgridspec(2,1, height_ratios=[1.2, 0.8])
-    # sub_fig_2_top = fig.add_subplot(sub_fig_2[0])
-    # sub_fig_2_bottom = fig.add_subplot(sub_fig_2[1], sharex=sub_fig_2_top)
-    #
-    # sub_fig_3 = fig.add_subplot(gs[2, 0])
-    #
-    # sub_fig_4 = gs[0, 1:].subgridspec(2,2, hspace=0.2)
-    # sub_fig_4_dict = {
-    #     'L2/3': fig.add_subplot(sub_fig_4[0, 0]),
-    #     'L4': fig.add_subplot(sub_fig_4[1, 0]),
-    #     'L5': fig.add_subplot(sub_fig_4[0, 1]),
-    #     'L6': fig.add_subplot(sub_fig_4[1, 1]),
-    # }
-    # overlay_fig_4 = fig.add_subplot(gs[0, 1:])
-    # overlay_fig_4.set_facecolor('none')
-    # overlay_fig_4.set_in_layout(False)
-    # overlay_fig_4.set_frame_on(False)
-    # overlay_fig_4.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
-    #
-    # sub_fig_5 = fig.add_subplot(gs[1, 1])
-    # sub_fig_6 = fig.add_subplot(gs[1, 2])
-    # sub_fig_7 = fig.add_subplot(gs[2, 1])
-    # sub_fig_8 = fig.add_subplot(gs[2, 2])
-
-    fig = plt.figure(figsize=(17 / 2.54, 13 / 2.54))
+    fig = plt.figure(figsize=(17 / 2.54, 12 / 2.54))
 
     gs = fig.add_gridspec(
-        nrows=3, ncols=3,
-        width_ratios=[1.4, 1.1, 1.1],
-        height_ratios=[1.4, 0.8, 0.8]
+        nrows=2, ncols=3,
+        width_ratios=[1.0, 0.8, 0.8],
+        height_ratios=[0.8, 1.0]
     )
 
-    # -------------------------
-    # Left column
-    # -------------------------
-    sub_fig_1 = fig.add_subplot(gs[0, 0])
+    sub_fig_network = fig.add_subplot(gs[0, 0])
 
-    sub_fig_2 = gs[1, 0].subgridspec(2, 1, height_ratios=[1.2, 0.8])
-    sub_fig_2_top = fig.add_subplot(sub_fig_2[0])
-    sub_fig_2_bottom = fig.add_subplot(sub_fig_2[1], sharex=sub_fig_2_top)
+    sub_fig_weights = fig.add_subplot(gs[0, 1:])
 
-    sub_fig_3 = fig.add_subplot(gs[2, 0])
+    sub_fig_fr = gs[1, :2].subgridspec(2, 1, height_ratios=[1.2, 0.8])
+    sub_fig_fr_top = fig.add_subplot(sub_fig_fr[0])
+    sub_fig_fr_bottom = fig.add_subplot(sub_fig_fr[1], sharex=sub_fig_fr_top)
 
-    # -------------------------
-    # Subplot 4
-    # -------------------------
-    sub_fig_4 = gs[0, 1:].subgridspec(
-        2, 2,
-        hspace=0.35,  # increased vertical spacing (important)
-        wspace=0.25
-    )
-
-    sub_fig_4_dict = {
-        'L2/3': fig.add_subplot(sub_fig_4[0, 0]),
-        'L4': fig.add_subplot(sub_fig_4[1, 0]),
-        'L5': fig.add_subplot(sub_fig_4[0, 1]),
-        'L6': fig.add_subplot(sub_fig_4[1, 1]),
-    }
-
-    # -------------------------
-    # Right-side lower panels
-    # -------------------------
-    sub_fig_5 = fig.add_subplot(gs[1, 1])
-    sub_fig_6 = fig.add_subplot(gs[1, 2])
-    sub_fig_7 = fig.add_subplot(gs[2, 1])
-    sub_fig_8 = fig.add_subplot(gs[2, 2])
+    sub_fig_bp = fig.add_subplot(gs[1, 2])
 
     label_mapping = {
-        '(A)': sub_fig_1,
-        '(B)': sub_fig_2_top,
-        '(C)': sub_fig_3,
-        '(D)': sub_fig_4_dict['L2/3'],
-        '(E)': sub_fig_5,
-        '(F)': sub_fig_6,
-        '(G)': sub_fig_7,
-        '(H)': sub_fig_8,
+        '(A)': sub_fig_network,
+        '(B)': sub_fig_weights,
+        '(C)': sub_fig_fr_top,
+        '(D)': sub_fig_bp,
         }
 
-    plot_network_architecture(sub_fig_1)
-    plot_time_course(network_paths, sub_fig_2_top, sub_fig_2_bottom)
-    plot_bistable_perception(network_paths, sub_fig_3)
-    plot_layer_results(network_paths, fig, None, sub_fig_4_dict, sub_fig_5, sub_fig_6, sub_fig_7, sub_fig_8)
+    plot_network_architecture(sub_fig_network)
+    plot_learned_weights(network_paths, sub_fig_weights)
+    plot_time_course(network_paths, sub_fig_fr_top, sub_fig_fr_bottom)
+    plot_bistable_perception(network_paths, sub_fig_bp)
 
     add_sub_fig_labels(label_mapping)
 
@@ -453,20 +665,62 @@ def create_wta_results_fig(network_paths, seed=1):
     finish_plot(fig, 'wta_fig.pdf')
 
 
+def create_wta_layers_results_fig(network_paths):
+
+    fig = plt.figure(figsize=(17 / 2.54, 10 / 2.54))
+
+    gs = fig.add_gridspec(
+        nrows=2, ncols=3,
+        width_ratios=[1.0, 1.0, 1.0],
+        height_ratios=[1.0, 1.0]
+    )
+
+    sub_fig_fr = gs[0:, 0].subgridspec(
+        4, 1,
+        # hspace=0.35,
+        # wspace=0.25
+    )
+
+    sub_fig_fr_dict = {
+        'L2/3': fig.add_subplot(sub_fig_fr[0]),
+        'L4': fig.add_subplot(sub_fig_fr[1]),
+        'L5': fig.add_subplot(sub_fig_fr[2]),
+        'L6': fig.add_subplot(sub_fig_fr[3]),
+    }
+
+    sub_fig_wsi = fig.add_subplot(gs[0, 1])
+    sub_fig_wsi_interp = fig.add_subplot(gs[0, 2])
+    sub_fig_divt = fig.add_subplot(gs[1, 1])
+    sub_fig_divt_interp = fig.add_subplot(gs[1, 2])
+
+    label_mapping = {
+        '(A)': sub_fig_fr_dict['L2/3'],
+        '(B)': sub_fig_wsi,
+        '(C)': sub_fig_wsi_interp,
+        '(D)': sub_fig_divt,
+        '(E)': sub_fig_divt_interp,
+        }
+
+    plot_layer_results(network_paths, fig, sub_fig_fr, sub_fig_fr_dict, sub_fig_wsi, sub_fig_wsi_interp, sub_fig_divt, sub_fig_divt_interp)
+
+    add_sub_fig_labels(label_mapping)
+
+    fig.tight_layout(
+        pad=3.0,
+        w_pad=3.0,
+        h_pad=1.0)
+
+    finish_plot(fig, 'wta_layers_fig.pdf')
+
+
 
 if __name__ == '__main__':
 
-    network_paths = ['wta.pt']
+    network_paths = ['wta.pt', 'wta_copy.pt']
+    history_paths = ['wta_history.pt']
 
-    # === Results to show ===
-    # Time courses
-    # Bistable perception
-    # Rainbow plots
-    # Wsi, Csi
-    # Divergence timing
+    create_wta_general_results_fig(network_paths)
+    # create_wta_layers_results_fig(network_paths)
 
-    # run_bistable_perception('wta.pt')
-
-    create_wta_results_fig(network_paths)
-
+    # plot_training_history(history_paths)
 
