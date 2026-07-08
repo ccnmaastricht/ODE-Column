@@ -9,13 +9,14 @@ def plot_all_parity_cases(nr_output_cols, random_order, draw_numbers):
 
     if nr_output_cols == 1:
         # Load 8 bit classification trained network
-        # with open('../results/_parity_old/parity_12_and_children/parity_12_only_L23_latin_no_adap_noise_2_0_only_L5_output/parity_post_training.pkl', 'rb') as f:
+        # with open('../results_old/_parity_old/parity_12_and_children/parity_12_only_L23_latin_no_adap_noise_2_0_only_L5_output/parity_post_training.pkl', 'rb') as f:
         #     network = pickle.load(f)
-        with open('../results/parity_8bit_classification_seed1_onlyL5output_L23einhibi_pt2/parity_post_training.pkl', 'rb') as f:
+        with open(
+                '../results_old/parity_8bit_classification_seed1_onlyL5output_L23einhibi_pt2/parity_post_training.pkl', 'rb') as f:
             network = pickle.load(f)
     elif nr_output_cols == 2:
         # Load 4 bit trajectory trained network
-        with open('../results/parity_successful_double_trajectory/parity_post_training.pkl', 'rb') as f:
+        with open('../results_old/parity_successful_double_trajectory/parity_post_training.pkl', 'rb') as f:
             network = pickle.load(f)
 
     # Prepare time vector and initial state

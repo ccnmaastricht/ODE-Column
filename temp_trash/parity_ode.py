@@ -76,7 +76,7 @@ def visualize_results(network, firing_rates, stims, loss, train_iter, batch_size
 
         plt.tight_layout(pad=3.0)
         fig.subplots_adjust(left=0.15)
-        plt.savefig('../results/parity_seed_{}/firing_rates_{:02d}_{:1d}'.format(seed, train_iter + 1, i))
+        plt.savefig('../results_old/parity_seed_{}/firing_rates_{:02d}_{:1d}'.format(seed, train_iter + 1, i))
         plt.close(fig)
 
         # Also plot the first eight columns
@@ -98,7 +98,7 @@ def visualize_results(network, firing_rates, stims, loss, train_iter, batch_size
 
         plt.tight_layout(pad=3.0)
         fig.subplots_adjust(left=0.15)
-        plt.savefig('../results/parity_seed_{}/firing_rates_first8_{:02d}_{:1d}'.format(seed, train_iter + 1, i))
+        plt.savefig('../results_old/parity_seed_{}/firing_rates_first8_{:02d}_{:1d}'.format(seed, train_iter + 1, i))
         plt.close(fig)
 
 def visualize_weights(network, train_iter, seed):
@@ -124,7 +124,7 @@ def visualize_weights(network, train_iter, seed):
 
             # Clean filename (remove problematic characters)
             clean_name = name.replace('.', '_')
-            plt.savefig('../results/parity_seed_{}/{}_{:02d}'.format(seed, clean_name, train_iter + 1))
+            plt.savefig('../results_old/parity_seed_{}/{}_{:02d}'.format(seed, clean_name, train_iter + 1))
             plt.close(fig)
 
 def make_ds(ds_size, tile=1):
@@ -256,13 +256,13 @@ def train_parity_ode(nr_inputs,
     Train a network to perform parity classification (even/odd)
     using a neural ODE to train feedforward and lateral weights.
     '''
-    if not os.path.exists(f'../results/parity_seed_{seed}'):
-        os.makedirs(f'../results/parity_seed_{seed}')
+    if not os.path.exists(f'../results_old/parity_seed_{seed}'):
+        os.makedirs(f'../results_old/parity_seed_{seed}')
 
     network, time_vec, initial_state = init_network(device, nr_inputs, batch_size, two_output_cols)
 
     # # Load existing network
-    # network = load_pkl_file('../results/parity_pre_training.pkl')
+    # network = load_pkl_file('../results_old/parity_pre_training.pkl')
 
     # Make a test set
     test_set = make_ds(batch_size, tile=4)
@@ -271,7 +271,7 @@ def train_parity_ode(nr_inputs,
     test_initial_state = torch.tile(initial_state, (4, 1))
 
     # Save the network pre-training
-    save_pkl_file(f'../results/parity_seed_{seed}/parity_pre_training.pkl', network)
+    save_pkl_file(f'../results_old/parity_seed_{seed}/parity_pre_training.pkl', network)
 
     optimizer = torch.optim.Adam(network.parameters(), lr=0.1, betas=(0.9, 0.999), eps=1e-08)
     criterion = torch.nn.BCEWithLogitsLoss()
@@ -355,7 +355,7 @@ def train_parity_ode(nr_inputs,
 
         # print('Iter {:02d} | Total Loss {:.5f}'.format(batch_itr + 1, loss.item()))
         losses[batch_itr] = loss.item()
-        save_pkl_file(f'../results/parity_seed_{seed}/losses.pkl', losses)
+        save_pkl_file(f'../results_old/parity_seed_{seed}/losses.pkl', losses)
 
         # Every five batches, visualize training and save the current network
         with torch.no_grad():
@@ -384,7 +384,7 @@ def train_parity_ode(nr_inputs,
 
                 visualize_results(network, firing_rates, train_set, loss.item(), batch_itr, batch_size, target_trajectory, two_output_cols, seed)
                 visualize_weights(network, batch_itr, seed)
-                save_pkl_file(f'../results/parity_seed_{seed}/parity_post_training.pkl', network)
+                save_pkl_file(f'../results_old/parity_seed_{seed}/parity_post_training.pkl', network)
 
                 print(
                     f"Iter {batch_itr:04d} | "
