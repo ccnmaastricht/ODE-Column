@@ -1,66 +1,55 @@
 import torch
 import numpy as np
 import os
-import pickle
 
 from torch.utils.data import TensorDataset, DataLoader
-import matplotlib.pyplot as plt
 
 from src.brain_network import BrainNetwork
 from src.ww_model import DM
+from src.utils.paths import config_dir, data_dir, models_dir
 from src.utils.loss_functions import huber_loss_wta
 from src.utils.set_seed import set_seed
 
 
 
 def make_input_pairs(test_stride=10):
-    """ Creates a grid of input pairs (A, B) such that each
+    """
+    Creates a grid of input pairs (A, B) such that each
     input rate is always between 15.0 and 45.0 and the two have
-    a difference of at least 5.0 and at most 10.0."""
+    a difference of at least 5.0 and at most 10.0.
+    """
     mu_values = np.linspace(15, 45, 100)
 
-    train_pairs = []
-    test_pairs = []
+    input_pairs = []
 
-    for i, a in enumerate(mu_values):
-        for j, b in enumerate(mu_values):
+    for a in mu_values:
+        for b in mu_values:
 
-            if not (5 <= abs(a - b) <= 10):
-                continue
+            if 5 <= abs(a - b) <= 10:
+                input_pairs.append([a, b])
 
-            if (i + j) % test_stride == 0:
-                test_pairs.append([a, b])
-            else:
-                train_pairs.append([a, b])
+    return input_pairs
 
-    return train_pairs, test_pairs
-
-def make_ds_ww(ds_file, mode, input_pairs, time_steps):
-    """ Make Wang-Wong dataset from provided input pairs."""
-
-    if not os.path.exists('../data'):
-        os.makedirs('../data')
-
-    # Caching depends on nr of input_pairs
-    cache_key = ds_file.replace('.pkl', f'_{mode}.pkl')
-
-    if os.path.exists(cache_key):
-        with open(cache_key, 'rb') as f:
-            ds = pickle.load(f)
+def make_ds_ww(ds_file, input_pairs, time_steps):
+    """
+    Generate or load the complete Wang-Wong dataset.
+    """
+    if os.path.exists(ds_file):
+        ds = torch.load(ds_file, weights_only=False)
 
     else:
+        print("Generating Wang-Wong dataset...")
+
         nr_samples = len(input_pairs)
 
         ds = {
-            'states': torch.Tensor(nr_samples, time_steps, 2),
-            'stims': torch.Tensor(nr_samples, 2)
+            'states': torch.empty(nr_samples, time_steps, 2),
+            'stims': torch.empty(nr_samples, 2)
         }
 
-        dm = DM()  # Wang-Wong model
+        dm = DM()
 
-        for i in range(nr_samples):
-            muA, muB = input_pairs[i]
-
+        for i, (muA, muB) in enumerate(input_pairs):
             R = dm.run_sim(muA, muB)
             R = R[:, ::10]
             R = R[:, :time_steps]
@@ -68,29 +57,49 @@ def make_ds_ww(ds_file, mode, input_pairs, time_steps):
             ds['states'][i] = torch.tensor(R).transpose(0, 1)
             ds['stims'][i] = torch.tensor([muA, muB])
 
-        with open(cache_key, 'wb') as f:
-            pickle.dump(ds, f)
+        torch.save(ds, ds_file)
 
     return ds['states'], ds['stims']
 
-def get_data(batch_size, network_time_params, fn):
-    """ Gets the training dataset made with Wang-Wong model,
-    scales it down to match our L23e firing rates."""
-    # Determine number of time steps for the target data
+def split_dataset(states, stims, seed, test_fraction=0.1):
+    """
+    Randomly partition the dataset into train and test sets.
+    """
+    generator = torch.Generator().manual_seed(seed)
+
+    n = len(states)
+    perm = torch.randperm(n, generator=generator)
+
+    n_test = int(round(test_fraction * n))
+
+    test_idx = perm[:n_test]
+    train_idx = perm[n_test:]
+
+    return (
+        states[train_idx],
+        stims[train_idx],
+        states[test_idx],
+        stims[test_idx])
+
+def get_data(batch_size, network_time_params, fn, seed):
+    """
+    Gets the Wang-Wong dataset and creates a random train/test split.
+    """
     dt = network_time_params['dt']
     sim_time = network_time_params['sim_time']
     time_steps = int(round(sim_time / dt))
 
-    train_pairs, test_pairs = make_input_pairs()
+    input_pairs = make_input_pairs()
 
-    train_states, train_stims = make_ds_ww(fn, 'train', train_pairs, time_steps)
-    test_states, test_stims = make_ds_ww(fn, 'test', test_pairs, time_steps)
+    states, stims = make_ds_ww(fn, input_pairs, time_steps)
 
-    # Scale down Wang-Wong firing rates to match with our L23e
-    train_states = train_states / 30.
-    test_states = test_states / 30.
+    # Scale down Wang-Wong firing rates
+    states = states / 30.
+
+    train_states, train_stims, test_states, test_stims = split_dataset(states, stims, seed)
 
     ds = TensorDataset(train_states, train_stims)
+
     train_loader = DataLoader(ds, batch_size=batch_size, shuffle=True, drop_last=True)
 
     return train_loader, test_states, test_stims
@@ -124,94 +133,97 @@ if __name__ == '__main__':
     test_freq           = 10
     train_with_adjoint  = False
     train_with_noise    = True
-    seed                = 1
-    fn_target_data      = '../../data/ds_wta.pkl'
+    fn_target_data      = data_dir('ds_wta.pt')
     device              = torch.device('cpu')
 
-    set_seed(seed)
+
+    for seed in range(1, 11):
+
+        set_seed(seed)
+        print('Seed:', seed)
 
 
-    # Build network
-    config_path = '../../config/wta_params.toml'
-    network = BrainNetwork.from_toml(config_path)
+        # Build network
+        config_path = config_dir('wta_params.toml')
+        network = BrainNetwork.from_toml(config_path)
 
-    network.add_area('mt', 2)
+        network.add_area('mt', 2)
 
-    network.add_input_connection('mt', 2, receptive_field_size=1, stride=1, trainable=False, std=0.0)
-    network.add_lateral_connection('mt', trainable=True)
-    network.add_output_connection('mt', trainable=False)
+        network.add_input_connection('mt', 2, receptive_field_size=1, stride=1, trainable=False, std=0.0)
+        network.add_lateral_connection('mt', trainable=True)
+        network.add_output_connection('mt', trainable=False)
 
-    network.add_custom_connection(connection_name='self_excitation',
-                                  source='mt',
-                                  target='mt',
-                                  initializer=initialize_self_excitation_connection)
-
-
-    # Prepare train and test data, and optimizer
-    train_loader, test_states, test_stims = get_data(batch_size, network.params['model']['time_params'], fn_target_data)
-    test_states = test_states.to(device)
-    optimizer = torch.optim.Adam(network.parameters(), lr=10.0) # torch.optim.RMSprop(network.parameters(), lr=10.0, alpha=0.9)
-
-    # Store losses
-    train_losses = []
-    test_losses = []
-
-    # Start training loop
-    for epoch in range(num_epochs):
-
-        train_loss_sum = 0.0
-
-        for itr, (true_states, stim_batch) in enumerate(train_loader):
-
-            optimizer.zero_grad()
-            true_states = true_states.to(device)
-
-            output = network.run(stim_batch, adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
-
-            # Compute loss between predicted and true states
-            pred_states = network.read_out(output, mode='trajectory')
-            loss = huber_loss_wta(pred_states, true_states)
-
-            loss.backward()
-            optimizer.step()
-
-            train_loss_sum = train_loss_sum / len(train_loader)
-
-            # Test
-            if itr % test_freq == 0:
-                with torch.no_grad():
-
-                    output = network.run(test_stims, adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
-                    pred_states = network.read_out(output, mode='trajectory')
-                    test_loss = huber_loss_wta(pred_states, test_states)
-
-                    print('Epoch {:02d} | Iter {:02d} | Train Loss {:.4f} | Test Loss {:.4f}'.format(epoch, itr//10, loss.item(), test_loss.item()))
-
-                    train_losses.append(loss.item())
-                    test_losses.append(test_loss.item())
+        network.add_custom_connection(connection_name='self_excitation',
+                                      source='mt',
+                                      target='mt',
+                                      initializer=initialize_self_excitation_connection)
 
 
-    # Store training history and trained network
-    history = {'train_losses': train_losses,
-               'test_losses': test_losses}
+        # Prepare train and test data, and optimizer
+        train_loader, test_states, test_stims = get_data(batch_size, network.params['model']['time_params'], fn_target_data, seed)
+        test_states = test_states.to(device)
+        optimizer = torch.optim.Adam(network.parameters(), lr=10.0) # torch.optim.RMSprop(network.parameters(), lr=10.0, alpha=0.9)
 
-    torch.save(history, 'wta_history.pt')
-    network.save('wta.pt')
+        # Store losses
+        train_losses = []
+        test_losses = []
+
+        # Start training loop
+        for epoch in range(num_epochs):
+
+            train_loss_sum = 0.0
+
+            for itr, (true_states, stim_batch) in enumerate(train_loader):
+
+                optimizer.zero_grad()
+                true_states = true_states.to(device)
+
+                output = network.run(stim_batch, adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
+
+                # Compute loss between predicted and true states
+                pred_states = network.read_out(output, mode='trajectory')
+                loss = huber_loss_wta(pred_states, true_states)
+
+                loss.backward()
+                optimizer.step()
+
+                train_loss_sum = train_loss_sum / len(train_loader)
+
+                # Test
+                if itr % test_freq == 0:
+                    with torch.no_grad():
+
+                        output = network.run(test_stims, adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
+                        pred_states = network.read_out(output, mode='trajectory')
+                        test_loss = huber_loss_wta(pred_states, test_states)
+
+                        print('Epoch {:02d} | Iter {:02d} | Train Loss {:.4f} | Test Loss {:.4f}'.format(epoch, itr//10, loss.item(), test_loss.item()))
+
+                        train_losses.append(loss.item())
+                        test_losses.append(test_loss.item())
 
 
-    # weights = network.connections['recurrent_mt_mt'].weights + network.connections['lateral_mt_mt'].weights + network.connections[
-    #     'self_excitation_mt_mt'].weights
-    #
-    # plt.imshow(weights.detach().numpy(), cmap="viridis", interpolation="nearest")
-    # plt.show()
+        # Store training history and trained network
+        history = {'train_losses': train_losses,
+                   'test_losses': test_losses}
 
-    # firing_rates = network.get_firing_rates(output)
-    # # network.analysis.plot_firing_rates(firing_rates)
-    # for i in range(len(test_stims)):
-    #     print(test_stims[i])
-    #     plt.plot(test_states[i, :, 0], linestyle='--', label='true_1')
-    #     plt.plot(test_states[i, :, 1], linestyle='--', label='true_2')
-    #     plt.plot(firing_rates[:, i, 0], label='pred_1')
-    #     plt.plot(firing_rates[:, i, 8], label='pred_2')
-    #     plt.legend()
-    #     plt.show()
+        torch.save(history, models_dir('wta', f'wta_history_{seed}.pt'))
+        network.save(models_dir('wta', f'wta_{seed}.pt'))
+
+
+        # weights = network.connections['recurrent_mt_mt'].weights + network.connections['lateral_mt_mt'].weights + network.connections[
+        #     'self_excitation_mt_mt'].weights
+        #
+        # plt.imshow(weights.detach().numpy(), cmap="viridis", interpolation="nearest")
+        # plt.show()
+
+        # firing_rates = network.get_firing_rates(output)
+        # # network.analysis.plot_firing_rates(firing_rates)
+        # for i in range(len(test_stims)):
+        #     print(test_stims[i])
+        #     plt.plot(test_states[i, :, 0], linestyle='--', label='true_1')
+        #     plt.plot(test_states[i, :, 1], linestyle='--', label='true_2')
+        #     plt.plot(firing_rates[:, i, 0], label='pred_1')
+        #     plt.plot(firing_rates[:, i, 8], label='pred_2')
+        #     plt.legend()
+        #     plt.show()
