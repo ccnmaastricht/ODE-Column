@@ -19,5 +19,4 @@ __pycache__/
 
 # Project-specific folders
 data/
-results/
-pickled_ds/
+results_old/

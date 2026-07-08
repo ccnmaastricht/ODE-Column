@@ -16,8 +16,8 @@ def visualize_results(pred_raw, true, stim, context, network, train_loss, test_l
     '''
     Visualize the firing rates of L23e and the weights during training.
     '''
-    if not os.path.exists(f'../results/context_seed_{seed}'):
-        os.makedirs(f'../results/context_seed_{seed}')
+    if not os.path.exists(f'../results_old/context_seed_{seed}'):
+        os.makedirs(f'../results_old/context_seed_{seed}')
     fig, axes = plt.subplots(2, 3, figsize=(12, 8))
     axes_indices = [(0,0), (0,1), (1,0), (1,1)]
 
@@ -194,7 +194,7 @@ def train_context_wta(nr_samples,
         optimizer.step()
         # scheduler.step()
 
-        # Validate network and visualize results
+        # Validate network and visualize results_old
         with torch.no_grad():
             network.constrain_weights()
 

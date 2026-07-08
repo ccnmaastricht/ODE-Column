@@ -141,7 +141,7 @@ def xor_timecourse():
 
             initial_state = ode_output[-1, :, :]
 
-            # Store results
+            # Store results_old
             firing_rates = compute_firing_rate(ode_output[:, :, :24] - ode_output[:, :, 24:48]).squeeze(dim=1)
             time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, :] = firing_rates
             stim_time_course[stim_iter*time_steps:(stim_iter+1)*time_steps, 0] = stim_ode[:, 0, 2]  # idx2 = layer 4

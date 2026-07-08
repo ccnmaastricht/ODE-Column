@@ -18,63 +18,95 @@ def make_xor_ds():
     xor_targets = (xor_shuffled[:, 0] != xor_shuffled[:, 1]).float()
     return xor_shuffled, xor_targets.unsqueeze(1)
 
-def run_xor_batch(train_with_adjoint, train_with_noise, device):
-    """ Runs one batch of XOR samples through the network and computes
-    the loss between the model predictions and training targets. """
-    stim_batch, true_labels = make_xor_ds()
-    true_labels = true_labels.to(device)
+def compute_ei_ratio_penalty(network, target=0.61):
 
-    start = time.time()
+    total_penalty = 0
 
-    # Run simulation
-    output = network.run(stim_batch, adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
-    model_read_out = network.read_out(output, mode='classification')
+    for name, conn in network.connections.items():
+        if conn.trainable:
 
+            weights = conn.weights
+            num_columns = weights.shape[0] // 8
+            W_in_reshaped = weights.view(num_columns, 8, -1)
 
-    # network.save('test.pt')
+            W_E = W_in_reshaped[:, 2, :]  # (columns, source)
+            W_I = W_in_reshaped[:, 3, :]
 
-    # print(time.time() - start)
+            E_drive = W_E.abs().sum(dim=1)
+            I_drive = W_I.abs().sum(dim=1)
 
-    firing_rates = network.get_firing_rates(output, area='v1')
-    network.analysis.plot_firing_rates(firing_rates)
-    #
-    # print(model_read_out)
-    # print(true_labels)
+            excess = (E_drive * target) - I_drive
+            penalty = torch.relu(excess).pow(2).mean()
+            total_penalty += penalty
+            stop = 0
 
-    # Compute loss
-    # loss = torch.mean(torch.abs(model_read_out - true_labels)) # mae
-    loss = ((model_read_out - true_labels) ** 2).mean() # mse
-    return loss
+    return total_penalty
 
+def run_xor_batch(train_with_adjoint, train_with_noise, batch_size, device):
+    """ Runs multiple XOR batches through the network and computes
+    the average loss over all batches. """
+    nr_batches = batch_size//4
+    total_loss = 0.0
+
+    for _ in range(nr_batches):
+        stim_batch, true_labels = make_xor_ds()
+        true_labels = true_labels.to(device)
+
+        # Run simulation
+        output = network.run(
+            stim_batch,
+            adjoint=train_with_adjoint,
+            stochastic=train_with_noise,
+            device=device
+        )
+        model_read_out = network.read_out(output, mode='classification')
+
+        network.save('test.pt')
+
+        # firing_rates = network.get_firing_rates(output, area='v1')
+        # network.analysis.plot_firing_rates(firing_rates)
+        #
+        # print(model_read_out)
+        # print(true_labels)
+
+        loss = ((model_read_out - true_labels) ** 2).mean()  # mse loss
+        ei_ratio_penalty = compute_ei_ratio_penalty(network)
+        ei_weight = 1e-3
+        # print(ei_ratio_penalty * ei_weight)
+
+        total_loss += (loss + (ei_ratio_penalty * ei_weight))
+
+    avg_loss = total_loss / nr_batches
+    return avg_loss
 
 
 
 if __name__ == '__main__':
 
     # Params
+    batch_size              = 16
     nr_epochs               = 100
-    lr                      = 0.5
+    lr                      = 1.0
     train_with_adjoint      = False
-    train_with_noise        = False
+    train_with_noise        = True
     seed                    = 1
     device                  = torch.device('cpu')
 
     set_seed(seed)
 
-    # Loading saved network
-    config_path = '../config/example_params.toml'
-    network = BrainNetwork.load('test.pt', config_path)
+    # # Loading saved network
+    # network = BrainNetwork.load('test.pt')
 
-    # # Building the network
-    # config_path = '../config/example_params.toml'
-    # network = BrainNetwork(config_path)
-    #
-    # network.add_area(area_name='v1', size=2)
-    # network.add_area(area_name='v2', size=1)
-    #
-    # network.add_input_connection(target_area='v1', input_size=2, trainable=True)
-    # network.add_feedforward_connection(source='v1', target='v2', trainable=True, scale=10.0)
-    # network.add_output_connection(source_area='v2', trainable=False)
+    # Building the network
+    config_path = '../config/example_params.toml'
+    network = BrainNetwork.from_toml(config_path)
+
+    network.add_area(area_name='v1', size=2)
+    network.add_area(area_name='v2', size=1)
+
+    network.add_input_connection(target_area='v1', input_size=2, trainable=True)
+    network.add_feedforward_connection(source='v1', target='v2', trainable=True, scale=10.0)
+    network.add_output_connection(source_area='v2', trainable=False)
 
     # Training setup
     optimizer = torch.optim.Adam(network.parameters(), lr=lr)
@@ -85,13 +117,13 @@ if __name__ == '__main__':
         optimizer.zero_grad()
 
         # Run simulation and compute loss
-        loss = run_xor_batch(train_with_adjoint, train_with_noise, device)
+        loss = run_xor_batch(train_with_adjoint, train_with_noise, batch_size, device)
 
         loss.backward()
         optimizer.step()
 
         # Test
         with torch.no_grad():
-            test_loss = run_xor_batch(train_with_adjoint, train_with_noise, device)
+            test_loss = run_xor_batch(train_with_adjoint, train_with_noise, 4, device)
             print('Iter {:02d} | Train Loss {:.4f} | Test Loss {:.4f}'.format(itr + 1, loss.item(), test_loss.item()))
 

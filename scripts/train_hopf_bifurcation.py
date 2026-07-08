@@ -24,8 +24,8 @@ def visualize_hopf(true_y, pred_y, ii, val_loss, train_loss):
     '''
     Visualize Hopf bifurcation training.
     '''
-    if not os.path.exists('../results/png'):
-        os.makedirs('../results/png')
+    if not os.path.exists('../results_old/png'):
+        os.makedirs('../results_old/png')
     fig = plt.figure(figsize=(12, 4), facecolor='white')
     ax_input = fig.add_subplot(131, frameon=False)
     ax_traj = fig.add_subplot(132, frameon=False)
@@ -60,7 +60,7 @@ def visualize_hopf(true_y, pred_y, ii, val_loss, train_loss):
     ax_phase.set_ylim(-2, 2)
 
     fig.tight_layout()
-    plt.savefig('../results/png/{:03d}'.format(ii))
+    plt.savefig('../results_old/png/{:03d}'.format(ii))
     plt.close(fig)
 
 

@@ -134,7 +134,7 @@ def run_bistable_perception(fn, nr_iterations):
                         total = torch.concat([total, comp_fr], dim=0)
                     initial_state = ode_output[-1, :, :]
 
-                    # Plot results
+                    # Plot results_old
                     # m = ode_output[:, 0, :16]
                     # plt.plot(m[:, 0])
                     # plt.plot(m[:, 8])

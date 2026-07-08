@@ -15,8 +15,8 @@ def visualize_results(pred, true, stim, network, train_loss, test_loss, weights,
     '''
     Visualize the firing rates of L23e during training.
     '''
-    if not os.path.exists(f'../results/wta_seed_{seed}'):
-        os.makedirs(f'../results/wta_seed_{seed}')
+    if not os.path.exists(f'../results_old/wta_seed_{seed}'):
+        os.makedirs(f'../results_old/wta_seed_{seed}')
     fig, axes = plt.subplots(1, 2, figsize=(9, 5))
 
     fig.text(0.2, 0.03, f"Input column 1: {stim[0]:.1f}", ha='center', fontsize=10, color='#1f77b4', fontweight='bold')
@@ -46,7 +46,7 @@ def visualize_results(pred, true, stim, network, train_loss, test_loss, weights,
 
     plt.tight_layout(pad=3.0)
     fig.subplots_adjust(left=0.15)
-    plt.savefig('../results/wta_seed_{}/{:02d}'.format(seed, len(weights)))
+    plt.savefig('../results_old/wta_seed_{}/{:02d}'.format(seed, len(weights)))
     plt.close(fig)
 
 def random_input_pair():
@@ -461,7 +461,7 @@ def train_wta(nr_samples,
         if iter > (nr_samples / batch_size) / 2:
             scheduler.step()
 
-        # Validate network and visualize results
+        # Validate network and visualize results_old
         with torch.no_grad():
             # Save current weights
             network.constrain_recurr_weights()

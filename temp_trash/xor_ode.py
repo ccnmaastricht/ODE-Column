@@ -17,11 +17,11 @@ def vis_xor_results(firing_rates, stim, train_loss, iter1, iter2):
     firing rates of column A, B and C and reports the training loss, the input
     condition (XOR or AND) and the final firing rate of column C, what determines
     the network's output.
-    Images are saved in ../results/png.
+    Images are saved in ../results_old/png.
     '''
 
-    if not os.path.exists('../results/png'):
-        os.makedirs('../results/png')
+    if not os.path.exists('../results_old/png'):
+        os.makedirs('../results_old/png')
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
 
     if stim[2] != stim[10]:
@@ -45,7 +45,7 @@ def vis_xor_results(firing_rates, stim, train_loss, iter1, iter2):
 
     plt.tight_layout(pad=3.0)
     fig.subplots_adjust(left=0.15)
-    plt.savefig('../results/png/{:02d}_{:1d}'.format(iter1+1, iter2))
+    plt.savefig('../results_old/png/{:02d}_{:1d}'.format(iter1+1, iter2))
     plt.close(fig)
 
 def make_stim(shuffle=True):
@@ -95,7 +95,7 @@ def run_four_xor_samples(network, initial_state, time_vec, time_steps, batch_siz
     Can be used for either training or testing the model (set mode).
     '''
 
-    # Storing results
+    # Storing results_old
     batch_output = torch.Tensor(batch_size, time_steps, 1, 72)
     stim_batch = torch.Tensor(batch_size, 16)
 
@@ -186,7 +186,7 @@ def train_xor_ode(nr_samples, nr_test_samples, batch_size):
 
         print('Iter {:02d} | Total Loss {:.5f}'.format(itr + 1, loss.item()))
 
-        # Test ODE model and visualize results
+        # Test ODE model and visualize results_old
         with torch.no_grad():
 
             for i in range(int(nr_test_samples / 4)):
