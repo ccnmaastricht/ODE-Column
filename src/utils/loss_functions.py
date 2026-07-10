@@ -12,6 +12,57 @@ def huber_loss_wta(pred_states, true):
     hub_loss = torch.nn.SmoothL1Loss(beta=1.0)
     return hub_loss(pred_states, true_reshaped)
 
+def compute_suppression_penalty(model_predictions, labels, num_classes):
+    """
+    Computes the penalty for high activations for incorrect class labels.
+    Facilitates contrastive learning.
+    """
+    one_hot_labels = torch.nn.functional.one_hot(labels, num_classes=num_classes)
+    suppression = ((1 - one_hot_labels) * model_predictions).mean()
+    return suppression
+
+def compute_L2_regularization(network):
+    """
+    Computes the penalty for large weights (i.e. L2 regularization).
+    """
+    total_L2_reg = 0
+
+    for name, conn in network.connections.items():
+        if conn.trainable:
+
+            L2_reg = (conn.weights ** 2).mean()
+            total_L2_reg += L2_reg
+
+    return total_L2_reg
+
+def compute_ei_ratio_penalty(network, target=0.61):
+    """
+    Computes the ratio of connections targeting the excitatory against
+    inhibitory populations in the target columns. Produces a penalty is
+    the ratio is significantly higher than the biologically realistic
+    standard ratio (=0.61).
+    """
+    total_ei_penalty = 0
+
+    for name, conn in network.connections.items():
+        if conn.trainable:
+
+            weights = conn.weights
+            num_columns = weights.shape[0] // 8
+            W_in_reshaped = weights.view(num_columns, 8, -1)
+
+            W_E = W_in_reshaped[:, 2, :]  # (columns, source)
+            W_I = W_in_reshaped[:, 3, :]
+
+            E_drive = W_E.abs().sum(dim=1)
+            I_drive = W_I.abs().sum(dim=1)
+
+            excess = (E_drive * target) - I_drive
+            penalty = torch.relu(excess).pow(2).mean()
+            total_ei_penalty += penalty
+
+    return total_ei_penalty
+
 def min_max(firing_rates):
     """
     Function to binary classify final firing rates by means of
