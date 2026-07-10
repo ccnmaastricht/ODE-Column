@@ -90,8 +90,6 @@ class NetworkReadout:
         firing_rates = torch.cat([firing_rates[area]
                                   for area in self.network.areas.keys() if area in firing_rates], dim=2,)
 
-        stop = 0
-
         if return_as_np_array:
             firing_rates = firing_rates.detach().cpu().numpy()
 

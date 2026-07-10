@@ -1,8 +1,8 @@
 import torch
-import time
 
 from src.utils.set_seed import set_seed
 from src.brain_network import BrainNetwork
+from src.utils.loss_functions import compute_ei_ratio_penalty
 
 
 
@@ -17,30 +17,6 @@ def make_xor_ds():
 
     xor_targets = (xor_shuffled[:, 0] != xor_shuffled[:, 1]).float()
     return xor_shuffled, xor_targets.unsqueeze(1)
-
-def compute_ei_ratio_penalty(network, target=0.61):
-
-    total_penalty = 0
-
-    for name, conn in network.connections.items():
-        if conn.trainable:
-
-            weights = conn.weights
-            num_columns = weights.shape[0] // 8
-            W_in_reshaped = weights.view(num_columns, 8, -1)
-
-            W_E = W_in_reshaped[:, 2, :]  # (columns, source)
-            W_I = W_in_reshaped[:, 3, :]
-
-            E_drive = W_E.abs().sum(dim=1)
-            I_drive = W_I.abs().sum(dim=1)
-
-            excess = (E_drive * target) - I_drive
-            penalty = torch.relu(excess).pow(2).mean()
-            total_penalty += penalty
-            stop = 0
-
-    return total_penalty
 
 def run_xor_batch(train_with_adjoint, train_with_noise, batch_size, device):
     """ Runs multiple XOR batches through the network and computes

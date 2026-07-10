@@ -8,7 +8,7 @@ import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 
 from src.brain_network import BrainNetwork
-from src.utils.paths import config_dir, models_dir, results_dir
+from src.utils.paths import config_path, models_path, results_path
 from src.utils.set_seed import set_seed
 from src.utils.plotting.helpers import *
 from src.utils.plotting.plot_history import plot_training_history
@@ -19,8 +19,8 @@ from src.utils.bistable_perception import dominance_time
 
 
 def run_bistable_perception(network_path):
-    config_path = config_dir('wta_bistable_perception_params.toml')
-    network = BrainNetwork.load(network_path, model_config_path=config_path)
+    config = config_path('wta_bistable_perception_params.toml')
+    network = BrainNetwork.load(network_path, model_config_path=config)
 
     inputs = [10., 11., 12., 13., 14., 15., 16., 17., 18., 19.,
               20., 21., 22., 23., 24., 25., 26., 27., 28., 29., 30.]
@@ -91,8 +91,8 @@ def compute_wsi_and_divt(firing_rates, dt, winner_idx, divt_threshold=0.1, divt_
 
 def plot_time_course(network_paths, sub_fig_top, sub_fig_bottom, network_to_plot=0):
     idx_path = network_paths[network_to_plot]
-    config_path = config_dir('wta_test_params.toml')
-    network = BrainNetwork.load(idx_path, model_config_path=config_path)
+    config = config_path('wta_test_params.toml')
+    network = BrainNetwork.load(idx_path, model_config_path=config)
 
     with torch.no_grad():
 
@@ -526,7 +526,7 @@ def create_wta_general_results_fig(network_paths, seed=1):
         w_pad=1.0,
         h_pad=1.0)
 
-    finish_plot(fig, results_dir('wta', 'wta_fig.pdf'))
+    finish_plot(fig, results_path('wta', 'wta_fig.pdf'))
 
 
 def create_wta_layers_results_fig(network_paths):
@@ -574,14 +574,14 @@ def create_wta_layers_results_fig(network_paths):
         w_pad=3.0,
         h_pad=1.0)
 
-    finish_plot(fig, results_dir('wta', 'wta_layers_fig.pdf'))
+    finish_plot(fig, results_path('wta', 'wta_layers_fig.pdf'))
 
 
 
 if __name__ == '__main__':
 
-    network_paths = [models_dir('wta', f'wta_{i}.pt') for i in range(1, 5)]
-    history_paths = [models_dir('wta', f'wta_history_{i}.pt') for i in range(1, 5)]
+    network_paths = [models_path('wta', f'wta_{i}.pt') for i in range(1, 5)]
+    history_paths = [models_path('wta', f'wta_history_{i}.pt') for i in range(1, 5)]
 
     create_wta_general_results_fig(network_paths)
     create_wta_layers_results_fig(network_paths)

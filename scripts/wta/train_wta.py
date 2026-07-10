@@ -6,7 +6,7 @@ from torch.utils.data import TensorDataset, DataLoader
 
 from src.brain_network import BrainNetwork
 from src.ww_model import DM
-from src.utils.paths import config_dir, data_dir, models_dir
+from src.utils.paths import config_path, data_path, models_path
 from src.utils.loss_functions import huber_loss_wta
 from src.utils.set_seed import set_seed
 
@@ -133,7 +133,7 @@ if __name__ == '__main__':
     test_freq           = 10
     train_with_adjoint  = False
     train_with_noise    = True
-    fn_target_data      = data_dir('ds_wta.pt')
+    fn_target_data      = data_path('ds_wta.pt')
     device              = torch.device('cpu')
 
 
@@ -144,8 +144,8 @@ if __name__ == '__main__':
 
 
         # Build network
-        config_path = config_dir('wta_params.toml')
-        network = BrainNetwork.from_toml(config_path)
+        config = config_path('wta_params.toml')
+        network = BrainNetwork.from_toml(config)
 
         network.add_area('mt', 2)
 
@@ -207,8 +207,8 @@ if __name__ == '__main__':
         history = {'train_losses': train_losses,
                    'test_losses': test_losses}
 
-        torch.save(history, models_dir('wta', f'wta_history_{seed}.pt'))
-        network.save(models_dir('wta', f'wta_{seed}.pt'))
+        torch.save(history, models_path('wta', f'wta_history_{seed}.pt'))
+        network.save(models_path('wta', f'wta_{seed}.pt'))
 
 
         # weights = network.connections['recurrent_mt_mt'].weights + network.connections['lateral_mt_mt'].weights + network.connections[
