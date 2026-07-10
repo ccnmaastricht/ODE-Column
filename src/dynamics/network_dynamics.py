@@ -16,14 +16,15 @@ class NetworkDynamics:
         """
         Compute the firing rates from (membrane potential - adaptation).
         """
-        # TODO: look at ImageColumnModel for an updated version! Also, is soft clamp necessary?
+        # TODO: clamping necessary? -> test
 
         x_nom = self.network.gain * x - self.network.threshold
         exp_input = -self.network.noise_factor * x_nom
+        exp_input = torch.clamp(exp_input, -50, 50)  # CLAMP
         # exp_input = soft_clamp(exp_input)
         exp_term = torch.exp(exp_input)
 
-        denom = 1 - exp_term
+        denom = 1 - exp_term + 1e-6  # ADD EPSILON
         x_activ = x_nom / denom
         return x_activ
 
