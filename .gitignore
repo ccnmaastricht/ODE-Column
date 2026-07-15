@@ -14,9 +14,13 @@ __pycache__/
 *.log
 *.pkl
 *.pickle
+*.pt
 *.h5
 *.hdf5
 
 # Project-specific folders
 data/
+data_old/
+results/
 results_old/
+models/
