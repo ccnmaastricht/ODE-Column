@@ -77,7 +77,7 @@ def train_digit_classification(
     network = BrainNetwork.from_toml(config)
 
     network.add_area('v1', 128)
-    network.add_area('v2', 2)
+    network.add_area('v2', len(digits_to_include))
 
     network.add_input_connection('v1', 100, receptive_field_size=3, stride=1,
                                  grid_organization=True, std=1.0, scale=0.2)

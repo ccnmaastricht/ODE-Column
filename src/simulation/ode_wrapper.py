@@ -19,7 +19,12 @@ class NetworkOdeWrapper(torch.nn.Module):
         self.ext_input = ext_input
         self.input_windows = input_windows
 
+        self.nfe = 0
+
     def forward(self, t, state):
+
+        self.nfe += 1
+        
         return self.network.dynamics.forward(
             t,
             state,

@@ -14,9 +14,8 @@ module load cudnn/9.9
 module load mamba
 micromamba activate columns_env
 
-# Prevent VRAM pre-allocation errors
-export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # Run your code
-cd /home/dasja/projects/ImageColumnNetwork
+cd /home/dasja/projects/ODE-Column
 python -m scripts.digits.train_digits_cluster
