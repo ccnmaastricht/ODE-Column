@@ -40,12 +40,12 @@ class NetworkSimulator:
                        for tensor in ext_input.values()}
         assert len(batch_sizes) == 1, f"Input tensors have inconsistent batch sizes: {batch_sizes}"
 
-    def _make_input_dict(self, input_var):
+    def _make_input_dict(self, input_var, input_keys):
         """
         Convert the input variable to a dictionary.
         """
         if not isinstance(input_var, dict):
-            input_var = {"input": input_var}
+            input_var = {input_key: input_var for input_key in input_keys}
         return input_var
 
     def _convert_to_tensors(self, ext_input, device):
@@ -106,8 +106,8 @@ class NetworkSimulator:
         if input_window is None:
             input_window = self.input_window
 
-        ext_input = self._make_input_dict(ext_input)
-        input_window = self._make_input_dict(input_window)
+        ext_input = self._make_input_dict(ext_input, ['input'])
+        input_window = self._make_input_dict(input_window, ext_input.keys())
 
         ext_input = self._convert_to_tensors(ext_input, device)
 

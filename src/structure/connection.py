@@ -31,13 +31,13 @@ class Connection(torch.nn.Module):
                 "mask",
                 torch.empty(target_size, source_size))
 
-    def _get_connection_params(self, params):
+    def _get_connection_params(self, params, unique_id=None):
         """
         Obtains the relevant parameters from the params dict to establish
         the connection.
         """
-        init = torch.tensor(params['model']['connection_inits'][self.conn_type])
-        mask = torch.tensor(params['model']['connection_masks'][self.conn_type])
+        init = torch.tensor(params['model']['connection_inits'][unique_id or self.conn_type])
+        mask = torch.tensor(params['model']['connection_masks'][unique_id or self.conn_type])
 
         baseline_synaptic_strength = params['general']['synaptic_strength']['baseline']
         return init, mask, baseline_synaptic_strength
@@ -199,7 +199,7 @@ class Connection(torch.nn.Module):
         """
         Initialize input weights targeting an area.
         """
-        init, mask, synapse_strength = self._get_connection_params(params)
+        init, mask, synapse_strength = self._get_connection_params(params, self.source_id)
         init = torch.transpose(init.unsqueeze(0), 0, 1)
         mask = torch.transpose(mask.unsqueeze(0), 0, 1)
         size_target_area = target_area.num_columns
@@ -219,7 +219,7 @@ class Connection(torch.nn.Module):
         """
         Initialize output weights reading out activity from an area.
         """
-        init, mask, _ = self._get_connection_params(params)
+        init, mask, _ = self._get_connection_params(params, self.target_id)
         size_source_area = source_area.num_columns
 
         rand_weights = self._init_weights(init, size_source_area, 1, 1.0, std, scale)

@@ -399,7 +399,8 @@ class BrainNetwork(torch.nn.Module):
         input_size (int):               Size of input. If input is two-dimensional, please pass flattened size
                                         (and set grid_organization=True).
         unique_id (str):                An optional user-specified id for the input. Useful when the network
-                                        should contain more than one input connection.
+                                        should contain more than one input connection. If using, make sure there
+                                        is a corresponding mask and init in the .toml file with the same id.
         trainable (bool):               If True, weights should be updated during training.
         ================================
         See _initialize_default_connection() for more initialization options.
@@ -435,7 +436,8 @@ class BrainNetwork(torch.nn.Module):
         Params:
         source_area (str):              Source area of the output connection.
         unique_id (str):                An optional user-specified id for the output. Useful when the network
-                                        should contain more than one output connection.
+                                        should contain more than one output connection. If using, make sure there
+                                        is a corresponding mask and init in the .toml file with the same id.
         trainable (bool):               If True, weights should be updated during training.
         ================================
         See _initialize_default_connection() for more initialization options.
