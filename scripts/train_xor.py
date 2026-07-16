@@ -37,18 +37,11 @@ def run_xor_batch(train_with_adjoint, train_with_noise, batch_size, device):
         )
         model_read_out = network.read_out(output, mode='classification')
 
-        network.save('test.pt')
-
-        # firing_rates = network.get_firing_rates(output, area='v1')
-        # network.analysis.plot_firing_rates(firing_rates)
-        #
-        # print(model_read_out)
-        # print(true_labels)
+        network.analysis.plot_firing_rates(output)
 
         loss = ((model_read_out - true_labels) ** 2).mean()  # mse loss
         ei_ratio_penalty = compute_ei_ratio_penalty(network)
         ei_weight = 1e-3
-        # print(ei_ratio_penalty * ei_weight)
 
         total_loss += (loss + (ei_ratio_penalty * ei_weight))
 
@@ -63,15 +56,12 @@ if __name__ == '__main__':
     batch_size              = 16
     nr_epochs               = 100
     lr                      = 1.0
-    train_with_adjoint      = False
+    train_with_adjoint      = True
     train_with_noise        = True
     seed                    = 1
     device                  = torch.device('cpu')
 
     set_seed(seed)
-
-    # # Loading saved network
-    # network = BrainNetwork.load('test.pt')
 
     # Building the network
     config_path = '../config/example_params.toml'

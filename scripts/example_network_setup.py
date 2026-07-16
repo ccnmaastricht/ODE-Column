@@ -62,6 +62,4 @@ if __name__ == '__main__':
     model_read_out = network.read_out(output, mode='classification')
 
     # Plot all firing rates
-    firing_rates = network.get_firing_rates(output)
-    # network.analysis.plot_firing_rates(firing_rates, column=0)
-    network.analysis.plot_firing_rates(firing_rates, population=['L23e', 'L5e'])
+    network.analysis.plot_firing_rates(output, population=['L23e', 'L5e'])
