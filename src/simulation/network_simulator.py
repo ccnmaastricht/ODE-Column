@@ -180,6 +180,4 @@ class NetworkSimulator:
 
         self._store_last_state(network_output)
 
-        print(sim_wrapper.nfe)
-
         return network_output
