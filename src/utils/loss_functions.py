@@ -38,28 +38,33 @@ def compute_L2_regularization(network):
 def compute_ei_ratio_penalty(network, target=0.61):
     """
     Computes the ratio of connections targeting the excitatory against
-    inhibitory populations in the target columns. Produces a penalty is
+    inhibitory populations in the target columns. Produces a penalty if
     the ratio is significantly higher than the biologically realistic
     standard ratio (=0.61).
     """
-    total_ei_penalty = 0
+    total_ei_penalty = 0.0
 
-    for name, conn in network.connections.items():
-        if conn.trainable:
+    E_idx = [0, 2, 4, 6]
+    I_idx = [1, 3, 5, 7]
 
-            weights = conn.weights
-            num_columns = weights.shape[0] // 8
-            W_in_reshaped = weights.view(num_columns, 8, -1)
+    for _, conn in network.connections.items():
+        if not conn.trainable:
+            continue
 
-            W_E = W_in_reshaped[:, 2, :]  # (columns, source)
-            W_I = W_in_reshaped[:, 3, :]
+        weights = conn.weights
+        num_columns = weights.shape[0] // 8
 
-            E_drive = W_E.abs().sum(dim=1)
-            I_drive = W_I.abs().sum(dim=1)
+        # (columns, 8 populations, source)
+        W = weights.view(num_columns, 8, -1)
 
-            excess = (E_drive * target) - I_drive
-            penalty = torch.relu(excess).pow(2).mean()
-            total_ei_penalty += penalty
+        # Sum excitatory and inhibitory drive over all layers
+        E_drive = W[:, E_idx, :].abs().sum(dim=(1, 2))
+        I_drive = W[:, I_idx, :].abs().sum(dim=(1, 2))
+
+        excess = target * E_drive - I_drive
+        penalty = torch.relu(excess).pow(2).mean()
+
+        total_ei_penalty += penalty
 
     return total_ei_penalty
 
