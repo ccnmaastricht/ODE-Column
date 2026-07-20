@@ -101,8 +101,7 @@ class BrainNetwork(torch.nn.Module):
         # Membrane resistance and adaptation strength
         resistance = time_constants['membrane'] / params['capacitance']
         self.register_buffer("resistance", torch.tensor(resistance, dtype=torch.float32))
-        self.register_buffer("adaptation_strength", torch.tensor(
-            self.params['model']['adaptation_strength'], dtype=torch.float32))
+        self.register_buffer("adaptation_strength", torch.tensor(params['adaptation_strength'], dtype=torch.float32))
 
     def _initialize_additional_modules(self):
         """

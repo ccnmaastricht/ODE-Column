@@ -136,7 +136,8 @@ def train_wta(
 
     # Build network
     config = config_path('wta_params.toml')
-    network = BrainNetwork.from_toml(config)
+    general_config = config_path('general_params_wta.toml')
+    network = BrainNetwork.from_toml(config, general_config)
 
     network.add_area('mt', 2)
 

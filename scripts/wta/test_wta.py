@@ -580,8 +580,8 @@ def create_wta_layers_results_fig(network_paths):
 
 if __name__ == '__main__':
 
-    network_paths = [models_path('wta', f'wta_{i}.pt') for i in range(1, 5)]
-    history_paths = [models_path('wta', f'wta_history_{i}.pt') for i in range(1, 5)]
+    network_paths = [models_path('wta', f'wta_{i}.pt') for i in range(1, 4)]
+    history_paths = [models_path('wta', f'wta_history_{i}.pt') for i in range(1, 4)]
 
     create_wta_general_results_fig(network_paths)
     create_wta_layers_results_fig(network_paths)

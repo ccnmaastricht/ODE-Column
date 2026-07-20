@@ -199,7 +199,8 @@ def train_context_wta(
 
     # Initialize network
     config = config_path('context_params.toml')
-    network = BrainNetwork.from_toml(config)
+    general_config = config_path('general_params_wta.toml')
+    network = BrainNetwork.from_toml(config, general_config)
 
     area = 'v1'
 
