@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 import matplotlib.pyplot as plt
 
 from src.brain_network import BrainNetwork
@@ -15,17 +16,12 @@ def visualize_results(raw_output, network, stims, loss, epoch):
     firing_rates = network.get_firing_rates(raw_output)
 
     for i in range(len(stims)):
-        # fig, axes = plt.subplots(2, 4, figsize=(13, 7))
-        #
-        # axes_indices = [(0, 0), (0, 1), (0, 2), (0, 3),
-        #                 (1, 0), (1, 1), (1, 2), (1, 3)]
 
-        fig, axes = plt.subplots(4, 4, figsize=(13, 12))
+        fig, axes = plt.subplots(3, 4, figsize=(13, 12))
 
         axes_indices = [(0, 0), (0, 1), (0, 2), (0, 3),
                         (1, 0), (1, 1), (1, 2), (1, 3),
-                        (2, 0), (2, 1), (2, 2), (2, 3),
-                        (3, 0), (3, 1), (3, 2), (3, 3)]
+                        (2, 0), (2, 1), (2, 2), (2, 3)]
 
         for j in range(network.num_columns):
             axes[axes_indices[j]].plot(firing_rates[:, i, (j * 8) + 0], label='L23e')
@@ -62,19 +58,15 @@ def visualize_weights(network, epoch):
             plt.savefig('./results/{}_{:02d}'.format(clean_name, epoch))
             plt.close(fig)
 
-def make_ds(batch_size=8):
+def make_ds(batch_size=4):
     """
     Make a dataset of all parity inputs with fixed position.
     """
 
-    all_combinations = torch.tensor([[0., 0., 0., 0., 0., 0., 0., 1.],
-                                     [0., 0., 0., 0., 0., 0., 1., 1.],
-                                     [0., 0., 0., 0., 0., 1., 1., 1.],
-                                     [0., 0., 0., 0., 1., 1., 1., 1.],
-                                     [0., 0., 0., 1., 1., 1., 1., 1.],
-                                     [0., 0., 1., 1., 1., 1., 1., 1.],
-                                     [0., 1., 1., 1., 1., 1., 1., 1.],
-                                     [1., 1., 1., 1., 1., 1., 1., 1.],
+    all_combinations = torch.tensor([[0., 0., 0., 1.],
+                                     [0., 0., 1., 1.],
+                                     [0., 1., 1., 1.],
+                                     [1., 1., 1., 1.]
                                     ], dtype=torch.float32)
     all_combinations *= 15.
 
@@ -86,7 +78,7 @@ def make_ds(batch_size=8):
 
 def train_parity(
         seed,
-        batch_size=8,
+        batch_size=4,
         num_epochs=1000,
         test_freq=10,
         train_with_adjoint=False,
@@ -102,10 +94,10 @@ def train_parity(
     config = config_path('parity_params.toml')
     network = BrainNetwork.from_toml(config)
 
-    network.add_area('v1', 8)
+    network.add_area('v1', 4)
     network.add_area('v2', 2)
 
-    network.add_input_connection('v1', 8, receptive_field_size=1, stride=1)
+    network.add_input_connection('v1', 4, receptive_field_size=1, stride=1)
     network.add_feedforward_connection('v1', 'v2', scale=2.0)
     network.add_output_connection('v2')
 
@@ -133,8 +125,16 @@ def train_parity(
         output = network.run(train_set, adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
         model_read_out = network.read_out(output, mode='classification')
 
-        # Compute loss with CE
+        # Compute loss with MSE
         is_even = (train_set.sum(dim=1) % 30 == 0)
+        # parity_targets = torch.stack([
+        #     is_even.float(),  # even
+        #     (~is_even).float()  # odd
+        # ], dim=1)
+        # parity_targets *= 20.
+        # loss = ((model_read_out - parity_targets) ** 2).mean()
+
+        # Or compute loss with CE
         parity_targets = is_even.long()
         loss = criterion(model_read_out, parity_targets)
 
@@ -163,9 +163,6 @@ def train_parity(
 
 if __name__ == '__main__':
 
-    # TODO: pipeline
-    # Start without perturbations and without test set
-
     seed = 1
 
-    train_parity(seed, train_with_noise=True)
+    train_parity(seed)
