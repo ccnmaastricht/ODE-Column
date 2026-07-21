@@ -161,12 +161,8 @@ def run_batch(network, stims, context, true_states, penalty_weight, device, itr=
     Run a batch of stimuli-context pairs through the network and computes the loss
     between the model's activity and target activity.
     """
-    # First runs network without input to get to resting state activity
-    resting_state = network.run({'bottom_up': np.zeros_like(stims), 'context': np.zeros_like(context)},
-                                adjoint=False, stochastic=False, device=device)
-
     output = network.run({'bottom_up': stims, 'context': context},
-                         adjoint=train_with_adjoint, stochastic=train_with_noise, reset_state=False, device=device)
+                         adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
 
     # Compute loss between predicted and true states
     pred_states = network.read_out(output, mode='trajectory')

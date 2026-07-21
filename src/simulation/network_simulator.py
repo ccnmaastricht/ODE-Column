@@ -140,6 +140,22 @@ class NetworkSimulator:
 
         self.network_is_ready = True
 
+    def _initialize_network_activity(self, ext_input, input_window):
+        """
+        Runs the network without external input to ensure the initial state's membrane
+        potential is at resting state - only before the first batch is run through the network.
+        """
+        with torch.no_grad():
+
+            zero_input = {name : torch.zeros(1, input_tensor.shape[1]) for name, input_tensor in ext_input.items()}
+            sim_wrapper = NetworkOdeWrapper(self.network, zero_input, input_window)
+            self.network.constrain_weights()
+
+            resting_state = odeint(sim_wrapper, self.initial_state, self.time_vec)
+
+            membrane_potential_resting_state = resting_state[-1, :, :self.network.num_populations]
+            self.initial_state[:, :self.network.num_populations] = membrane_potential_resting_state
+
     def _store_last_state(self, network_output):
         """
         Stores the last state of the network output to potentially use as initial state
@@ -151,19 +167,29 @@ class NetworkSimulator:
         """
         Runs the network simulation.
         """
+        # Prepare the external input for simulation and infer the batch size
+        ext_input, input_window, batch_size = self._prepare_input_for_sim(ext_input, input_window, device)
+
+        # If this is the first simulation run, finalize the network, put everything to the device
+        # and run the network without input to get resting state membrane potential
         if not self.network_is_ready:
             self._prepare_network(device)
+            self._initialize_network_activity(ext_input, input_window)
 
-        ext_input, input_window, batch_size = self._prepare_input_for_sim(ext_input, input_window, device)
-        sim_wrapper = NetworkOdeWrapper(self.network, ext_input, input_window)
-
-        initial_state = self._extend_init_state(batch_size)
-
-        if not reset_state and self.previous_network_state is not None:  # Use the last state of the last simulation as the initial state
-            initial_state = self.previous_network_state
-
+        # Constrain all network weights to ensure no illegal connections can be used
         self.network.constrain_weights()
 
+        # Extend the initial state to match with the batch size
+        initial_state = self._extend_init_state(batch_size)
+
+        # If specified, use the last state of the last simulation as the initial state
+        if not reset_state and self.previous_network_state is not None:
+            initial_state = self.previous_network_state
+
+        # Initialize the wrapper and set the external input
+        sim_wrapper = NetworkOdeWrapper(self.network, ext_input, input_window)
+
+        # Run the network simulation with the specified ODE variant
         if not adjoint and not stochastic:
             network_output = odeint(sim_wrapper, initial_state, self.time_vec)
 
