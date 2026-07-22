@@ -168,4 +168,4 @@ if __name__ == '__main__':
 
     seed = 1
 
-    train_parity(seed, train_with_noise=True)
+    train_parity(seed, train_with_noise=False)

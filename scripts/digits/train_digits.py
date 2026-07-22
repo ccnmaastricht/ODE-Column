@@ -73,7 +73,7 @@ def train_digit_classification(
     set_seed(seed)
 
     # Initialize network
-    config = config_path('parity_params.toml')
+    config = config_path('digits_params.toml')
     network = BrainNetwork.from_toml(config)
 
     network.add_area('v1', 128)
@@ -83,6 +83,10 @@ def train_digit_classification(
                                  grid_organization=True, std=1.0, scale=0.2)
     network.add_feedforward_connection('v1', 'v2', std=1.0, scale=0.7)
     network.add_output_connection('v2')
+
+    # Extra lateral inhibition connections
+    network.add_lateral_connection('v1', receptive_field_size=2, stride=2)
+    network.add_lateral_connection('v2')
 
 
     # Get train and test set
@@ -121,7 +125,7 @@ def train_digit_classification(
         weight_penalty = compute_L2_regularization(network)
         ei_penalty = compute_ei_ratio_penalty(network)
 
-        loss = ce_loss + (lambda_suppression * suppression_penalty) + (lambda_magnitude * weight_penalty) + (lambda_ei * ei_penalty)
+        loss = ce_loss # + (lambda_suppression * suppression_penalty) + (lambda_magnitude * weight_penalty) + (lambda_ei * ei_penalty)
         acc = (labels == torch.argmax(model_predictions, dim=1)).float().mean()
 
         return loss, ce_loss, (lambda_suppression * suppression_penalty), (lambda_magnitude * weight_penalty), (lambda_ei * ei_penalty), acc, model_predictions
@@ -144,7 +148,7 @@ def train_digit_classification(
             start = time.time()
             optimizer.zero_grad()
 
-            loss, ce_loss, suppression, magnitude, ei, acc, preds = run_digits_batch(train_stims, train_labels)
+            loss, ce_loss, suppression, magnitude, ei, acc, preds = run_digits_batch(train_stims.to(device), train_labels)
 
             loss.backward()
             optimizer.step()
@@ -179,8 +183,19 @@ def train_digit_classification(
 
 if __name__ == '__main__':
 
-    digits_to_include = [0, 1]
+    digits_to_include = [0,1,2,3,4,5,6,7,8,9]
     seed = 1
     device = torch.device('mps')
 
-    train_digit_classification(digits_to_include, seed, device, batch_size=16)
+    train_digit_classification(
+        digits_to_include=digits_to_include,
+        seed=seed,
+        device=device,
+        train_with_adjoint=False,
+        train_with_noise=False,
+        batch_size=64,
+        nr_epochs=100,
+        lr=5e-2,
+        lambda_suppression=1e-1,
+        lambda_magnitude=1e-2,
+        lambda_ei=1e+0)
