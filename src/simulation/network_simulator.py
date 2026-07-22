@@ -140,14 +140,15 @@ class NetworkSimulator:
 
         self.network_is_ready = True
 
-    def _initialize_network_activity(self, ext_input, input_window):
+    def _initialize_network_activity(self, ext_input, input_window, device):
         """
         Runs the network without external input to ensure the initial state's membrane
         potential is at resting state - only before the first batch is run through the network.
         """
         with torch.no_grad():
 
-            zero_input = {name : torch.zeros(1, input_tensor.shape[1]) for name, input_tensor in ext_input.items()}
+            zero_input = {name : torch.zeros(1, input_tensor.shape[1], device=device)
+                          for name, input_tensor in ext_input.items()}
             sim_wrapper = NetworkOdeWrapper(self.network, zero_input, input_window)
             self.network.constrain_weights()
 
@@ -174,7 +175,7 @@ class NetworkSimulator:
         # and run the network without input to get resting state membrane potential
         if not self.network_is_ready:
             self._prepare_network(device)
-            self._initialize_network_activity(ext_input, input_window)
+            self._initialize_network_activity(ext_input, input_window, device)
 
         # Constrain all network weights to ensure no illegal connections can be used
         self.network.constrain_weights()
