@@ -8,7 +8,7 @@ if __name__ == "__main__":
     seed = 1
 
     train_digit_classification(
-        digits_to_include=[0,1],
+        digits_to_include=[0,1,2,3,4,5,6,7,8,9],
         seed=seed,
         device=device,
         train_with_adjoint=True,
