@@ -612,7 +612,10 @@ class BrainNetwork(torch.nn.Module):
         Load a saved network checkpoint and reinstate the network with its
         saved weights and parameters.
         """
-        checkpoint = torch.load(path, weights_only=False)
+        checkpoint = torch.load(
+            path,
+            map_location=torch.device("cpu"),
+            weights_only=False)
 
         return NetworkArchiver.restore_checkpoint(
             cls,
