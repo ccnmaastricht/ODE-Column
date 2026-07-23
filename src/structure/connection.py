@@ -153,7 +153,7 @@ class Connection(torch.nn.Module):
             ex_in_masked[:, 0::2] = exc
             ex_in_masked[:, 1::2] = inh
 
-            self.W = masked
+            self.W = ex_in_masked
         else:
             self.W = torch.relu(masked)
 
