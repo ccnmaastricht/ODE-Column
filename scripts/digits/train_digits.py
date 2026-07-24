@@ -1,7 +1,6 @@
 import torch
 import time
 import numpy as np
-import matplotlib.pyplot as plt
 
 from sklearn import datasets
 from sklearn.model_selection import train_test_split
@@ -114,9 +113,6 @@ def train_digit_classification(
             device=device)
         model_predictions = network.read_out(output, mode='classification')
 
-        # print(model_predictions)
-        # network.analysis.plot_firing_rates(output, area='v2', population='L23e')
-
         labels = labels.to(device)
         _, mapped_labels = torch.unique(labels, return_inverse=True)
         ce_loss = criterion(model_predictions, mapped_labels)
@@ -125,7 +121,7 @@ def train_digit_classification(
         weight_penalty = compute_L2_regularization(network)
         ei_penalty = compute_ei_ratio_penalty(network)
 
-        loss = ce_loss # + (lambda_suppression * suppression_penalty) + (lambda_magnitude * weight_penalty) + (lambda_ei * ei_penalty)
+        loss = ce_loss + (lambda_ei * ei_penalty) # + (lambda_suppression * suppression_penalty) + (lambda_magnitude * weight_penalty)
         acc = (labels == torch.argmax(model_predictions, dim=1)).float().mean()
 
         return loss, ce_loss, (lambda_suppression * suppression_penalty), (lambda_magnitude * weight_penalty), (lambda_ei * ei_penalty), acc, model_predictions

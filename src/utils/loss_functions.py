@@ -1,4 +1,5 @@
 import torch
+import math
 
 
 
@@ -35,38 +36,37 @@ def compute_L2_regularization(network):
 
     return total_L2_reg
 
-def compute_ei_ratio_penalty(network, target=0.61):
+def compute_ei_ratio_penalty(network, target=0.61, eps=1e-6, beta=10.0):
     """
     Computes the ratio of connections targeting the excitatory against
     inhibitory populations in the target columns. Produces a penalty if
     the ratio is significantly higher than the biologically realistic
     standard ratio (=0.61).
+    Beta: smaller penalizes the mean, bigger penalizes the maximum.
     """
-    total_ei_penalty = 0.0
-
-    E_idx = [0, 2, 4, 6]
-    I_idx = [1, 3, 5, 7]
+    all_excess = []
 
     for _, conn in network.connections.items():
         if not conn.trainable:
             continue
 
-        weights = conn.W
-        num_columns = weights.shape[0] // 8
+        W = conn.W
+        num_columns = W.shape[0] // 8
+        W = W.view(num_columns, 4, 2, -1)  # (columns, layers, [E,I], source)
 
-        # (columns, 8 populations, source)
-        W = weights.view(num_columns, 8, -1)
+        E_drive = W[:, :, 0, :].abs().sum(-1) + eps
+        I_drive = W[:, :, 1, :].abs().sum(-1) + eps
 
-        # Sum excitatory and inhibitory drive over all layers
-        E_drive = W[:, E_idx, :].abs().sum(dim=(1, 2))
-        I_drive = W[:, I_idx, :].abs().sum(dim=(1, 2))
+        # Equal contribution, regardless of magnitude
+        log_excess = torch.log(E_drive / I_drive) - math.log(target)
+        excess = torch.relu(log_excess)
 
-        excess = target * E_drive - I_drive
-        penalty = torch.relu(excess).pow(2).mean()
+        all_excess.append(excess.flatten())
+    excess_all = torch.cat(all_excess)
 
-        total_ei_penalty += penalty
-
-    return total_ei_penalty
+    # Penalize highest offenders the strongest
+    penalty = torch.logsumexp(beta * excess_all, dim=0) / beta
+    return penalty
 
 def min_max(firing_rates):
     """
