@@ -30,7 +30,7 @@ def compute_L2_regularization(network):
     for name, conn in network.connections.items():
         if conn.trainable:
 
-            L2_reg = (conn.weights ** 2).mean()
+            L2_reg = (conn.W ** 2).mean()
             total_L2_reg += L2_reg
 
     return total_L2_reg
@@ -51,7 +51,7 @@ def compute_ei_ratio_penalty(network, target=0.61):
         if not conn.trainable:
             continue
 
-        weights = conn.weights
+        weights = conn.W
         num_columns = weights.shape[0] // 8
 
         # (columns, 8 populations, source)
