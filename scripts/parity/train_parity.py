@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 from src.brain_network import BrainNetwork
 from src.utils.set_seed import set_seed
-from src.utils.loss_functions import compute_ei_ratio_penalty
+from src.utils.loss_functions import compute_ei_ratio_penalty, compute_L2_regularization
 from src.utils.paths import config_path, models_path
 
 
@@ -32,6 +32,9 @@ def visualize_results(raw_output, network, stims, loss, epoch):
             axes[axes_indices[j]].plot(firing_rates[:, i, (j * 8) + 4], label='L5e')
             axes[axes_indices[j]].plot(firing_rates[:, i, (j * 8) + 6], label='L6e')
 
+            if j > network.num_columns - 3:
+                axes[axes_indices[j]].set_ylim(0.0, 2.0)
+
         fig.legend(loc="upper left")
 
         fig.text(0.2, 0.03, f"Training loss: {loss:.2f}", ha='center', fontsize=10, fontweight='bold')
@@ -47,15 +50,15 @@ def visualize_weights(network, epoch):
     """
     Visualize learnable weights during training
     """
-    for name, param in network.named_parameters():
-        param_data = param.detach().cpu().numpy()
+    for name, conn in network.connections.items():
+        if conn.trainable:
 
-        if param.requires_grad:
             fig, ax = plt.subplots(figsize=(13, 7))
 
-            if param_data.ndim == 2:  # 2D weight matrices: use heatmap
-                heatmap = ax.imshow(param_data, cmap="viridis", interpolation="nearest")
-                fig.colorbar(heatmap, ax=ax)
+            weights = conn.W.detach().cpu().numpy()
+
+            heatmap = ax.imshow(weights, cmap="viridis", interpolation="nearest")
+            fig.colorbar(heatmap, ax=ax)
 
             # Clean filename (remove problematic characters)
             clean_name = name.replace('.', '_')
@@ -91,7 +94,7 @@ def train_parity(
         test_freq=10,
         train_with_adjoint=False,
         train_with_noise=False,
-        ei_weight=1e-1,
+        ei_weight=1e-1, # 1e-2
         device=torch.device('cpu')):
     """
     Train a BrainNetwork to learn parity (odd/even) classification.
@@ -142,10 +145,16 @@ def train_parity(
         ei_penalty = compute_ei_ratio_penalty(network)
         loss += (ei_penalty * ei_weight)
 
+        # Add L2 regularization
+        L2_weight = 1e-4
+        L2_reg = compute_L2_regularization(network)
+        # loss += (L2_reg * L2_weight)
+
         loss.backward()
         optimizer.step()
 
-        print('Epoch {:02d} | Train Loss {:.4f}'.format(epoch, loss.item()))
+        print('Epoch {:02d} | Train Loss {:.4f} | E/I {:.4f} | L2 {:.4f}'.format(
+            epoch, loss.item(), ei_penalty * ei_weight, L2_reg * L2_weight))
         losses.append(loss.item())
 
         # Visualize
