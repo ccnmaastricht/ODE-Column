@@ -120,6 +120,32 @@ def initialize_self_excitation_connection(network_params):
     weights = init_weights * mask
     return weights, mask
 
+def build_wta_network(area='mt', optimize_connectivity=False):
+    """
+    Build the two-column WTA decision-making network.
+    If optimize_connectivity=True, the recurrent (column-intrinsic) weights
+    can be updated during training.
+    """
+    config = config_path('wta_params.toml')
+    general_config = config_path('general_params_wta.toml')
+    network = BrainNetwork.from_toml(config, general_config)
+
+    if optimize_connectivity:
+        network.add_area(area, 2, intrinsic_trainable=True)
+    else:
+        network.add_area(area, 2)
+
+    network.add_input_connection(area, 2, receptive_field_size=1, stride=1, trainable=False, std=0.0)
+    network.add_lateral_connection(area, trainable=True)
+    network.add_output_connection(area, trainable=False)
+
+    network.add_custom_connection(connection_name='self_excitation',
+                                  source=area,
+                                  target=area,
+                                  initializer=initialize_self_excitation_connection)
+
+    return network
+
 def train_wta(
         fn_target_data,
         seed,
@@ -135,20 +161,7 @@ def train_wta(
     set_seed(seed)
 
     # Build network
-    config = config_path('wta_params.toml')
-    general_config = config_path('general_params_wta.toml')
-    network = BrainNetwork.from_toml(config, general_config)
-
-    network.add_area('mt', 2)
-
-    network.add_input_connection('mt', 2, receptive_field_size=1, stride=1, trainable=False, std=0.0)
-    network.add_lateral_connection('mt', trainable=True)
-    network.add_output_connection('mt', trainable=False)
-
-    network.add_custom_connection(connection_name='self_excitation',
-                                  source='mt',
-                                  target='mt',
-                                  initializer=initialize_self_excitation_connection)
+    network = build_wta_network()
 
     # Prepare train and test data, and optimizer
     train_loader, test_states, test_stims = get_data(batch_size, network.params['model']['time_params'], fn_target_data, seed)
