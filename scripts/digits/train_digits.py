@@ -88,6 +88,18 @@ def train_digit_classification(
     network.add_lateral_connection('v2')
 
 
+    # stim = torch.zeros(1, 100)
+    # resting_state = network.run(stim)
+    #
+    # weight_penalty = compute_L2_regularization(network)
+    # ei_penalty_1 = compute_ei_ratio_penalty(network, beta=1.0)
+    # ei_penalty_10 = compute_ei_ratio_penalty(network, beta=10.0)
+    # ei_penalty_20 = compute_ei_ratio_penalty(network, beta=20.0)
+    # ei_penalty_30 = compute_ei_ratio_penalty(network, beta=30.0)
+    # ei_penalty_100 = compute_ei_ratio_penalty(network, beta=100.0)
+    # stop = 0
+
+
     # Get train and test set
     X_train, X_test, y_train, y_test = prepare_ds(digits_to_include, padding=1, seed=seed)
 
@@ -121,7 +133,9 @@ def train_digit_classification(
         weight_penalty = compute_L2_regularization(network)
         ei_penalty = compute_ei_ratio_penalty(network)
 
-        loss = ce_loss + (lambda_ei * ei_penalty) # + (lambda_suppression * suppression_penalty) + (lambda_magnitude * weight_penalty)
+        print(ei_penalty.item() * lambda_ei)
+
+        loss = ce_loss + (lambda_ei * ei_penalty) # + (lambda_magnitude * weight_penalty) + (lambda_suppression * suppression_penalty)
         acc = (labels == torch.argmax(model_predictions, dim=1)).float().mean()
 
         return loss, ce_loss, (lambda_suppression * suppression_penalty), (lambda_magnitude * weight_penalty), (lambda_ei * ei_penalty), acc, model_predictions
@@ -193,5 +207,5 @@ if __name__ == '__main__':
         nr_epochs=100,
         lr=5e-2,
         lambda_suppression=1e-1,
-        lambda_magnitude=1e-2,
-        lambda_ei=1e+0)
+        lambda_magnitude=1e-1,
+        lambda_ei=1e-1)

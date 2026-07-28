@@ -17,5 +17,5 @@ if __name__ == "__main__":
         nr_epochs=100,
         lr=5e-2,
         lambda_suppression=1e-1,
-        lambda_magnitude=1e-2,
-        lambda_ei=1e-2)
+        lambda_magnitude=1e-1,
+        lambda_ei=1e-1)
