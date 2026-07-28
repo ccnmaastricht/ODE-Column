@@ -4,17 +4,30 @@ from src.structure.connection import Connection
 from src.utils.save_and_load import load_config
 
 
-
 class NetworkArchiver:
+    """
+    Handles network architecture serialization, checkpoint creation, and state
+    restoration.
+
+    Args:
+        network (BrainNetwork): Target brain network module.
+
+    Attributes:
+        network (BrainNetwork): Reference to the target brain network.
+    """
 
     def __init__(self, network):
 
         self.network = network
 
-    def export_architecture(self):
+    def _export_architecture(self):
         """
-        Returns an architecture dict of all areas, connections and
-        output_connections that make up the network.
+        Export a structured dictionary detailing all brain areas, connections, and
+        output connections that comprise the network layout.
+
+        Returns:
+            dict[str, list[dict]]: Architecture dictionary containing specifications
+                for area sizes, connectivity sources, targets, and trainability flags.
         """
         architecture = {"areas": [],
                         "connections": [],
@@ -51,9 +64,14 @@ class NetworkArchiver:
 
         return architecture
 
-    def import_architecture(self, architecture):
+    def _import_architecture(self, architecture):
         """
-        Import architecture and rebuild all areas and connections.
+        Reconstruct all network brain areas, internal connections, and output
+        connections from a serialized architecture dictionary.
+
+        Args:
+            architecture (dict[str, list[dict]]): Architecture dictionary exported
+                via `_export_architecture`.
         """
         for area in architecture["areas"]:
 
@@ -91,11 +109,14 @@ class NetworkArchiver:
 
     def create_checkpoint(self):
         """
-        Create the checkpoint for saving the current network: store
-        the architecture, weights and params, framework version and
-        current date.
+        Construct a comprehensive state checkpoint dictionary containing serialized
+        architecture layout, PyTorch state dictionary weights, model and general
+        parameters, framework version, and timestamp.
+
+        Returns:
+            dict[str, Any]: Complete model checkpoint payload dictionary.
         """
-        return {"architecture": self.export_architecture(),
+        return {"architecture": self._export_architecture(),
                 "state_dict": self.network.state_dict(),
 
                 "model_params": self.network.params['model'],
@@ -112,8 +133,21 @@ class NetworkArchiver:
             model_config_path=None,
             general_config_path=None):
         """
-        Reinstates the network from the saved checkpoint. If config_paths are specified,
-        overwrite the saved parameters with the parameters from the config file(s).
+        Restore a complete BrainNetwork model instance from a saved checkpoint,
+        optionally overriding parameters with external configuration files.
+
+        Args:
+            network_cls (type[BrainNetwork]): Class type reference to instantiate the
+                network.
+            checkpoint (dict[str, Any]): Checkpoint dictionary loaded from disk.
+            model_config_path (str | Path | None, optional): Path to model configuration
+                file to override stored parameters. Defaults to None.
+            general_config_path (str | Path | None, optional): Path to general configuration
+                file to override stored parameters. Defaults to None.
+
+        Returns:
+            BrainNetwork: Fully restored and finalized network instance with loaded
+                weights and buffers.
         """
         # Decide which parameters to use
         if model_config_path is None:
@@ -130,7 +164,7 @@ class NetworkArchiver:
 
         network = network_cls(model_params, general_params)
 
-        network.archive.import_architecture(checkpoint["architecture"])
+        network.archive._import_architecture(checkpoint["architecture"])
         network.finalize()
 
         network.load_state_dict(checkpoint["state_dict"])

@@ -5,11 +5,24 @@ from torchsde import sdeint, sdeint_adjoint
 from src.simulation.ode_wrapper import NetworkOdeWrapper
 
 
-
 class NetworkSimulator:
-
     """
-    Handles the simulation of the network activity.
+    Manages continuous-time neural network simulations using deterministic (ODE)
+    or stochastic (SDE) differential equation solvers.
+
+    Args:
+        network (BrainNetwork): Target brain network module.
+
+    Attributes:
+        network (BrainNetwork): Reference to the target brain network.
+        dt (float): Simulation integration time step size in seconds.
+        sim_time (float): Total simulation duration in seconds.
+        input_window (tuple[float, float]): Default time window `(start, end)` during
+            which inputs are active.
+        previous_network_state (torch.Tensor | None): Stored final state from previous
+            simulation run.
+        network_is_ready (bool): Flag indicating whether network device placement
+            and state initialization have been completed.
     """
 
     def __init__(self, network):
@@ -27,14 +40,27 @@ class NetworkSimulator:
 
     def _infer_batch_size(self, ext_input):
         """
-        Infer the batch size from the shape of the input tensors.
+        Infer batch size dimension from input tensor shapes.
+
+        Args:
+            ext_input (dict[str, torch.Tensor]): Dictionary of external input tensors.
+
+        Returns:
+            int: Inferred batch size (size of first tensor dimension).
         """
         first_input = next(iter(ext_input.values()))
         return first_input.shape[0]
 
     def _validate_input_shapes(self, ext_input):
         """
-        Check if input tensors have the same shape in the first dimension (i.e. batch size).
+        Validate that all external input tensors share a consistent batch size in
+        their first dimension.
+
+        Args:
+            ext_input (dict[str, torch.Tensor]): Dictionary of external input tensors.
+
+        Raises:
+            AssertionError: Raised if input tensors have mismatched batch sizes.
         """
         batch_sizes = {tensor.shape[0]
                        for tensor in ext_input.values()}
@@ -42,7 +68,17 @@ class NetworkSimulator:
 
     def _make_input_dict(self, input_var, input_keys):
         """
-        Convert the input variable to a dictionary.
+        Ensure input variables or window specifications are structured as a dictionary
+        mapped by key.
+
+        Args:
+            input_var (dict | torch.Tensor | tuple): Single input variable/window or
+                pre-formatted dictionary.
+            input_keys (list[str] | dict_keys): List of keys to map non-dictionary
+                inputs to.
+
+        Returns:
+            dict: Dictionary mapping specified keys to input variables.
         """
         if not isinstance(input_var, dict):
             input_var = {input_key: input_var for input_key in input_keys}
@@ -50,9 +86,17 @@ class NetworkSimulator:
 
     def _convert_to_tensors(self, ext_input, device):
         """
-        Convert each input tensor to a tensor and put them on the specified device.
-        If an input tensor is one-dimensional (aka one sample in a batch), it adds
-        an extra dimension.
+        Convert input arrays/values into float32 PyTorch tensors, move them to the
+        target compute device, and unsqueeze single samples into batch dimension.
+
+        Args:
+            ext_input (dict[str, Any]): Dictionary containing raw input tensors,
+                arrays, or scalars.
+            device (torch.device | str): Target compute device (e.g., 'cpu' or 'cuda').
+
+        Returns:
+            dict[str, torch.Tensor]: Dictionary containing device-allocated 2D input
+                tensors of shape `(batch_size, input_dim)`.
         """
         for name, input_var in ext_input.items():
 
@@ -70,8 +114,16 @@ class NetworkSimulator:
 
     def _validate_network_inputs(self, ext_input):
         """
-        Check if the inputs have an assigned connection that targets an area and if the
-        input tensor has the correct shape in the second dimension (should match with connection.weights)
+        Validate that provided input names match network input connection sources and
+        feature dimensions align with input weight matrices.
+
+        Args:
+            ext_input (dict[str, torch.Tensor]): Processed input tensors mapped by
+                source ID.
+
+        Raises:
+            AssertionError: Raised if input keys do not match input connections or
+                feature dimensions mismatch.
         """
         input_connections = {conn.source_id: conn
                          for conn in self.network.connections.values()
@@ -86,7 +138,15 @@ class NetworkSimulator:
 
     def _validate_input_windows(self, input_window):
         """
-        Check if input window does not exceed the simulation time.
+        Validate that active input time window bounds do not exceed total simulation time.
+
+        Args:
+            input_window (dict[str, tuple[float, float]]): Dictionary mapping input
+                names to `(start, end)` time intervals.
+
+        Raises:
+            AssertionError: Raised if input window start or end time exceeds total
+                simulation duration.
         """
         for window_i, window_tuple in input_window.items():
             start = window_tuple[0]
@@ -96,9 +156,18 @@ class NetworkSimulator:
 
     def _prepare_input_for_sim(self, ext_input, input_window, device):
         """
-        Prepare the input samples and the input time window for simulation:
-        they need to be formatted as dictionaries, inputs as tensors and on the device,
-        check if compatible with network architecture.
+        Format external inputs and time windows as dictionaries on the target device
+        and perform validation against network architecture.
+
+        Args:
+            ext_input (dict | torch.Tensor | None): External input specification.
+            input_window (dict | tuple | None): Active time window specification.
+            device (torch.device | str): Target compute device.
+
+        Returns:
+            tuple[dict[str, torch.Tensor] | None, dict[str, tuple[float, float]] | None, int]:
+                Tuple containing processed input dictionary, time window dictionary,
+                and inferred batch size.
         """
         if ext_input is None:
             return None, None, 1
@@ -123,14 +192,25 @@ class NetworkSimulator:
 
     def _extend_init_state(self, batch_size):
         """
-        Extend the initial state to fit with the batch size
+        Tile network initial state vector across batch dimension to match simulation
+        batch size.
+
+        Args:
+            batch_size (int): Target batch size.
+
+        Returns:
+            torch.Tensor: Tiled initial state matrix of shape
+                `(batch_size, 2 * total_populations)`.
         """
         return torch.tile(self.initial_state, (batch_size, 1))
 
     def _prepare_network(self, device):
         """
-        Finalizes the network and brings the network, time vector and initial state
-        to the specified device before the first batch is run through the network.
+        Finalize network layout, move network parameters to target device, construct
+        time vector, and initialize zeroed state.
+
+        Args:
+            device (torch.device | str): Target compute device.
         """
         self.network = self.network.to(device)
         self.network.finalize()
@@ -142,8 +222,15 @@ class NetworkSimulator:
 
     def _initialize_network_activity(self, ext_input, input_window, device):
         """
-        Runs the network without external input to ensure the initial state's membrane
-        potential is at resting state - only before the first batch is run through the network.
+        Simulate network dynamics without input to set initial membrane potentials
+        to resting state before primary simulation run.
+
+        Args:
+            ext_input (dict[str, torch.Tensor]): Processed input tensors mapped by
+                source ID.
+            input_window (dict[str, tuple[float, float]]): Processed time window
+                intervals.
+            device (torch.device | str): Target compute device.
         """
         with torch.no_grad():
 
@@ -159,14 +246,34 @@ class NetworkSimulator:
 
     def _store_last_state(self, network_output):
         """
-        Stores the last state of the network output to potentially use as initial state
-        for the next simulation, if user sets reset_state=False in the run command.
+        Store final network state from output tensor for potential initial state reuse
+        in subsequent simulations.
+
+        Args:
+            network_output (torch.Tensor): Simulation output tensor of shape
+                `(time_steps, batch_size, 2 * total_populations)`.
         """
         self.previous_network_state = network_output[-1]
 
     def run(self, ext_input, input_window, adjoint, stochastic, reset_state, device):
         """
-        Runs the network simulation.
+        Execute numerical simulation using standard ODE, adjoint ODE, SDE, or adjoint
+        SDE solvers.
+
+        Args:
+            ext_input (dict | torch.Tensor | None): External input drive tensors.
+            input_window (dict | tuple | None): Active time window interval tuples.
+            adjoint (bool): Whether to use adjoint sensitivity method solver variants
+                (`odeint_adjoint` / `sdeint_adjoint`).
+            stochastic (bool): Whether to simulate stochastic dynamics with noise
+                (`sdeint`) or deterministic dynamics (`odeint`).
+            reset_state (bool): Whether to reset initial state to resting state or
+                carry over `previous_network_state`.
+            device (torch.device | str): Target compute device for execution.
+
+        Returns:
+            torch.Tensor: Simulation output trajectory tensor of shape
+                `(time_steps, batch_size, 2 * total_populations)`.
         """
         # Prepare the external input for simulation and infer the batch size
         ext_input, input_window, batch_size = self._prepare_input_for_sim(ext_input, input_window, device)

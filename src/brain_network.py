@@ -14,7 +14,6 @@ from src.analysis.network_readout import NetworkReadout
 from src.save_and_load.network_archiver import NetworkArchiver
 
 
-
 FRAMEWORK_VERSION = '0.1.0'
 
 DEFAULT_GENERAL_CONFIG = (
@@ -23,16 +22,35 @@ DEFAULT_GENERAL_CONFIG = (
     "general_params.toml")
 
 
-
 class BrainNetwork(torch.nn.Module):
-
     """
-    Network class that allows the initialization of BrainArea and Connection objects.
-    Additionally, contains modules for network dynamics, simulation, analysis readout
-    and archiving.
+    Main container class for building, simulating, analyzing, and archiving networks
+    composed of laminar cortical column areas and structural connections.
+
+    Args:
+        model_params (dict): Model-specific configuration parameters dictionary.
+        general_params (dict): General parameter settings (time constants, gains, drive).
+
+    Attributes:
+        params (dict): Configuration dictionary containing model and general parameter blocks.
+        num_populations (int | None): Total number of neuronal populations across all areas.
+        num_columns (int | None): Total number of cortical columns in the network.
+        area_order (list[str]): Ordered list of brain area IDs matching state vector layout.
+        area_slices (dict[str, slice]): Dictionary mapping area IDs to state vector slices.
+        areas (torch.nn.ModuleDict): Dictionary mapping area IDs to `BrainArea` instances.
+        connections (torch.nn.ModuleDict): Dictionary mapping connection names to internal `Connection` instances.
+        output_connections (torch.nn.ModuleDict): Dictionary mapping names to readout `Connection` instances.
+        dynamics (NetworkDynamics): Bound network dynamics module.
+        simulator (NetworkSimulator): Bound numerical simulation engine.
+        readout (NetworkReadout): Bound signal readout and post-processing module.
+        analysis (NetworkAnalyzer): Bound plotting and weight inspection module.
+        archive (NetworkArchiver): Bound checkpointing and architecture serialization module.
+        network_is_finalized (bool): Readiness flag set once network indexing is completed.
+        framework_version (str): Installed framework version string.
     """
 
     def __init__(self, model_params, general_params):
+
         super().__init__()
 
         self.params = {"general": general_params, "model": model_params}
@@ -54,7 +72,15 @@ class BrainNetwork(torch.nn.Module):
     @classmethod
     def from_toml(cls, model_config_path, general_config_path=None):
         """
-        Initialize a BrainNetwork object from .toml config files.
+        Instantiate and initialize a BrainNetwork object directly from TOML parameter configuration files.
+
+        Args:
+            model_config_path (str | Path): Path to model configuration file (`.toml`).
+            general_config_path (str | Path | None, optional): Path to general parameter configuration file
+                (`.toml`). Defaults to None.
+
+        Returns:
+            BrainNetwork: Newly instantiated network instance initialized with configuration parameters.
         """
         model_params, general_params = cls._load_params_from_configs(
             model_config_path,
@@ -67,8 +93,15 @@ class BrainNetwork(torch.nn.Module):
     @staticmethod
     def _load_params_from_configs(model_config_path, general_config_path):
         """
-        Load model-specific and general parameters from their respective
-        config files.
+        Load parameter dictionaries from TOML configuration files, substituting default general parameters
+        if unassigned.
+
+        Args:
+            model_config_path (str | Path): Path to model config file.
+            general_config_path (str | Path | None): Path to general config file.
+
+        Returns:
+            tuple[dict, dict]: Tuple containing model parameters dictionary and general parameters dictionary.
         """
         if general_config_path is None:
             general_config_path = DEFAULT_GENERAL_CONFIG
@@ -80,7 +113,10 @@ class BrainNetwork(torch.nn.Module):
 
     def _initialize_general_parameters(self, params):
         """
-        Initialize general parameters that apply for the entire network.
+        Register global network buffers for background drive, firing rate gain/threshold/noise parameters, and time constants.
+
+        Args:
+            params (dict): General configuration dictionary.
         """
         # Background drive
         bg_drive = torch.tensor(params['background_drive'], dtype=torch.float32)
@@ -105,8 +141,7 @@ class BrainNetwork(torch.nn.Module):
 
     def _initialize_additional_modules(self):
         """
-        Initialize NetworkDynamics(), NetworkSimulator(), NetworkReadout(),
-        NetworkAnalyzer() and NetworkArchiver().
+        Bind dynamics, simulator, readout, analysis, and archiver modules to this network instance.
         """
         self.dynamics   = NetworkDynamics(self)
         self.simulator  = NetworkSimulator(self)
@@ -116,7 +151,16 @@ class BrainNetwork(torch.nn.Module):
 
     def _get_area(self, area_id):
         """
-        Returns the Area object from the self.areas dict.
+        Retrieve a BrainArea instance from the areas dictionary by identifier string.
+
+        Args:
+            area_id (str): Name or unique ID of target area.
+
+        Returns:
+            BrainArea: Retained brain area module.
+
+        Raises:
+            AssertionError: Raised if requested area ID is not registered.
         """
         area_id = area_id.lower()
         assert area_id in self.areas.keys(), f"Area '{area_id}' is not yet initialized. Please use BrainNetwork.add_area(name, size)."
@@ -133,42 +177,18 @@ class BrainNetwork(torch.nn.Module):
             trainable=True,
             output=False):
         """
-        Initialize the specified default connection as a Connection object and store it
-        in the appropriate dict.
+        Instantiate a Connection object using a specified initializer function and register
+        it within internal or output connection dictionaries.
 
-        Params:
-        connection_type (str):          Specified connection type. Appropriate types are 'input', 'output',
-                                        'recurrent', 'background', 'feedforward', 'feedback', 'lateral'.
-        source (str):                   ID of source.
-        target (str):                   ID of target.
-        initializer (func):             Specified function to be used to initialize the weights. Should
-                                        return (weights, mask).
-        *initializer_args:              Params passed to initializer func. See below for more information.
-        trainable (bool):               If True, the feedforward weights should be updated during training.
-                                        If False, the weights should remain static.
-        output (bool):                  If True, the connection should be added to the output_connections dict
-                                        instead of the regular connections dict.
-        ================================
-        *initializer_args are different across the various connection types. Find the exhaustive list of
-        possible params below:
-        params (dict):                  BrainNetwork's parameters, both general and model-specific.
-        source_area (BrainArea):        Source BrainArea object for connection types 'output', 'feedforward',
-                                        and 'feedback'.
-        target_area (BrainArea):        Target BrainArea object for connection types 'input', 'feedforward',
-                                        and 'feedback'.
-        area (BrainArea):               Source *and* target BrainArea object for connection types 'recurrent',
-                                        'background' and 'lateral'.
-        size_input (int):               Size of the input for connection type 'input'.
-        receptive_field_size (int):     Size of the receptive fields that constrain the input the target area
-                                        receives from the source area. Leave as None if the source and target
-                                        area should be fully connected.
-        stride (int):                   Stride (step size) of the receptive field window.
-        grid_organization (bool):       If True, the receptive field connectivity between the source and target
-                                        area will assume a two-dimensional (i.e. grid) organization.
-                                        If False, connectivity will assume a one-dimensional organization.
-        std (float):                    Standard deviation of the randomly initialized weights. Mean will be
-                                        determined from the user-specified .toml file.
-        scale (float):                  Scale of the initialized weights.
+        Args:
+            connection_type (str): Connection type classification string.
+            source (str): Source identifier string.
+            target (str): Target identifier string.
+            initializer (Callable): Function initializing weight and mask matrices.
+            *initializer_args: Positional arguments passed to initializer function.
+            trainable (bool, optional): Whether weights parameter requires grad. Defaults to True.
+            output (bool, optional): Whether to register in `output_connections` dictionary instead
+                of `connections`. Defaults to False.
         """
         connection = Connection(
             connection_type,
@@ -196,17 +216,21 @@ class BrainNetwork(torch.nn.Module):
             intrinsic_trainable=False,
             background_trainable=False):
         """
-        Initialize the specified area and its recurrent and background connections.
+        Add a cortical column area to the network architecture and optionally establish its
+        intrinsic recurrent and background connections.
 
-        Params:
-        area_name (str):                The name of the added area, as specified in the .toml file (e.g. 'v1', 'v2', etc).
-        size (int):                     The number of columns of the area.
-        unique_id (str):                An optional user-specified id for the area. Useful when the network should contain more
-                                        area modules with the same area configurations.
-        initialize_recurrent_and        If False, adding the area will not automatically add recurrent and background
-            _background (bool):         connections.
-        intrinsic_trainable (bool):     If True, the recurrent (column-intrinsic) connections can be updated during training.
-        background_trainable (bool):    If True, the background connections can be updated during training.
+        Args:
+            area_name (str): Configured area name string matching parameters in configuration
+                file.
+            size (int): Number of cortical columns contained within the area.
+            unique_id (str | None, optional): Unique area identifier string. Defaults to None
+                (uses `area_name`).
+            initialize_recurrent_and_background (bool, optional): Whether to automatically
+                instantiate recurrent and background connections. Defaults to True.
+            intrinsic_trainable (bool, optional): Whether recurrent connection weights are trainable.
+                Defaults to False.
+            background_trainable (bool, optional): Whether background connection weights are trainable.
+                Defaults to False.
         """
         area_name = area_name.lower()
         assert area_name in self.params['general']['population_size'], f"Population sizes of '{area_name}' not found in .toml file. "
@@ -229,14 +253,12 @@ class BrainNetwork(torch.nn.Module):
             unique_area_id,
             trainable=True):
         """
-        Add recurrent (column-intrinsic) connections to the network architecture.
+        Add column-intrinsic recurrent connections to a specific brain area.
 
-        Params:
-        area (str):                     Area for which recurrent connections should be initialized.
-        unique_area_id (str):           User-specified id for the area.
-        trainable (bool):               If True, weights should be updated during training.
-        ================================
-        See _initialize_default_connection() for more initialization options.
+        Args:
+            area (BrainArea | str): BrainArea object or area identifier string.
+            unique_area_id (str): Unique area identifier string.
+            trainable (bool, optional): Whether recurrent weights are trainable during optimization. Defaults to True.
         """
         self._initialize_default_connection(
             'recurrent',
@@ -252,14 +274,12 @@ class BrainNetwork(torch.nn.Module):
             unique_area_id,
             trainable=True):
         """
-        Add background connections to the network architecture.
+        Add background drive connections to a specific brain area.
 
-        Params:
-        area (str):                     Area for which background connections should be initialized.
-        unique_area_id (str):           User-specified id for the area.
-        trainable (bool):               If True, weights should be updated during training.
-        ================================
-        See _initialize_default_connection() for more initialization options.
+        Args:
+            area (BrainArea | str): BrainArea object or area identifier string.
+            unique_area_id (str): Unique area identifier string.
+            trainable (bool, optional): Whether background weights are trainable during optimization. Defaults to True.
         """
         self._initialize_default_connection(
             'background',
@@ -280,14 +300,17 @@ class BrainNetwork(torch.nn.Module):
             std=0.1,
             scale=1.0):
         """
-        Add a feedforward connection to the network architecture.
+        Add inter-area feedforward connectivity between a source area and target area with optional receptive field constraints.
 
-        Params:
-        source (str):                   Source area that the feedforward connection originates from.
-        target (str):                   Target area of the feedforward connection.
-        trainable (bool):               If True, weights should be updated during training.
-        ================================
-        See _initialize_default_connection() for more initialization options.
+        Args:
+            source (str): Identifier of source area.
+            target (str): Identifier of target area.
+            trainable (bool, optional): Whether weights are trainable during optimization. Defaults to True.
+            receptive_field_size (int | None, optional): Size of spatial receptive field window. Defaults to None.
+            stride (int, optional): Stride step size of receptive field window. Defaults to 1.
+            grid_organization (bool, optional): Whether connectivity assumes 2D grid arrangement. Defaults to False.
+            std (float, optional): Standard deviation of initialized weights. Defaults to 0.1.
+            scale (float, optional): Scaling multiplier for initialized weights. Defaults to 1.0.
         """
         source_area = self._get_area(source)
         target_area = self._get_area(target)
@@ -318,14 +341,17 @@ class BrainNetwork(torch.nn.Module):
             std=0.1,
             scale=1.0):
         """
-        Add a feedback connection to the network architecture.
+        Add inter-area feedback connectivity from a source area to a target area with optional receptive field constraints.
 
-        Params:
-        source (str):                   Source area that the feedback connection originates from.
-        target (str):                   Target area of the feedback connection.
-        trainable (bool):               If True, weights should be updated during training.
-        ================================
-        See _initialize_default_connection() for more initialization options.
+        Args:
+            source (str): Identifier of source area.
+            target (str): Identifier of target area.
+            trainable (bool, optional): Whether weights are trainable during optimization. Defaults to True.
+            receptive_field_size (int | None, optional): Size of spatial receptive field window. Defaults to None.
+            stride (int, optional): Stride step size of receptive field window. Defaults to 1.
+            grid_organization (bool, optional): Whether connectivity assumes 2D grid arrangement. Defaults to False.
+            std (float, optional): Standard deviation of initialized weights. Defaults to 0.1.
+            scale (float, optional): Scaling multiplier for initialized weights. Defaults to 1.0.
         """
         source_area = self._get_area(source)
         target_area = self._get_area(target)
@@ -355,13 +381,16 @@ class BrainNetwork(torch.nn.Module):
             std=0.1,
             scale=1.0):
         """
-        Add lateral connections to the network architecture.
+        Add inter-column lateral connectivity within an area, excluding column-intrinsic recurrent connections.
 
-        Params:
-        area_name (str):                Area for which lateral connections should be initialized.
-        trainable (bool):               If True, weights should be updated during training.
-        ================================
-        See _initialize_default_connection() for more initialization options.
+        Args:
+            area_name (str): Identifier of target area.
+            trainable (bool, optional): Whether weights are trainable during optimization. Defaults to True.
+            receptive_field_size (int | None, optional): Size of spatial receptive field window. Defaults to None.
+            stride (int, optional): Stride step size of receptive field window. Defaults to 1.
+            grid_organization (bool, optional): Whether connectivity assumes 2D grid arrangement. Defaults to False.
+            std (float, optional): Standard deviation of initialized weights. Defaults to 0.1.
+            scale (float, optional): Scaling multiplier for initialized weights. Defaults to 1.0.
         """
         area = self._get_area(area_name)
 
@@ -391,18 +420,18 @@ class BrainNetwork(torch.nn.Module):
             std=0.1,
             scale=1.0):
         """
-        Add an input connection to the network architecture.
+        Add external drive input connections targeting a specific brain area.
 
-        Params:
-        target_area (str):              Target area of the input connection.
-        input_size (int):               Size of input. If input is two-dimensional, please pass flattened size
-                                        (and set grid_organization=True).
-        unique_id (str):                An optional user-specified id for the input. Useful when the network
-                                        should contain more than one input connection. If using, make sure there
-                                        is a corresponding mask and init in the .toml file with the same id.
-        trainable (bool):               If True, weights should be updated during training.
-        ================================
-        See _initialize_default_connection() for more initialization options.
+        Args:
+            target_area (str): Identifier of target brain area receiving input.
+            input_size (int): Dimension of external input vector.
+            unique_id (str | None, optional): Unique ID string for input connection. Defaults to None (uses 'input').
+            trainable (bool, optional): Whether weights are trainable during optimization. Defaults to True.
+            receptive_field_size (int | None, optional): Size of spatial receptive field window. Defaults to None.
+            stride (int, optional): Stride step size of receptive field window. Defaults to 1.
+            grid_organization (bool, optional): Whether connectivity assumes 2D grid arrangement. Defaults to False.
+            std (float, optional): Standard deviation of initialized weights. Defaults to 0.1.
+            scale (float, optional): Scaling multiplier for initialized weights. Defaults to 1.0.
         """
         area = self._get_area(target_area)
         input_name = unique_id or 'input'
@@ -430,16 +459,14 @@ class BrainNetwork(torch.nn.Module):
             std=0.0,
             scale=1.0):
         """
-        Add an output connection to the network architecture.
+        Add task readout output connection reading out activity from a source brain area.
 
-        Params:
-        source_area (str):              Source area of the output connection.
-        unique_id (str):                An optional user-specified id for the output. Useful when the network
-                                        should contain more than one output connection. If using, make sure there
-                                        is a corresponding mask and init in the .toml file with the same id.
-        trainable (bool):               If True, weights should be updated during training.
-        ================================
-        See _initialize_default_connection() for more initialization options.
+        Args:
+            source_area (str): Identifier of source brain area supplying readout.
+            unique_id (str | None, optional): Unique ID string for output connection. Defaults to None (uses 'output').
+            trainable (bool, optional): Whether output readout weights are trainable. Defaults to False.
+            std (float, optional): Standard deviation of initialized weights. Defaults to 0.0.
+            scale (float, optional): Scaling multiplier for initialized weights. Defaults to 1.0.
         """
         area = self._get_area(source_area)
         output_name = unique_id or 'output'
@@ -466,25 +493,20 @@ class BrainNetwork(torch.nn.Module):
             is_output_connection=False,
             **initializer_args):
         """
-        Add a custom connection to the network architecture with a user-specified initializer function.
+        Add a custom connection to the network architecture using a custom user-defined initializer function.
 
-        Params:
-        connection_name (str):          Name of the connection, can be anything (also 'feedforward', 'input', etc.)
-                                        as long as the {name}_{source}_{target} string is unique to the network.
-        source (str):                   Name of the source, can refer to an already initialized network area with
-                                        BrainNetwork.add_area(), or to a network-external source (i.e. 'input').
-        target (str):                   Name of the source, can refer to an already initialized network area with
-                                        BrainNetwork.add_area(), or to a network-external target (i.e. 'output').
-        initializer (func):             A user-specified function that initializes the connection weights and mask.
-                                        The function receives a dictionary with network parameters ('source', 'target',
-                                        'general_params' and 'model_params' as the first argument, and any optional
-                                        user-specified arguments. The function should return tensors (weights, mask)
-                                        both with the shape (target, source).
-        trainable (bool):               If True, weights should be updated during training.
-        is_output_connection (bool):    If True, the network will handle the connection as output (i.e. read-out) and
-                                        the connection itself has no influence on network dynamics. In this case,
-                                        the target should not refer to a brain area.
-        ** initializer_args:            Optional arguments to pass to the user-specified initializer function.
+        Args:
+            connection_name (str): Identifier string for custom connection.
+            source (str): Source area ID or external source name.
+            target (str): Target area ID or external target name.
+            initializer (Callable): Custom initializer function returning `(weights, mask)` tensors. The
+                function receives a dictionary with network parameters (keys: 'source', 'target', 'general_params',
+                'model_params') as the first argument, and any optional user-specified arguments. The function
+                should return tensors `(weights, mask)` both with the shape `(target.size, source.size)`.
+            trainable (bool, optional): Whether weights are trainable during optimization. Defaults to True.
+            is_output_connection (bool, optional): Whether connection functions as a readout output without
+                affecting network dynamics. Defaults to False.
+            **initializer_args: Additional keyword arguments passed to custom initializer function.
         """
         connection = Connection(
             connection_name,
@@ -517,9 +539,8 @@ class BrainNetwork(torch.nn.Module):
 
     def finalize(self):
         """
-        Finalizes the network after initializing all areas and connections by setting
-        the total number of populations and columns, and setting slices to index the
-        activity of each area. Also extends adaptation strength to entire network.
+        Finalize network geometry after adding all areas and connections, setting state vector slice indices
+        and extending adaptation buffers.
         """
         if not self.network_is_finalized:
 
@@ -540,7 +561,8 @@ class BrainNetwork(torch.nn.Module):
 
     def constrain_weights(self):
         """
-        Constrain all connection weights to not use any illegal connections.
+        Constrain all internal and output connection weight matrices to enforce structural masks and
+        Dale's law sign rules.
         """
         all_connections = (list(self.connections.values())
                            + list(self.output_connections.values()))
@@ -550,10 +572,23 @@ class BrainNetwork(torch.nn.Module):
 
     def run(self, ext_input=None, input_window=None, adjoint=False, stochastic=False, reset_state=True, device="cpu"):
         """
-        Delegates running the network to the simulation engine.
-        Todo: add documentation
-        reset_state=False can only be done if the network has been simulated after
-        initialization and if the previous batch_size matches the current batch_size.
+        Delegate numerical integration of network dynamics to the simulation engine across specified time windows.
+
+        Args:
+            ext_input (dict | torch.Tensor | None, optional): External drive input specification. Defaults to None.
+                If None, the network will run at resting state.
+            input_window (dict | tuple | None, optional): Active time window intervals. Defaults to None.
+                If None, `input_window` from TOML configuration file will be used.
+            adjoint (bool, optional): Whether to use adjoint solver variants. Defaults to False.
+            stochastic (bool, optional): Whether to simulate stochastic dynamics with noise. Defaults to False.
+            reset_state (bool, optional): Whether to reset initial state to resting state. If False, will use the
+                last state of the previous simulation as the current initial state. Defaults to True.
+            device (torch.device | str, optional): Compute device for execution. Defaults to "cpu".
+
+        Returns:
+            torch.Tensor: Simulation output state trajectory tensor of shape
+                `(time_steps, batch_size, 2 * total_populations)`. The last dimension is split into
+                membrane potential `[:, :, :N]` and adaptation `[:, :, N:]`
         """
         return self.simulator.run(
             ext_input=ext_input,
@@ -573,8 +608,20 @@ class BrainNetwork(torch.nn.Module):
             return_as_np_array=True,
             return_as_dict=False):
         """
-        Computes the firing rate from the raw state (= [membrane_potential, adaptation])
-        Returns as np.array unless specified otherwise.
+        Compute population firing rates from raw state trajectory tensors and filter by sample, area, column,
+        or laminar layer.
+
+        Args:
+            raw_state (torch.Tensor): Simulation state output tensor.
+            sample (int | list[int] | None, optional): Sample indices filter. Defaults to None.
+            area (str | None, optional): Target area filter. Defaults to None.
+            column (int | list[int] | None, optional): Column indices filter. Defaults to None.
+            population (int | str | list | None, optional): Population layer filter. Defaults to None.
+            return_as_np_array (bool, optional): Whether to return array as NumPy. Defaults to True.
+            return_as_dict (bool, optional): Whether to return structured area dictionary. Defaults to False.
+
+        Returns:
+            np.ndarray | torch.Tensor | tuple: Processed firing rates tensor or dictionary tuple.
         """
         return self.readout.get_firing_rates(
             raw_state=raw_state,
@@ -587,11 +634,16 @@ class BrainNetwork(torch.nn.Module):
 
     def read_out(self, raw_output, mode, sum_per_col=True):
         """
-        Reads model output from raw output; converts to firing rates and slices
-        only the area(s) that are identified as output sources.
-        Either returns entire trajectory (mode='trajectory') or average of
-        last x time steps (mode='classification'), i.e. trajectory-based vs
-        classification-based training procedure.
+        Compute task output readouts from raw simulation state trajectories using continuous or classification
+        time averaging.
+
+        Args:
+            raw_output (torch.Tensor): Simulation output state trajectory tensor.
+            mode (str): Evaluation mode (`'trajectory'` or `'classification'`).
+            sum_per_col (bool, optional): Whether to sum rates across all 8 column populations. Defaults to True.
+
+        Returns:
+            torch.Tensor | dict[str, torch.Tensor]: Processed readout tensor or dictionary of readout tensors.
         """
         return self.readout.read_out(
             raw_output=raw_output,
@@ -600,8 +652,10 @@ class BrainNetwork(torch.nn.Module):
 
     def save(self, path):
         """
-        Save the current network as a checkpoint, with its learned weights
-        and additional parameters.
+        Serialize and save current network architecture, model parameters, and trained weights to a checkpoint file.
+
+        Args:
+            path (str | Path): Output file path for checkpoint saving.
         """
         checkpoint = self.archive.create_checkpoint()
         torch.save(checkpoint, path)
@@ -609,8 +663,17 @@ class BrainNetwork(torch.nn.Module):
     @classmethod
     def load(cls, path, model_config_path=None, general_config_path=None):
         """
-        Load a saved network checkpoint and reinstate the network with its
-        saved weights and parameters.
+        Load a saved network checkpoint from file and reinstate its architecture, weights, and parameters.
+
+        Args:
+            path (str | Path): File path of saved checkpoint.
+            model_config_path (str | Path | None, optional): Optional override config path for model parameters.
+                Defaults to None.
+            general_config_path (str | Path | None, optional): Optional override config path for general parameters.
+                Defaults to None.
+
+        Returns:
+            BrainNetwork: Fully reinstated and finalized network instance.
         """
         checkpoint = torch.load(
             path,

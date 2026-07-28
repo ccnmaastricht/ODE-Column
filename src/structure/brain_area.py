@@ -3,16 +3,38 @@ import numpy as np
 from scipy.linalg import block_diag
 
 
-
 class BrainArea(torch.nn.Module):
-
     """
-    Areas denote groups of columns with the same column parameters (e.g. population counts,
-    background synapse counts, etc). The recurrent activity profile determines the column-
-    intrinsic dynamics.
+    Represents a cortical brain area consisting of a group of laminar columns with
+    shared population counts, connection probabilities, and synaptic strengths.
+
+    Args:
+        col_params (dict): General configuration dictionary containing population size,
+            background synapse count, and synaptic strength specifications.
+        area_name (str): Configured area name string matching parameters in config.
+        num_columns (int): Number of cortical columns contained within this area.
+        unique_id (str): Unique area identifier string within the parent network.
+
+    Attributes:
+        num_columns (int): Number of cortical columns in the area.
+        area_name (str): Configured name of the area.
+        id (str): Unique area identifier.
+        population_sizes (np.ndarray): Array of population sizes tiled across columns.
+        num_populations (int): Total number of neuronal populations in the area.
+        connection_probabilities (np.ndarray): Block-diagonal connection matrix of
+            shape `(num_populations, num_populations)`.
+        background_synapse_counts (torch.Tensor): Tiled background synapse count vector.
+        baseline_synaptic_strength (float): Baseline synaptic strength value.
+        recurrent_synapse_counts (torch.Tensor): Recurrent synapse count matrix.
+        recurrent_synaptic_strength (torch.Tensor): Recurrent synaptic strength matrix.
+        recurrent_weights (torch.Tensor): Registered buffer of internal recurrent weights.
+        background_weights (torch.Tensor): Registered buffer of background drive weights.
+        internal_mask (torch.Tensor): Registered buffer mask for intra-column connections.
+        external_mask (torch.Tensor): Registered buffer mask for inter-column connections.
     """
 
     def __init__(self, col_params, area_name, num_columns, unique_id):
+
         super().__init__()
 
         self.num_columns = num_columns
@@ -26,7 +48,11 @@ class BrainArea(torch.nn.Module):
 
     def _initialize_population_parameters(self, column_parameters):
         """
-        Initialize the population sizes for the columns.
+        Initialize tiled population size arrays across columns and construct internal/external
+        column connectivity masks.
+
+        Args:
+            column_parameters (dict): Parameter dictionary containing population sizes.
         """
         self.population_sizes = np.array(
             column_parameters['population_size'][self.area_name])
@@ -37,7 +63,11 @@ class BrainArea(torch.nn.Module):
 
     def _initialize_connection_probabilities(self, column_parameters):
         """
-        Initialize the connection probabilities for the columns.
+        Initialize internal connection probability matrix tiled along the block diagonal for
+        all columns in the area.
+
+        Args:
+            column_parameters (dict): Parameter dictionary containing connection probabilities.
         """
         self.internal_connection_probabilities = torch.tensor(
             column_parameters['connection_probabilities']['internal'])
@@ -48,7 +78,11 @@ class BrainArea(torch.nn.Module):
 
     def _initialize_synapses(self, column_parameters):
         """
-        Initialize the synapse counts and synaptic strengths for the columns.
+        Initialize background synapse counts, baseline synaptic strength, and compute recurrent
+        synapse count and strength matrices.
+
+        Args:
+            column_parameters (dict): Parameter dictionary containing synapse specs.
         """
         background_synapse_counts = torch.tensor(
             column_parameters['background_synapse_counts'][self.area_name])
@@ -63,8 +97,7 @@ class BrainArea(torch.nn.Module):
 
     def _compute_recurrent_synapse_counts(self):
         """
-        Compute the number of synapses for recurrent connections based on the
-        connection probabilities and population sizes.
+        Compute recurrent synapse count matrix using connection probabilities and population sizes.
         """
         log_numerator = np.log(1 - np.array(self.connection_probabilities))
         log_denominator = np.log(1 - 1 / np.array(np.outer(self.population_sizes, self.population_sizes)))
@@ -74,7 +107,8 @@ class BrainArea(torch.nn.Module):
 
     def _build_recurrent_synaptic_strength_matrix(self):
         """
-        Build the synaptic strength matrix.
+        Construct recurrent synaptic strength matrix applying baseline strength and inhibitory
+        population scaling factors.
         """
         inhibitory_scaling_factor = torch.tensor([
             -num_excitatory / num_inhibitory
@@ -90,7 +124,7 @@ class BrainArea(torch.nn.Module):
 
     def _build_all_weights(self):
         """
-        Build recurrent and background from synapse counts and synaptic strengths.
+        Compute recurrent and background weight matrices and register them as PyTorch module buffers.
         """
         recurrent_weights = self.recurrent_synapse_counts * self.recurrent_synaptic_strength
         self.register_buffer("recurrent_weights", recurrent_weights)
@@ -99,8 +133,11 @@ class BrainArea(torch.nn.Module):
 
     def _make_in_ex_masks(self, num_columns):
         """
-        Make an internal mask with ones for within column connections
-        and an external mask with ones for across column connections.
+        Construct internal intra-column mask and external inter-column mask matrices and register
+        them as PyTorch buffers.
+
+        Args:
+            num_columns (int): Number of cortical columns in the area.
         """
         column_size = self.num_populations // num_columns  # will likely always be 8
 
@@ -116,5 +153,3 @@ class BrainArea(torch.nn.Module):
 
         external_mask = 1 - mask
         self.register_buffer("external_mask", external_mask)
-
-

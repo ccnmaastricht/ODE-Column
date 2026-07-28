@@ -2,16 +2,35 @@ import torch
 import math
 
 
-
 class Connection(torch.nn.Module):
-
     """
-    Connections allow source activity to influence target areas (between areas) or
-    target populations (within areas). Connections include recurrent (intrinsic),
-    background, feedforward, feedback, lateral and input.
+    Represents structural connections between areas or populations, supporting
+    recurrent, background, feedforward, feedback, lateral, input, and output types.
+
+    Args:
+        conn_type (str): Connection type classification string (e.g., 'feedforward').
+        source (str): Identifier of the source area or input name.
+        target (str): Identifier of the target area or output name.
+        trainable (bool): Whether connection weights are updated during training.
+        source_size (int | None, optional): Total populations in source area. Defaults to None.
+        target_size (int | None, optional): Total populations in target area. Defaults to None.
+        initialize_weights_and_mask (bool, optional): Whether to allocate empty parameters
+            for weights and mask during instantiation. Defaults to False.
+
+    Attributes:
+        conn_type (str): Type specification string.
+        source_id (str): Source identifier string.
+        target_id (str): Target identifier string.
+        source_size (int | None): Number of source populations.
+        target_size (int | None): Number of target populations.
+        trainable (bool): Flag indicating if weights parameter requires grad.
+        weights (torch.nn.Parameter): Learnable synaptic weight parameter matrix.
+        mask (torch.Tensor): Registered buffer mask enforcing structural connectivity.
+        W (torch.Tensor): Constrained weight matrix enforcing sign constraints.
     """
 
     def __init__(self, conn_type, source, target, trainable, source_size=None, target_size=None, initialize_weights_and_mask=False):
+
         super().__init__()
 
         self.conn_type      = conn_type
@@ -33,8 +52,16 @@ class Connection(torch.nn.Module):
 
     def _get_connection_params(self, params, unique_id=None):
         """
-        Obtains the relevant parameters from the params dict to establish
-        the connection.
+        Extract connection initialization template, connectivity mask template, and baseline
+        synaptic strength from configuration dictionary.
+
+        Args:
+            params (dict): Configuration parameter dictionary.
+            unique_id (str | None, optional): Specific connection lookup key. Defaults to None.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor, float]: Tuple containing initial template tensor,
+                mask template tensor, and baseline synaptic strength float.
         """
         init = torch.tensor(params['model']['connection_inits'][unique_id or self.conn_type])
         mask = torch.tensor(params['model']['connection_masks'][unique_id or self.conn_type])
@@ -44,7 +71,19 @@ class Connection(torch.nn.Module):
 
     def _init_weights(self, init, size_source, size_target, synapse_strength, std, scale):
         """
-        Initialize random weights and fit them to shape (target, source).
+        Generate randomly sampled normal synaptic weight matrix shaped to `(size_target, size_source)`
+        using specified mean, standard deviation, and scale.
+
+        Args:
+            init (torch.Tensor): Initial weight template tensor.
+            size_source (int): Number of source columns/populations.
+            size_target (int): Number of target columns/populations.
+            synapse_strength (float): Synaptic strength multiplier.
+            std (float): Standard deviation for Gaussian noise sampling.
+            scale (float): Scaling factor applied to initial weights.
+
+        Returns:
+            torch.Tensor: Randomly initialized weight matrix of shape `(size_target, size_source)`.
         """
         init *= synapse_strength
         init = torch.tile(init, (size_target, size_source))
@@ -55,8 +94,18 @@ class Connection(torch.nn.Module):
 
     def _make_receptive_field_mask(self, size_source, size_target, receptive_field_size, stride, grid_organization):
         """
-        Create a receptive field mask to constrain which connections can
-        be made between a source and target area.
+        Construct receptive field mask enforcing 1D or 2D spatial connectivity constraints
+        between source and target areas.
+
+        Args:
+            size_source (int): Number of source columns.
+            size_target (int): Number of target columns.
+            receptive_field_size (int | None): Size of receptive field window.
+            stride (int): Stride step size of receptive field window.
+            grid_organization (bool): Whether connectivity assumes a 2D spatial grid layout.
+
+        Returns:
+            torch.Tensor: Receptive field binary mask matrix of shape `(size_target, size_source)`.
         """
         receptive_field_mask = torch.zeros(size_target, size_source)
 
@@ -97,8 +146,20 @@ class Connection(torch.nn.Module):
 
     def _initialize_connection_between_areas(self, params, source_area, target_area, receptive_field_size, stride, grid_organization, std, scale):
         """
-        Initialize connection weights between two BrainArea objects.
-        Gets called to initialize feedforward, feedback and lateral connection weights.
+        Initialize weight and mask matrices for inter-area connections (feedforward, feedback, or lateral).
+
+        Args:
+            params (dict): Configuration parameters dictionary.
+            source_area (BrainArea): Source brain area instance.
+            target_area (BrainArea): Target brain area instance.
+            receptive_field_size (int | None): Size of receptive field window.
+            stride (int): Stride step size of receptive field window.
+            grid_organization (bool): Whether connectivity assumes 2D grid organization.
+            std (float): Standard deviation of initial weights.
+            scale (float): Scaling factor for initial weights.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Tuple containing weight matrix and mask matrix.
         """
         init, mask, synapse_strength = self._get_connection_params(params)
 
@@ -118,29 +179,43 @@ class Connection(torch.nn.Module):
 
     def set_weights_and_mask(self, weights, mask):
         """
-        Set the connection weights and mask as object attributes.
+        Set weight matrix as a PyTorch Module Parameter and mask matrix as a PyTorch registered buffer.
+
+        Args:
+            weights (torch.Tensor): Initial weight matrix tensor.
+            mask (torch.Tensor): Connectivity mask matrix tensor.
         """
         self.weights = torch.nn.Parameter(weights, requires_grad=self.trainable)
         self.register_buffer("mask", mask)
 
     def set_sizes(self, source_size, target_size):
         """
-        Set the sizes (number of populations) of the source and target.
+        Set source and target population counts.
+
+        Args:
+            source_size (int): Number of populations in source.
+            target_size (int): Number of populations in target.
         """
         self.source_size = source_size
         self.target_size = target_size
 
     def get_name(self):
         """
-        Returns the unique string specifying the connection.
+        Generate unique formatted string name for the connection
+        (`'{conn_type}_{source_id}_{target_id}'`).
+
+        Returns:
+            str: Connection name string.
         """
         return f'{self.conn_type}_{self.source_id}_{self.target_id}'
 
     def constrain(self, existing_areas):
         """
-        Constrain the connection so no illegal connections can be used. Uses the
-        connection mask and, if the connection source is a BrainArea, it forces
-        excitatory connections to be non-negative and inhibitory ones to be non-positive.
+        Apply structural mask and Dale's law sign constraints to weight matrix, forcing excitatory
+        connections to be non-negative and inhibitory connections to be non-positive.
+
+        Args:
+            existing_areas (Iterable[str]): Collection of initialized brain area names.
         """
         masked = self.weights * self.mask
 
@@ -159,13 +234,25 @@ class Connection(torch.nn.Module):
 
     def initialize_recurrent_weights(self, area):
         """
-        Initialize recurrent (i.e. column-intrinsic) weights within the same area.
+        Extract recurrent weight and mask matrices from a BrainArea instance.
+
+        Args:
+            area (BrainArea): Target brain area module.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Tuple of recurrent weights and internal mask tensors.
         """
         return area.recurrent_weights, area.internal_mask
 
     def initialize_background_weights(self, area):
         """
-        Initialize background weights within an area.
+        Extract background drive weight and mask matrices from a BrainArea instance.
+
+        Args:
+            area (BrainArea): Target brain area module.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Tuple of background weights and mask tensors.
         """
         bg_weights = area.background_weights.unsqueeze(1)  # add extra dim
         mask = torch.ones_like(bg_weights)
@@ -173,19 +260,58 @@ class Connection(torch.nn.Module):
 
     def initialize_feedforward_weights(self, params, source_area, target_area, receptive_field_size, stride, grid_organization, std, scale):
         """
-        Initialize feedforward weights between source area and target area.
+        Initialize feedforward connectivity weights and mask between source area and target area.
+
+        Args:
+            params (dict): Configuration parameters dictionary.
+            source_area (BrainArea): Source brain area instance.
+            target_area (BrainArea): Target brain area instance.
+            receptive_field_size (int | None): Size of receptive field.
+            stride (int): Stride step size of receptive field.
+            grid_organization (bool): Whether 2D spatial grid connectivity applies.
+            std (float): Standard deviation of initial weights.
+            scale (float): Scaling factor for initial weights.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Tuple containing initial weights and mask tensors.
         """
         return self._initialize_connection_between_areas(params, source_area, target_area, receptive_field_size, stride, grid_organization, std, scale)
 
     def initialize_feedback_weights(self, params, source_area, target_area, receptive_field_size, stride, grid_organization, std, scale):
         """
-        Initialize feedback weights between source area and target area.
+        Initialize feedback connectivity weights and mask between source area and target area.
+
+        Args:
+            params (dict): Configuration parameters dictionary.
+            source_area (BrainArea): Source brain area instance.
+            target_area (BrainArea): Target brain area instance.
+            receptive_field_size (int | None): Size of receptive field.
+            stride (int): Stride step size of receptive field.
+            grid_organization (bool): Whether 2D spatial grid connectivity applies.
+            std (float): Standard deviation of initial weights.
+            scale (float): Scaling factor for initial weights.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Tuple containing initial weights and mask tensors.
         """
         return self._initialize_connection_between_areas(params, source_area, target_area, receptive_field_size, stride, grid_organization, std, scale)
 
     def initialize_lateral_weights(self, params, area, receptive_field_size, stride, grid_organization, std, scale):
         """
-        Initialize lateral weights within an area.
+        Initialize lateral connectivity weights and mask within an area, excluding intra-column
+        connections.
+
+        Args:
+            params (dict): Configuration parameters dictionary.
+            area (BrainArea): Target brain area module.
+            receptive_field_size (int | None): Size of receptive field.
+            stride (int): Stride step size of receptive field.
+            grid_organization (bool): Whether 2D spatial grid connectivity applies.
+            std (float): Standard deviation of initial weights.
+            scale (float): Scaling factor for initial weights.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Tuple containing lateral weights and mask tensors.
         """
         weights, mask = self._initialize_connection_between_areas(params, area, area, receptive_field_size, stride, grid_organization, std, scale)
 
@@ -197,7 +323,20 @@ class Connection(torch.nn.Module):
 
     def initialize_input_weights(self, params, size_input, target_area, receptive_field_size, stride, grid_organization, std, scale):
         """
-        Initialize input weights targeting an area.
+        Initialize external input weights and mask targeting a brain area.
+
+        Args:
+            params (dict): Configuration parameters dictionary.
+            size_input (int): Dimension of external input vector.
+            target_area (BrainArea): Target brain area module.
+            receptive_field_size (int | None): Size of receptive field.
+            stride (int): Stride step size of receptive field.
+            grid_organization (bool): Whether 2D spatial grid connectivity applies.
+            std (float): Standard deviation of initial weights.
+            scale (float): Scaling factor for initial weights.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Tuple containing input weights and mask tensors.
         """
         init, mask, synapse_strength = self._get_connection_params(params, self.source_id)
         init = torch.transpose(init.unsqueeze(0), 0, 1)
@@ -217,7 +356,17 @@ class Connection(torch.nn.Module):
 
     def initialize_output_weights(self, params, source_area, std, scale):
         """
-        Initialize output weights reading out activity from an area.
+        Initialize task output readout weights and mask from a source brain area.
+
+        Args:
+            params (dict): Configuration parameters dictionary.
+            source_area (BrainArea): Source brain area module.
+            std (float): Standard deviation of initial weights.
+            scale (float): Scaling factor for initial weights.
+
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: Tuple containing output readout weights and mask
+                tensors.
         """
         init, mask, _ = self._get_connection_params(params, self.target_id)
         size_source_area = source_area.num_columns
@@ -227,4 +376,3 @@ class Connection(torch.nn.Module):
         mask = torch.tile(mask, (1, size_source_area))
         weights = rand_weights * mask
         return weights, mask
-
