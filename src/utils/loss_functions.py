@@ -26,15 +26,16 @@ def compute_L2_regularization(network):
     """
     Computes the penalty for large weights (i.e. L2 regularization).
     """
-    total_L2_reg = 0
+    total_sq_sum = 0.0
+    total_count = 0
 
-    for name, conn in network.connections.items():
-        if conn.trainable:
+    for _, conn in network.connections.items():
+        if not conn.trainable:
+            continue
+        total_sq_sum = total_sq_sum + (conn.W ** 2).sum()
+        total_count += conn.W.numel()
 
-            L2_reg = (conn.W ** 2).mean()
-            total_L2_reg += L2_reg
-
-    return total_L2_reg
+    return total_sq_sum / total_count
 
 def compute_ei_ratio_penalty(network, target=0.61, eps=1e-6, beta=10.0):
     """
