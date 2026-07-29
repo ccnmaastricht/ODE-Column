@@ -182,22 +182,23 @@ class NetworkReadout:
         """
         assert mode == 'trajectory' or mode == 'classification', f"Invalid mode for read-out. Acceptable modes are 'trajectory' or 'classification'."
 
+        output_conns = {name : conn for name, conn in self.network.connections.items() if conn.conn_type == 'output'}
         read_outs = {}
 
-        for conn_name, output_conn in self.network.output_connections.items():
+        for conn_name, output_conn in output_conns.items():
+
             fr_output_area = self.get_firing_rates(raw_output, area=output_conn.source_id, return_as_np_array=False)
-            read_out = fr_output_area * output_conn.weights
+            read_out = fr_output_area * output_conn.W
 
             if sum_per_col:
-                read_out_reshape = torch.reshape(read_out,
-                                                 (read_out.shape[0], read_out.shape[1], read_out.shape[2] // 8, 8))
+                read_out_reshape = torch.reshape(read_out, (read_out.shape[0], read_out.shape[1], read_out.shape[2] // 8, 8))
                 read_out = torch.sum(read_out_reshape, dim=-1)
 
             if mode == 'classification':
                 read_out = self._classification_read_out(read_out)
 
-            if len(list(self.network.output_connections.keys())) == 1:
-                return read_out
-
             read_outs[conn_name] = read_out
+
+        if len(output_conns) == 1:
+            return read_out
         return read_outs

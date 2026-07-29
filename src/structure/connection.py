@@ -12,6 +12,9 @@ class Connection(torch.nn.Module):
         source (str): Identifier of the source area or input name.
         target (str): Identifier of the target area or output name.
         trainable (bool): Whether connection weights are updated during training.
+        dales_law_constraint (bool): Whether the source is a BrainArea and weights should follow
+            Dale's law, i.e. constrain excitatory weights to be non-negative and inhibitory
+            weight non-positive. If False, all weights are constrained to be non-negative.
         source_size (int | None, optional): Total populations in source area. Defaults to None.
         target_size (int | None, optional): Total populations in target area. Defaults to None.
         initialize_weights_and_mask (bool, optional): Whether to allocate empty parameters
@@ -24,21 +27,24 @@ class Connection(torch.nn.Module):
         source_size (int | None): Number of source populations.
         target_size (int | None): Number of target populations.
         trainable (bool): Flag indicating if weights parameter requires grad.
+        dales_law_constraint (bool): Flag indicating if weights should follow Dale's law.
         weights (torch.nn.Parameter): Learnable synaptic weight parameter matrix.
         mask (torch.Tensor): Registered buffer mask enforcing structural connectivity.
-        W (torch.Tensor): Constrained weight matrix enforcing sign constraints.
+        W (torch.Tensor): Constrained weight matrix.
     """
 
-    def __init__(self, conn_type, source, target, trainable, source_size=None, target_size=None, initialize_weights_and_mask=False):
+    def __init__(self, conn_type, source, target, trainable, dales_law_constraint,
+                 source_size=None, target_size=None, initialize_weights_and_mask=False):
 
         super().__init__()
 
-        self.conn_type      = conn_type
-        self.source_id      = source
-        self.target_id      = target
-        self.source_size    = source_size
-        self.target_size    = target_size
-        self.trainable      = trainable
+        self.conn_type              = conn_type
+        self.source_id              = source
+        self.target_id              = target
+        self.source_size            = source_size
+        self.target_size            = target_size
+        self.trainable              = trainable
+        self.dales_law_constraint   = dales_law_constraint
 
         if initialize_weights_and_mask:
 
@@ -209,26 +215,23 @@ class Connection(torch.nn.Module):
         """
         return f'{self.conn_type}_{self.source_id}_{self.target_id}'
 
-    def constrain(self, existing_areas):
+    def constrain(self):
         """
         Apply structural mask and Dale's law sign constraints to weight matrix, forcing excitatory
         connections to be non-negative and inhibitory connections to be non-positive.
-
-        Args:
-            existing_areas (Iterable[str]): Collection of initialized brain area names.
         """
         masked = self.weights * self.mask
 
-        if self.source_id in existing_areas:
+        if self.dales_law_constraint:
 
             exc = torch.relu(masked[:, 0::2])
             inh = -torch.relu(-masked[:, 1::2])
 
-            ex_in_masked = masked.clone()
-            ex_in_masked[:, 0::2] = exc
-            ex_in_masked[:, 1::2] = inh
+            dales_law_masked = masked.clone()
+            dales_law_masked[:, 0::2] = exc
+            dales_law_masked[:, 1::2] = inh
 
-            self.W = ex_in_masked
+            self.W = dales_law_masked
         else:
             self.W = torch.relu(masked)
 

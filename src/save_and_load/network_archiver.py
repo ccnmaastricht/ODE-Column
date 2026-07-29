@@ -30,8 +30,7 @@ class NetworkArchiver:
                 for area sizes, connectivity sources, targets, and trainability flags.
         """
         architecture = {"areas": [],
-                        "connections": [],
-                        "output_connections": []}
+                        "connections": []}
 
         for area_id, area in self.network.areas.items():
 
@@ -48,19 +47,10 @@ class NetworkArchiver:
                 "target_id": conn.target_id,
                 "source_size": conn.source_size,
                 "target_size": conn.target_size,
-                "trainable": conn.trainable}
+                "trainable": conn.trainable,
+                "dales_law_constraint": conn.dales_law_constraint}
 
             architecture["connections"].append(conn_dict)
-
-        for conn in self.network.output_connections.values():
-
-            architecture["output_connections"].append({
-                "conn_type": conn.conn_type,
-                "source_id": conn.source_id,
-                "target_id": conn.target_id,
-                "source_size": conn.source_size,
-                "target_size": conn.target_size,
-                "trainable": conn.trainable})
 
         return architecture
 
@@ -88,24 +78,12 @@ class NetworkArchiver:
                 conn["source_id"],
                 conn["target_id"],
                 conn["trainable"],
+                conn["dales_law_constraint"],
                 conn["source_size"],
                 conn["target_size"],
                 initialize_weights_and_mask=True)
 
             self.network.connections[connection.get_name()] = connection
-
-        for conn in architecture["output_connections"]:
-
-            connection = Connection(
-                conn["conn_type"],
-                conn["source_id"],
-                conn["target_id"],
-                conn["trainable"],
-                conn["source_size"],
-                conn["target_size"],
-                initialize_weights_and_mask=True)
-
-            self.network.output_connections[connection.get_name()] = connection
 
     def create_checkpoint(self):
         """

@@ -74,6 +74,7 @@ class NetworkAnalyzer:
                 if `conn_name` is specified.
         """
         if get_constrained_weights:
+            self.network.constrain_weights()
             conn_dict = {name : conn.W for name, conn in self.network.connections.items()}
         else:
             conn_dict = {name : conn.weights for name, conn in self.network.connections.items()}
@@ -122,8 +123,9 @@ class NetworkAnalyzer:
             f"{'Source':15}"
             f"{'Target':15}"
             f"{'Shape':15}"
-            f"{'Trainable':10}"
-            f"{'Type':12}"
+            f"{'Trainable':15}"
+            f"{"Dale's law":15}"
+            f"{'Type':15}"
         )
         print(header)
         print("-" * len(header))
@@ -134,5 +136,6 @@ class NetworkAnalyzer:
                 f"{str(conn.source_id):15}"
                 f"{str(conn.target_id):15}"
                 f"{str((conn.target_size, conn.source_size)):15}"
-                f"{str(conn.trainable):10}"
-                f"{str(conn.conn_type):12}")
+                f"{str(conn.trainable):15}"
+                f"{str(conn.dales_law_constraint):15}"
+                f"{str(conn.conn_type):15}")

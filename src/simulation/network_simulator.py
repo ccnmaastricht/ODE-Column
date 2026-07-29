@@ -233,12 +233,9 @@ class NetworkSimulator:
             device (torch.device | str): Target compute device.
         """
         with torch.no_grad():
-
-            zero_input = {name : torch.zeros(1, input_tensor.shape[1], device=device)
-                          for name, input_tensor in ext_input.items()}
-            sim_wrapper = NetworkOdeWrapper(self.network, zero_input, input_window)
             self.network.constrain_weights()
 
+            sim_wrapper = NetworkOdeWrapper(self.network, None, None)
             resting_state = odeint(sim_wrapper, self.initial_state, self.time_vec)
 
             membrane_potential_resting_state = resting_state[-1, :, :self.network.num_populations]

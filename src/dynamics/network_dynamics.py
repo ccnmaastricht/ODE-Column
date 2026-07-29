@@ -21,10 +21,10 @@ class NetworkDynamics:
         self.network = network
 
     def compute_firing_rate(self, x):
-        """
+        r"""
         Compute neural population firing rates from net effective drive by applying
         a smooth sigmoidal activation function:
-        \( r = \\frac{g \\cdot x - \\theta}{1 - \\exp(-\\beta (g \\cdot x - \\theta))} \).
+        \( r = \frac{g \cdot x - \theta}{1 - \exp(-\beta (g \cdot x - \theta))} \).
 
         Args:
             x (torch.Tensor): Net effective input (membrane potential minus adaptation),
@@ -38,27 +38,12 @@ class NetworkDynamics:
 
         x_nom = self.network.gain * x - self.network.threshold
         exp_input = -self.network.noise_factor * x_nom
-        exp_input = torch.clamp(exp_input, -50, 50)  # CLAMP
-        # exp_input = _soft_clamp(exp_input)
+        # exp_input = torch.clamp(exp_input, -50, 50)  # CLAMP
         exp_term = torch.exp(exp_input)
 
         denom = 1 - exp_term + 1e-6  # ADD EPSILON
         x_activ = x_nom / denom
         return x_activ
-
-    def _soft_clamp(self, x, max_val=80):
-        """
-        Apply soft bounds to input using hyperbolic tangent scaling.
-
-        Args:
-            x (torch.Tensor): Input tensor to clamp.
-            max_val (float, optional): Maximum boundary value. Defaults to 80.
-
-        Returns:
-            torch.Tensor: Softly clamped tensor bounded within `(-max_val, max_val)`.
-        """
-        # TODO: decide if should keep this function
-        return max_val * torch.tanh(x / max_val)
 
     def _set_activities(self, t, fr_per_area, ext_input, input_windows):
         """
@@ -99,8 +84,8 @@ class NetworkDynamics:
     def _compute_currents(self, t, firing_rates, ext_input, input_windows):
         """
         Compute total incoming synaptic currents for all network areas at time t by
-        multiplying source activities by connection weight matrices and scaling by
-        synaptic time constants.
+        multiplying source activities by constrained connection weight matrices and
+        scaling by synaptic time constants.
 
         Args:
             t (torch.Tensor): Current simulation time scalar, shape `()` or `(1,)`.
@@ -124,6 +109,8 @@ class NetworkDynamics:
                     for area_id, area in self.network.areas.items()}
 
         for connection in self.network.connections.values():
+            if connection.source_id not in activities.keys() or connection.conn_type == 'output':
+                continue
             source_fr = activities[connection.source_id]
             current = source_fr @ connection.W.T
             currents[connection.target_id] += current * self.network.synapse_time_constant
@@ -132,11 +119,11 @@ class NetworkDynamics:
         return total_current
 
     def forward(self, t, state, ext_input, input_windows):
-        """
+        r"""
         Compute system state derivatives (d/dt) for ODE/SDE numerical integration by
         evaluating the differential equations for membrane potential \( V \)
-        (\(\\tau_m \\frac{dV}{dt} = -V + I_{syn} \\cdot R\)) and spike-frequency
-        adaptation \( a \) (\(\\tau_a \\frac{da}{dt} = -a + w_a \\cdot r\)).
+        (\(\tau_m \frac{dV}{dt} = -V + I_{syn} \cdot R\)) and spike-frequency
+        adaptation \( a \) (\(\tau_a \frac{da}{dt} = -a + w_a \cdot r\)).
 
         Args:
             t (torch.Tensor): Current time step scalar, shape `()` or `(1,)`.

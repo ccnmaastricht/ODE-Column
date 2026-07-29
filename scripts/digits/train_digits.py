@@ -88,18 +88,6 @@ def train_digit_classification(
     network.add_lateral_connection('v2')
 
 
-    # stim = torch.zeros(1, 100)
-    # resting_state = network.run(stim)
-    #
-    # weight_penalty = compute_L2_regularization(network)
-    # ei_penalty_1 = compute_ei_ratio_penalty(network, beta=1.0)
-    # ei_penalty_10 = compute_ei_ratio_penalty(network, beta=10.0)
-    # ei_penalty_20 = compute_ei_ratio_penalty(network, beta=20.0)
-    # ei_penalty_30 = compute_ei_ratio_penalty(network, beta=30.0)
-    # ei_penalty_100 = compute_ei_ratio_penalty(network, beta=100.0)
-    # stop = 0
-
-
     # Get train and test set
     X_train, X_test, y_train, y_test = prepare_ds(digits_to_include, padding=1, seed=seed)
 
@@ -131,7 +119,7 @@ def train_digit_classification(
 
         suppression_penalty = compute_suppression_penalty(model_predictions, mapped_labels, len(digits_to_include))
         weight_penalty = compute_L2_regularization(network)
-        ei_penalty = compute_ei_ratio_penalty(network)
+        ei_penalty = compute_smart_ei_ratio_penalty(network)
 
         print(ei_penalty.item() * lambda_ei)
 

@@ -38,8 +38,7 @@ class BrainNetwork(torch.nn.Module):
         area_order (list[str]): Ordered list of brain area IDs matching state vector layout.
         area_slices (dict[str, slice]): Dictionary mapping area IDs to state vector slices.
         areas (torch.nn.ModuleDict): Dictionary mapping area IDs to `BrainArea` instances.
-        connections (torch.nn.ModuleDict): Dictionary mapping connection names to internal `Connection` instances.
-        output_connections (torch.nn.ModuleDict): Dictionary mapping names to readout `Connection` instances.
+        connections (torch.nn.ModuleDict): Dictionary mapping connection names to `Connection` instances.
         dynamics (NetworkDynamics): Bound network dynamics module.
         simulator (NetworkSimulator): Bound numerical simulation engine.
         readout (NetworkReadout): Bound signal readout and post-processing module.
@@ -61,7 +60,6 @@ class BrainNetwork(torch.nn.Module):
         self.area_slices        = {}
         self.areas              = torch.nn.ModuleDict({})
         self.connections        = torch.nn.ModuleDict({})
-        self.output_connections = torch.nn.ModuleDict({})
 
         self._initialize_general_parameters(general_params)
         self._initialize_additional_modules()
@@ -174,8 +172,7 @@ class BrainNetwork(torch.nn.Module):
             target,
             initializer,
             *initializer_args,
-            trainable=True,
-            output=False):
+            trainable=True):
         """
         Instantiate a Connection object using a specified initializer function and register
         it within internal or output connection dictionaries.
@@ -187,25 +184,22 @@ class BrainNetwork(torch.nn.Module):
             initializer (Callable): Function initializing weight and mask matrices.
             *initializer_args: Positional arguments passed to initializer function.
             trainable (bool, optional): Whether weights parameter requires grad. Defaults to True.
-            output (bool, optional): Whether to register in `output_connections` dictionary instead
-                of `connections`. Defaults to False.
         """
+        dales_law_constraint = True if source in self.areas.keys() else False
+
         connection = Connection(
             connection_type,
             source,
             target,
-            trainable)
+            trainable,
+            dales_law_constraint)
 
         weights, mask = initializer(connection, *initializer_args)
 
         connection.set_sizes(weights.shape[1], weights.shape[0])
         connection.set_weights_and_mask(weights, mask)
 
-        registry = (self.output_connections
-                    if output
-                    else self.connections)
-
-        registry[connection.get_name()] = connection
+        self.connections[connection.get_name()] = connection
 
     def add_area(
             self,
@@ -480,8 +474,7 @@ class BrainNetwork(torch.nn.Module):
             area,
             std,
             scale,
-            trainable=trainable,
-            output=True)
+            trainable=trainable)
 
     def add_custom_connection(
             self,
@@ -490,7 +483,6 @@ class BrainNetwork(torch.nn.Module):
             target,
             initializer,
             trainable=True,
-            is_output_connection=False,
             **initializer_args):
         """
         Add a custom connection to the network architecture using a custom user-defined initializer function.
@@ -500,19 +492,21 @@ class BrainNetwork(torch.nn.Module):
             source (str): Source area ID or external source name.
             target (str): Target area ID or external target name.
             initializer (Callable): Custom initializer function returning `(weights, mask)` tensors. The
-                function receives a dictionary with network parameters (keys: 'source', 'target', 'general_params',
-                'model_params') as the first argument, and any optional user-specified arguments. The function
-                should return tensors `(weights, mask)` both with the shape `(target.size, source.size)`.
+                function receives a dictionary with network parameters (keys: 'connection', 'source',
+                'target', 'general_params', 'model_params') as the first argument, and any optional
+                user-specified arguments. The function should return tensors `(weights, mask)` both with
+                the shape `(target.size, source.size)`.
             trainable (bool, optional): Whether weights are trainable during optimization. Defaults to True.
-            is_output_connection (bool, optional): Whether connection functions as a readout output without
-                affecting network dynamics. Defaults to False.
             **initializer_args: Additional keyword arguments passed to custom initializer function.
         """
+        dales_law_constraint = True if source in self.areas.keys() else False
+
         connection = Connection(
             connection_name,
             source,
             target,
-            trainable)
+            trainable,
+            dales_law_constraint)
 
         # If source or target are initialized brain areas, get their BrainArea object
         if source in self.areas.keys():
@@ -521,6 +515,7 @@ class BrainNetwork(torch.nn.Module):
             target = self.areas[target]
 
         init_dict = {
+            'connection': connection,
             'source': source,
             'target': target,
             'general_params': self.params['general'],
@@ -531,11 +526,7 @@ class BrainNetwork(torch.nn.Module):
         connection.set_sizes(weights.shape[1], weights.shape[0])
         connection.set_weights_and_mask(weights, mask)
 
-        registry = (self.output_connections
-                    if is_output_connection
-                    else self.connections)
-
-        registry[connection.get_name()] = connection
+        self.connections[connection.get_name()] = connection
 
     def finalize(self):
         """
@@ -561,14 +552,10 @@ class BrainNetwork(torch.nn.Module):
 
     def constrain_weights(self):
         """
-        Constrain all internal and output connection weight matrices to enforce structural masks and
-        Dale's law sign rules.
+        Constrain all  connection weight matrices to enforce structural masks and Dale's law sign rules.
         """
-        all_connections = (list(self.connections.values())
-                           + list(self.output_connections.values()))
-
-        for connection in all_connections:
-            connection.constrain(self.areas.keys())
+        for connection in self.connections.values():
+            connection.constrain()
 
     def run(self, ext_input=None, input_window=None, adjoint=False, stochastic=False, reset_state=True, device="cpu"):
         """
