@@ -106,11 +106,23 @@ def initialize_self_excitation_connection(network_params):
     """
     Initializer function for self-excitation weights (within column).
     """
-    init = torch.tensor(network_params['model_params']['connection_inits']['self_excitation'])
+    init_raw = np.array(network_params['model_params']['connection_inits']['self_excitation'])
     mask = torch.tensor(network_params['model_params']['connection_masks']['self_excitation'])
 
-    size_area = network_params['source'].num_columns
+    area_name = network_params['source'].area_name
+    population_sizes = np.array(network_params['general_params']['population_size'][area_name])
 
+    # Compute area-specific synapse counts
+    log_numerator = np.log(1 - init_raw)
+    log_denominator = np.log(1 - 1 / np.outer(population_sizes, population_sizes))
+    init = log_numerator / log_denominator / population_sizes[:, None]
+
+    # Multiply with synaptic strength
+    baseline_synaptic_strength = network_params['general_params']['synaptic_strength']['baseline']
+    init = torch.tensor(init * baseline_synaptic_strength, dtype=torch.float32)
+
+    # Weight initialization
+    size_area = network_params['source'].num_columns
     init = torch.tile(init, (size_area, size_area))
     init_weights = abs(torch.normal(mean=init, std=0.1))
 
