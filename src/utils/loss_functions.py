@@ -37,6 +37,17 @@ def compute_L2_regularization(network):
 
     return total_sq_sum / total_count
 
+def compute_fr_volatility_penalty(rates, dt=1.0, max_mean_sq_d=0.1):
+    """
+    Computes the penalty for firing rates with a too high rate of change.
+    """
+    d_rate = (rates[1:] - rates[:-1]) / dt
+    mean_sq_deriv = d_rate.pow(2).mean(dim=0)  # mean squared derivative
+
+    excess = torch.relu(mean_sq_deriv - max_mean_sq_d)
+    penalty = excess.sum()
+    return penalty
+
 def compute_ei_ratio_penalty(network, target=0.61):
     """
     Computes the ratio of connections targeting the excitatory against
@@ -63,7 +74,8 @@ def compute_ei_ratio_penalty(network, target=0.61):
         E_drive = W[:, E_idx, :].abs().sum(dim=(1, 2))
         I_drive = W[:, I_idx, :].abs().sum(dim=(1, 2))
 
-        excess = target * E_drive - I_drive
+        # excess = target * E_drive - I_drive
+        excess = E_drive - ((E_drive + I_drive) * target)
         penalty = torch.relu(excess).pow(2).mean()
 
         total_ei_penalty += penalty

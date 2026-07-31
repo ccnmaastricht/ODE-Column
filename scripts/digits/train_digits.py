@@ -10,7 +10,7 @@ from torch.utils.data import TensorDataset, DataLoader
 from src.brain_network import BrainNetwork
 from src.utils.paths import config_path, models_path
 from src.utils.set_seed import set_seed
-from src.utils.loss_functions import compute_suppression_penalty, compute_L2_regularization, compute_ei_ratio_penalty
+from src.utils.loss_functions import compute_suppression_penalty, compute_L2_regularization, compute_smart_ei_ratio_penalty, compute_fr_volatility_penalty
 
 
 
@@ -65,7 +65,8 @@ def train_digit_classification(
         lr=5e-2,
         lambda_suppression=1e-1,
         lambda_magnitude=1e-2,
-        lambda_ei=1e+0):
+        lambda_ei=1e+0,
+        lambda_fr=1e+0):
     """
     Train a BrainNetwork to classify handwritten digits.
     """
@@ -121,17 +122,20 @@ def train_digit_classification(
         weight_penalty = compute_L2_regularization(network)
         ei_penalty = compute_smart_ei_ratio_penalty(network)
 
-        print(ei_penalty.item() * lambda_ei)
+        firing_rates = network.get_firing_rates(output, return_as_np_array=False)
+        fr_penalty = compute_fr_volatility_penalty(firing_rates)
 
-        loss = ce_loss + (lambda_ei * ei_penalty) # + (lambda_magnitude * weight_penalty) + (lambda_suppression * suppression_penalty)
+        loss = ce_loss + (lambda_fr * fr_penalty)
+        # loss = ce_loss + (lambda_ei * ei_penalty) + (lambda_magnitude * weight_penalty) + (lambda_suppression * suppression_penalty)
         acc = (labels == torch.argmax(model_predictions, dim=1)).float().mean()
 
-        return loss, ce_loss, (lambda_suppression * suppression_penalty), (lambda_magnitude * weight_penalty), (lambda_ei * ei_penalty), acc, model_predictions
+        return loss, ce_loss, (lambda_fr * fr_penalty), (lambda_suppression * suppression_penalty), (lambda_magnitude * weight_penalty), (lambda_ei * ei_penalty), acc, model_predictions
 
 
     # Store history during training
     history = {'train_losses': [],
                'test_losses': [],
+               'fr_volatility': [],
                'suppression': [],
                'L2_reg': [],
                'ei_ratio': [],
@@ -146,7 +150,7 @@ def train_digit_classification(
             start = time.time()
             optimizer.zero_grad()
 
-            loss, ce_loss, suppression, magnitude, ei, acc, preds = run_digits_batch(train_stims.to(device), train_labels)
+            loss, ce_loss, volatility, suppression, magnitude, ei, acc, preds = run_digits_batch(train_stims.to(device), train_labels)
 
             loss.backward()
             optimizer.step()
@@ -157,9 +161,10 @@ def train_digit_classification(
         # Evaluate with test set, after every epoch
         with torch.no_grad():
 
-            test_loss, test_ce_loss, test_suppression, test_magnitude, test_ei, test_acc, test_preds = run_digits_batch(X_test, y_test)
+            test_loss, test_ce_loss, test_volatility, test_suppression, test_magnitude, test_ei, test_acc, test_preds = run_digits_batch(X_test, y_test)
 
             print('Test loss | {:.5f}'.format(test_loss.item()))
+            print('Volatility {:.5f}'.format(test_volatility.item()))
             print('Suppression {:.5f}'.format(test_suppression.item()))
             print('L2 regularization {:.5f}'.format(test_magnitude.item()))
             print('E/I ratio {:.5f}'.format(test_ei.item()))
@@ -168,6 +173,7 @@ def train_digit_classification(
             print(torch.concat((test_preds, y_test.to(device).unsqueeze(1)), dim=-1))
 
             history['test_losses'].append(test_loss.item())
+            history['fr_volatility'].append(test_volatility.item())
             history['suppression'].append(test_suppression.item())
             history['L2_reg'].append(test_magnitude.item())
             history['ei_ratio'].append(test_ei.item())
@@ -196,4 +202,5 @@ if __name__ == '__main__':
         lr=5e-2,
         lambda_suppression=1e-1,
         lambda_magnitude=1e-1,
-        lambda_ei=1e-1)
+        lambda_ei=1e-1,
+        lambda_fr=1e+0)
