@@ -1,10 +1,18 @@
 import torch
 
 
-
 def torch_interp(x, xp, fp):
     """
-    Interpolates fp at points x, given base points xp.
+    Perform 1D linear interpolation of function values `fp` evaluated at target query
+    coordinates `x` given sample coordinates `xp` using PyTorch tensors.
+
+    Args:
+        x (torch.Tensor): Target evaluation query coordinates tensor.
+        xp (torch.Tensor): Strictly increasing 1D sample coordinates tensor.
+        fp (torch.Tensor): Sample function values tensor matching `xp` length.
+
+    Returns:
+        torch.Tensor: Linearly interpolated function values evaluated at coordinates `x`.
     """
     x = torch.clamp(x, xp[0], xp[-1])  # clamp x to the valid range of xp
 

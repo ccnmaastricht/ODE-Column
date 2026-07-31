@@ -3,8 +3,16 @@ import torch
 import numpy as np
 
 
-
 def plot_training_history(history_paths, time_unit="Epoch"):
+    """
+    Load saved training checkpoint history files and plot training and test loss
+    trajectories across multiple runs using Matplotlib.
+
+    Args:
+        history_paths (list[str | Path]): List of file paths to saved history `.pt`/checkpoint
+            files.
+        time_unit (str, optional): Label for the horizontal time axis. Defaults to "Epoch".
+    """
     train_histories = []
     test_histories = []
 

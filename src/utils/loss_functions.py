@@ -1,22 +1,42 @@
 import torch
 import math
 
+# TODO: remove unused loss functions
 
 
 def huber_loss_wta(pred_states, true):
     """
-    Computes Huber loss, a loss function suited for trajectories.
+    Compute Huber loss (smooth L1 loss) between predicted state trajectories and
+    target trajectories for winner-take-all dynamics.
+
+    Args:
+        pred_states (torch.Tensor): Model predicted state trajectories, shape
+            `(time_steps, batch_size, state_dim)`.
+        true (torch.Tensor): Simulated ground truth trajectory tensor, shape
+            `(batch_size, time_steps, state_dim)`.
+
+    Returns:
+        torch.Tensor: Computed Smooth L1 loss scalar.
     """
     true_reshaped = true.transpose(0, 1).contiguous()
 
-    # Compute loss between model prediction and WangWong simulated data
+    # Compute loss between model prediction and target data
     hub_loss = torch.nn.SmoothL1Loss(beta=1.0)
     return hub_loss(pred_states, true_reshaped)
 
 def compute_suppression_penalty(model_predictions, labels, num_classes):
     """
-    Computes the penalty for high activations for incorrect class labels.
-    Facilitates contrastive learning.
+    Compute contrastive suppression penalty by averaging model activations for non-target
+    class labels to facilitate contrastive learning.
+
+    Args:
+        model_predictions (torch.Tensor): Model prediction outputs, shape
+            `(batch_size, num_classes)`.
+        labels (torch.Tensor): Class label indices, shape `(batch_size,)`.
+        num_classes (int): Total number of output classification categories.
+
+    Returns:
+        torch.Tensor: Computed mean suppression penalty scalar.
     """
     one_hot_labels = torch.nn.functional.one_hot(labels, num_classes=num_classes)
     suppression = ((1 - one_hot_labels) * model_predictions).mean()
@@ -24,7 +44,14 @@ def compute_suppression_penalty(model_predictions, labels, num_classes):
 
 def compute_L2_regularization(network):
     """
-    Computes the penalty for large weights (i.e. L2 regularization).
+    Compute L2 weight regularization penalty over all trainable connection parameters
+    in the network.
+
+    Args:
+        network (BrainNetwork): Network module containing trainable connections.
+
+    Returns:
+        torch.Tensor: Average squared weight regularization penalty scalar.
     """
     total_sq_sum = 0.0
     total_count = 0
@@ -39,7 +66,18 @@ def compute_L2_regularization(network):
 
 def compute_fr_volatility_penalty(rates, dt=1.0, max_mean_sq_d=0.1):
     """
-    Computes the penalty for firing rates with a too high rate of change.
+    Compute penalty for firing rate trajectories with rate-of-change volatility
+    exceeding a maximum mean squared derivative threshold.
+
+    Args:
+        rates (torch.Tensor): Firing rate trajectory tensor, shape
+            `(time_steps, batch_size, total_populations)`.
+        dt (float, optional): Integration time step size in seconds. Defaults to 1.0.
+        max_mean_sq_d (float, optional): Maximum allowed mean squared derivative
+            threshold. Defaults to 0.1.
+
+    Returns:
+        torch.Tensor: Firing rate volatility penalty scalar.
     """
     d_rate = (rates[1:] - rates[:-1]) / dt
     mean_sq_deriv = d_rate.pow(2).mean(dim=0)  # mean squared derivative
@@ -50,10 +88,16 @@ def compute_fr_volatility_penalty(rates, dt=1.0, max_mean_sq_d=0.1):
 
 def compute_ei_ratio_penalty(network, target=0.61):
     """
-    Computes the ratio of connections targeting the excitatory against
-    inhibitory populations in the target columns. Produces a penalty if
-    the ratio is significantly higher than the biologically realistic
-    standard ratio (=0.61).
+    Compute structural penalty if the ratio of excitatory-targeting to inhibitory-targeting
+    synaptic drive exceeds a biological reference ratio.
+
+    Args:
+        network (BrainNetwork): Network module containing trainable connections.
+        target (float, optional): Target baseline excitatory-to-inhibitory balance
+            ratio. Defaults to 0.61.
+
+    Returns:
+        torch.Tensor: Total E/I balance ratio penalty scalar across network connections.
     """
     total_ei_penalty = 0.0
 
@@ -84,11 +128,20 @@ def compute_ei_ratio_penalty(network, target=0.61):
 
 def compute_smart_ei_ratio_penalty(network, target=0.61, eps=1e-6, beta=100.0):
     """
-    Computes the ratio of connections targeting the excitatory against
-    inhibitory populations in the target columns. Produces a penalty if
-    the ratio is significantly higher than the biologically realistic
-    standard ratio (=0.61).
-    Beta: smaller penalizes the mean, bigger penalizes the maximum.
+    Compute LogSumExp-scaled structural penalty for log-ratio deviations of excitatory
+    and inhibitory synaptic drive across columns and layers.
+
+    Args:
+        network (BrainNetwork): Network module containing trainable connections.
+        target (float, optional): Target baseline excitatory-to-inhibitory balance
+            ratio. Defaults to 0.61.
+        eps (float, optional): Epsilon value added for numerical division stability.
+            Defaults to 1e-6.
+        beta (float, optional): Smooth maximum temperature scaling parameter. Defaults
+            to 100.0.
+
+    Returns:
+        torch.Tensor: LogSumExp-aggregated E/I balance penalty scalar.
     """
     all_excess = []
 
@@ -113,26 +166,3 @@ def compute_smart_ei_ratio_penalty(network, target=0.61, eps=1e-6, beta=100.0):
     # Penalize highest offenders the strongest
     penalty = (torch.logsumexp(beta * excess_all, dim=0) - math.log(excess_all.numel())) / beta
     return penalty
-
-def min_max(firing_rates):
-    """
-    Function to binary classify final firing rates by means of
-    min-maxing. Thus, the maximum final firing rate will receive
-    score=1 and the minimum will receive score=0.
-    """
-    max_val = torch.max(firing_rates)
-    min_val = torch.min(firing_rates)
-    return (firing_rates - min_val) / (max_val - min_val)
-
-def fr_to_binary(firing_rates, scaling_factor=1.0):
-    """
-    Function to binary classify final firing rates. Loosely
-    z-scores the input and passes it to a sigmoid function to
-    obtain values between 0 and 1.
-    """
-    threshold = torch.mean(firing_rates)
-    sd_fr = torch.std(firing_rates) / scaling_factor
-
-    fr_normalized = (firing_rates - threshold) / sd_fr
-    fr_sigmoid = torch.sigmoid(fr_normalized)
-    return fr_sigmoid
