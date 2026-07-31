@@ -156,6 +156,46 @@ def get_data(batch_size, network_time_params, fn, seed):
 
     return train_loader, test_states, test_stims, test_contexts
 
+def initialize_network(area, nr_inputs, nr_contexts):
+    """
+    Initialize a network for context-dependent decision-making.
+    """
+    config = config_path('context_params.toml')
+    general_config = config_path('general_params_wta.toml')
+    network = BrainNetwork.from_toml(config, general_config)
+
+    network.add_area(area, nr_inputs)
+
+    network.add_input_connection(area, nr_inputs, unique_id='bottom_up',
+                                 receptive_field_size=1, stride=1, trainable=False, std=0.0)
+    network.add_input_connection(area, nr_contexts, unique_id='context')
+
+    network.add_lateral_connection(area, receptive_field_size=2, stride=2)
+    network.add_custom_connection(connection_name='self_excitation', source=area, target=area,
+                                  initializer=initialize_self_excitation_connection)
+    network.add_output_connection(area)
+
+    return network
+
+def apply_context_weight_constraints(context_to, network, area, nr_inputs, nr_contexts):
+    """
+    Apply context weight constraints if specified
+    """
+    if context_to != 'default':
+        assert context_to in ['deep_only', 'superficial_only'], (f"The only acceptable options for context_to are 'default',"
+                                                               f"'deep_only' and 'superficial_only'. ")
+
+        if context_to == 'deep_only':
+            constrained_mask = torch.tensor([0., 0., 0., 0., 1., 1., 1., 1.]).unsqueeze(1)
+        elif context_to == 'superficial_only':
+            constrained_mask = torch.tensor([1., 1., 0., 0., 0., 0., 0., 0.]).unsqueeze(1)
+
+        with torch.no_grad():
+            constrained_mask = torch.tile(constrained_mask, (nr_inputs, nr_contexts))
+
+            network.connections[f'input_context_{area}'].weights.mul_(constrained_mask)
+            network.connections[f'input_context_{area}'].mask.copy_(constrained_mask)
+
 def run_batch(network, stims, context, true_states, penalty_weight, device, itr=None, plotting=False):
     """
     Run a batch of stimuli-context pairs through the network and computes the loss
@@ -174,9 +214,9 @@ def run_batch(network, stims, context, true_states, penalty_weight, device, itr=
 
     if plotting:
         for i in range(16):
-            visualize_results(pred_states[:, i], true_states[i], stims[i], context[i], network, itr + f'_{i}', area='v1')
+            visualize_results(pred_states[:, i], true_states[i], stims[i], context[i], network, itr + f'_{i}', area='mt')
 
-    return loss
+    return loss, output
 
 def train_context_wta(
         fn_target_data,
@@ -186,6 +226,7 @@ def train_context_wta(
         test_freq=10,
         train_with_adjoint=True,
         train_with_noise=True,
+        context_to='default',
         penalty_weight=1e-6,
         device=torch.device('cpu')):
     """
@@ -193,38 +234,34 @@ def train_context_wta(
     """
     set_seed(seed)
 
-    # Initialize network
-    config = config_path('context_params.toml')
-    general_config = config_path('general_params_wta.toml')
-    network = BrainNetwork.from_toml(config, general_config)
 
-    area = 'v1'
+    # Initialize the network
+    area = 'mt'
+    nr_inputs = 4
+    nr_contexts = 2
 
-    network.add_area(area, 4)
+    network = initialize_network(area, nr_inputs, nr_contexts)
+    apply_context_weight_constraints(context_to, network, area, nr_inputs, nr_contexts)
 
-    network.add_input_connection(area, 4, unique_id='bottom_up', receptive_field_size=1, stride=1, trainable=False, std=0.0)
-    network.add_input_connection(area, 2, unique_id='context')
-
-    network.add_lateral_connection(area, receptive_field_size=2, stride=2)
-    network.add_custom_connection(connection_name='self_excitation', source=area, target=area,
-                                  initializer=initialize_self_excitation_connection)
-    network.add_output_connection(area)
 
     # Prepare training data and optimizer
-    train_loader, test_states, test_stims, test_contexts = get_data(batch_size, network.params['model']['time_params'], fn_target_data, seed)
+    train_loader, test_states, test_stims, test_contexts = get_data(
+        batch_size, network.params['model']['time_params'], fn_target_data, seed)
     test_states, test_contexts = test_states.to(device), test_contexts.to(device)
 
+    # TODO: decide on optimizer and learning rates
     # optimizer = torch.optim.Adam([{'params': network.connections[f'lateral_{area}_{area}'].weights, 'lr': 10.0},
     #                               {'params': network.connections[f'self_excitation_{area}_{area}'].weights, 'lr': 10.0},
-    #                               {'params': network.connections[f'input_context_{area}'].weights, 'lr': 1.0}])
+    #                               {'params': network.connections[f'input_context_{area}'].weights, 'lr': 0.1}])
 
     optimizer = torch.optim.RMSprop([{'params': network.connections[f'lateral_{area}_{area}'].weights, 'lr': 10.0},
                                   {'params': network.connections[f'self_excitation_{area}_{area}'].weights, 'lr': 10.0},
-                                  {'params': network.connections[f'input_context_{area}'].weights, 'lr': 0.1}], alpha=0.9)
+                                  {'params': network.connections[f'input_context_{area}'].weights, 'lr': 1.0}], alpha=0.9)
 
     # Store losses
     train_losses = []
     test_losses = []
+
 
     # Start training loop
     for epoch in range(num_epochs):
@@ -234,18 +271,28 @@ def train_context_wta(
         for itr, (true_states, stim_batch, context_batch) in enumerate(train_loader):
             optimizer.zero_grad()
 
-            loss = run_batch(network, stim_batch, context_batch, true_states.to(device), penalty_weight, device)
+            loss, output = run_batch(network, stim_batch, context_batch, true_states.to(device), penalty_weight, device)
 
             loss.backward()
+
+
+            # if itr > 25:
+            #     for name, param in network.named_parameters():
+            #         print(param.grad)
+            #     network.analysis.plot_firing_rates(output)
+
+
             optimizer.step()
 
             train_loss_sum = train_loss_sum / len(train_loader)
+
+            # print(loss.item())
 
             # Test
             if itr % test_freq == 0:
                 with torch.no_grad():
 
-                    test_loss = run_batch(network, test_stims, test_contexts, test_states, penalty_weight, device, f'{epoch}_{itr}', plotting=True)
+                    test_loss, _ = run_batch(network, test_stims, test_contexts, test_states, penalty_weight, device, f'{epoch}_{itr}', plotting=True)
 
                     print('Epoch {:02d} | Iter {:02d} | Train Loss {:.4f} | Test Loss {:.4f}'.format(epoch, itr // test_freq, loss.item(), test_loss.item()))
 
@@ -265,20 +312,24 @@ if __name__ == '__main__':
 
     fn_target_data      = data_path('ds_wta.pt')
     batch_size          = 32
-    num_epochs          = 3
+    num_epochs          = 10
     test_freq           = 10
     train_with_adjoint  = False
     train_with_noise    = True
     device              = torch.device('cpu')
 
+    # context_to = 'default'
+    context_to = 'superficial_only'
+    # context_to = 'deep_only'
     seed = 1
 
     train_context_wta(
-    fn_target_data,
-    seed,
-    batch_size=batch_size,
-    num_epochs=num_epochs,
-    test_freq=test_freq,
-    train_with_adjoint=train_with_adjoint,
-    train_with_noise=train_with_noise,
-    device=device)
+        fn_target_data,
+        seed,
+        batch_size=batch_size,
+        num_epochs=num_epochs,
+        test_freq=test_freq,
+        train_with_adjoint=train_with_adjoint,
+        train_with_noise=train_with_noise,
+        context_to=context_to,
+        device=device)
