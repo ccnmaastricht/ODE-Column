@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 from src.brain_network import BrainNetwork
 from src.utils.set_seed import set_seed
-from src.utils.loss_functions import compute_ei_ratio_penalty, compute_L2_regularization
+from src.utils.loss_functions import compute_ei_ratio_penalty, compute_fr_volatility_penalty
 from src.utils.paths import config_path, models_path
 
 
@@ -55,7 +55,7 @@ def visualize_weights(network, epoch):
 
             fig, ax = plt.subplots(figsize=(13, 7))
 
-            weights = conn.W.detach().cpu().numpy()
+            weights = network.analysis.get_weights(name)
 
             heatmap = ax.imshow(weights, cmap="viridis", interpolation="nearest")
             fig.colorbar(heatmap, ax=ax)
@@ -94,7 +94,8 @@ def train_parity(
         test_freq=10,
         train_with_adjoint=False,
         train_with_noise=False,
-        ei_weight=1e-1, # 1e-2
+        ei_weight=1e+0, # 1e-1
+        lambda_volatility=1e-1,
         device=torch.device('cpu')):
     """
     Train a BrainNetwork to learn parity (odd/even) classification.
@@ -114,10 +115,6 @@ def train_parity(
 
     network.add_lateral_connection('v1')
     network.add_lateral_connection('v2')
-
-    for name, param in network.named_parameters():
-        weights = param.detach().numpy()
-        stop = 0
 
     # Optimizer
     optimizer = torch.optim.Adam(network.parameters(), lr=0.1)
@@ -143,18 +140,18 @@ def train_parity(
 
         # Add E/I ratio penalty
         ei_penalty = compute_ei_ratio_penalty(network)
-        loss += (ei_penalty * ei_weight)
+        # loss += (ei_penalty * ei_weight)
 
-        # Add L2 regularization
-        L2_weight = 1e-4
-        L2_reg = compute_L2_regularization(network)
-        # loss += (L2_reg * L2_weight)
+        # Add firing rates oscillation penalty
+        firing_rates = network.get_firing_rates(output, return_as_np_array=False)
+        volatility_penalty = compute_fr_volatility_penalty(firing_rates, max_mean_sq_d=0.0)
+        loss += (volatility_penalty * lambda_volatility)
 
         loss.backward()
         optimizer.step()
 
-        print('Epoch {:02d} | Train Loss {:.4f} | E/I {:.4f} | L2 {:.4f}'.format(
-            epoch, loss.item(), ei_penalty * ei_weight, L2_reg * L2_weight))
+        print('Epoch {:02d} | Train Loss {:.4f} | E/I {:.4f} | V {:.4f}'.format(
+            epoch, loss.item(), ei_penalty * ei_weight, volatility_penalty * lambda_volatility))
         losses.append(loss.item())
 
         # Visualize
