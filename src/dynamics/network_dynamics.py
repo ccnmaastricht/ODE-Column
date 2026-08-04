@@ -34,14 +34,12 @@ class NetworkDynamics:
             torch.Tensor: Population firing rates in Hz,
                 shape `(batch_size, total_populations)`.
         """
-        # TODO: clamping necessary? -> test
-
         x_nom = self.network.gain * x - self.network.threshold
         exp_input = -self.network.noise_factor * x_nom
-        # exp_input = torch.clamp(exp_input, -50, 50)  # CLAMP
+        exp_input = torch.clamp(exp_input, -80.0, 80.0)
         exp_term = torch.exp(exp_input)
 
-        denom = 1 - exp_term + 1e-6  # ADD EPSILON
+        denom = 1 - exp_term + 1e-6
         x_activ = x_nom / denom
         return x_activ
 
@@ -63,17 +61,15 @@ class NetworkDynamics:
             dict[str, torch.Tensor]: Combined dictionary mapping activity source
                 names to current firing rate/drive tensors at time `t`.
         """
-        # Add background drive
         activities = {'background': self.network.background_drive}
 
-        # Add firing rates of all network areas
         activities.update(fr_per_area)
 
-        # Add network-external input
         if ext_input is not None:
+
             for input_name, x in ext_input.items():
-                # Present input if t is in input window
                 start, end = input_windows[input_name]
+
                 if start <= t.item() < end:
                     activities[input_name] = x
                 else:
@@ -154,8 +150,8 @@ class NetworkDynamics:
         delta_adaptation = (-adaptation + self.network.adaptation_strength_full *
                             firing_rate) / self.network.adapt_time_constant
 
-        state = torch.concat((delta_membrane_potential, delta_adaptation), dim=1)
-        return state
+        delta_state = torch.concat((delta_membrane_potential, delta_adaptation), dim=1)
+        return delta_state
 
     def diffusion(self, t, state):
         """

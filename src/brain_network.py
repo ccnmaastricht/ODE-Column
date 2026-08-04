@@ -29,7 +29,7 @@ class BrainNetwork(torch.nn.Module):
 
     Args:
         model_params (dict): Model-specific configuration parameters dictionary.
-        general_params (dict): General parameter settings (time constants, gains, drive).
+        general_params (dict): General parameter settings (time constants, population sizes, etc.).
 
     Attributes:
         params (dict): Configuration dictionary containing model and general parameter blocks.
@@ -111,7 +111,8 @@ class BrainNetwork(torch.nn.Module):
 
     def _initialize_general_parameters(self, params):
         """
-        Register global network buffers for background drive, firing rate gain/threshold/noise parameters, and time constants.
+        Register global network buffers for background drive, firing rate gain/threshold/noise parameters,
+        and time constants.
 
         Args:
             params (dict): General configuration dictionary.
@@ -161,7 +162,8 @@ class BrainNetwork(torch.nn.Module):
             AssertionError: Raised if requested area ID is not registered.
         """
         area_id = area_id.lower()
-        assert area_id in self.areas.keys(), f"Area '{area_id}' is not yet initialized. Please use BrainNetwork.add_area(name, size)."
+        assert area_id in self.areas.keys(), (f"Area '{area_id}' is not yet initialized. "
+                                              f"Please use BrainNetwork.add_area(name, size).")
 
         return self.areas[area_id]
 
@@ -175,7 +177,7 @@ class BrainNetwork(torch.nn.Module):
             trainable=True):
         """
         Instantiate a Connection object using a specified initializer function and register
-        it within internal or output connection dictionaries.
+        it within connections dictionary.
 
         Args:
             connection_type (str): Connection type classification string.
@@ -236,7 +238,6 @@ class BrainNetwork(torch.nn.Module):
         area = BrainArea(self.params['general'], area_name, size, unique_id)
         self.areas[unique_id] = area
 
-        # Add recurrent connectivity and background connectivity as connections
         if initialize_recurrent_and_background:
             self.add_recurrent_connection(area, unique_id, intrinsic_trainable)
             self.add_background_connection(area, unique_id, background_trainable)
@@ -453,7 +454,7 @@ class BrainNetwork(torch.nn.Module):
             std=0.0,
             scale=1.0):
         """
-        Add task readout output connection reading out activity from a source brain area.
+        Add readout output connection, reading out activity from a source brain area.
 
         Args:
             source_area (str): Identifier of source brain area supplying readout.
@@ -552,7 +553,7 @@ class BrainNetwork(torch.nn.Module):
 
     def constrain_weights(self):
         """
-        Constrain all  connection weight matrices to enforce structural masks and Dale's law sign rules.
+        Constrain all connection weight matrices to enforce structural masks and Dale's law sign rules.
         """
         for connection in self.connections.values():
             connection.constrain()

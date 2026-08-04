@@ -22,8 +22,8 @@ class NetworkArchiver:
 
     def _export_architecture(self):
         """
-        Export a structured dictionary detailing all brain areas, connections, and
-        output connections that comprise the network layout.
+        Export a structured dictionary detailing all brain areas and connections
+        that comprise the network architecture.
 
         Returns:
             dict[str, list[dict]]: Architecture dictionary containing specifications
@@ -56,8 +56,8 @@ class NetworkArchiver:
 
     def _import_architecture(self, architecture):
         """
-        Reconstruct all network brain areas, internal connections, and output
-        connections from a serialized architecture dictionary.
+        Reconstruct all network brain areas and connections from a
+        serialized architecture dictionary.
 
         Args:
             architecture (dict[str, list[dict]]): Architecture dictionary exported

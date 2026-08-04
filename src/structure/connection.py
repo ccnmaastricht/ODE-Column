@@ -127,7 +127,8 @@ class Connection(torch.nn.Module):
         nr_cols_per_receptive_field = size_target // nr_receptive_fields
 
         assert size_target % nr_receptive_fields == 0, \
-            f"The number of columns in the first area ({size_target}) can not be divided by the number of receptive fields ({nr_receptive_fields})."
+            (f"The number of columns in the first area ({size_target}) can not be divided "
+             f"by the number of receptive fields ({nr_receptive_fields}).")
 
         col_idx = 0
         end = size_source - receptive_field_size + 1
@@ -261,7 +262,8 @@ class Connection(torch.nn.Module):
         mask = torch.ones_like(bg_weights)
         return bg_weights, mask
 
-    def initialize_feedforward_weights(self, params, source_area, target_area, receptive_field_size, stride, grid_organization, std, scale):
+    def initialize_feedforward_weights(self, params, source_area, target_area, receptive_field_size,
+                                       stride, grid_organization, std, scale):
         """
         Initialize feedforward connectivity weights and mask between source area and target area.
 
@@ -278,9 +280,11 @@ class Connection(torch.nn.Module):
         Returns:
             tuple[torch.Tensor, torch.Tensor]: Tuple containing initial weights and mask tensors.
         """
-        return self._initialize_connection_between_areas(params, source_area, target_area, receptive_field_size, stride, grid_organization, std, scale)
+        return self._initialize_connection_between_areas(params, source_area, target_area, receptive_field_size,
+                                                         stride, grid_organization, std, scale)
 
-    def initialize_feedback_weights(self, params, source_area, target_area, receptive_field_size, stride, grid_organization, std, scale):
+    def initialize_feedback_weights(self, params, source_area, target_area, receptive_field_size,
+                                    stride, grid_organization, std, scale):
         """
         Initialize feedback connectivity weights and mask between source area and target area.
 
@@ -297,7 +301,8 @@ class Connection(torch.nn.Module):
         Returns:
             tuple[torch.Tensor, torch.Tensor]: Tuple containing initial weights and mask tensors.
         """
-        return self._initialize_connection_between_areas(params, source_area, target_area, receptive_field_size, stride, grid_organization, std, scale)
+        return self._initialize_connection_between_areas(params, source_area, target_area, receptive_field_size,
+                                                         stride, grid_organization, std, scale)
 
     def initialize_lateral_weights(self, params, area, receptive_field_size, stride, grid_organization, std, scale):
         """
@@ -316,7 +321,8 @@ class Connection(torch.nn.Module):
         Returns:
             tuple[torch.Tensor, torch.Tensor]: Tuple containing lateral weights and mask tensors.
         """
-        weights, mask = self._initialize_connection_between_areas(params, area, area, receptive_field_size, stride, grid_organization, std, scale)
+        weights, mask = self._initialize_connection_between_areas(params, area, area, receptive_field_size,
+                                                                  stride, grid_organization, std, scale)
 
         # Constrain mask and weights such that there are no column_intrinsic connections
         mask *= area.external_mask
@@ -324,7 +330,8 @@ class Connection(torch.nn.Module):
 
         return weights, mask
 
-    def initialize_input_weights(self, params, size_input, target_area, receptive_field_size, stride, grid_organization, std, scale):
+    def initialize_input_weights(self, params, size_input, target_area, receptive_field_size,
+                                 stride, grid_organization, std, scale):
         """
         Initialize external input weights and mask targeting a brain area.
 
@@ -348,8 +355,9 @@ class Connection(torch.nn.Module):
 
         rand_weights = self._init_weights(init, size_input, size_target_area, synapse_strength, std, scale)
 
-        receptive_field_mask = self._make_receptive_field_mask(size_input, size_target_area, receptive_field_size, stride, grid_organization)
-        rf_mask = receptive_field_mask.repeat_interleave(8, dim=0)  # only interleave for dimension target_area
+        receptive_field_mask = self._make_receptive_field_mask(size_input, size_target_area, receptive_field_size,
+                                                               stride, grid_organization)
+        rf_mask = receptive_field_mask.repeat_interleave(8, dim=0)
 
         mask = torch.tile(mask, (size_target_area, size_input))
         mask *= rf_mask

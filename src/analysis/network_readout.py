@@ -180,7 +180,8 @@ class NetworkReadout:
             AssertionError: Raised if readout mode is not `'trajectory'` or
                 `'classification'`.
         """
-        assert mode == 'trajectory' or mode == 'classification', f"Invalid mode for read-out. Acceptable modes are 'trajectory' or 'classification'."
+        assert mode == 'trajectory' or mode == 'classification', (f"Invalid mode for read-out. "
+                                                                  f"Acceptable modes are 'trajectory' or 'classification'.")
 
         output_conns = {name : conn for name, conn in self.network.connections.items() if conn.conn_type == 'output'}
         read_outs = {}

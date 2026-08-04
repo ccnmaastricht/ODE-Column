@@ -220,17 +220,10 @@ class NetworkSimulator:
 
         self.network_is_ready = True
 
-    def _initialize_network_activity(self, ext_input, input_window, device):
+    def _initialize_network_activity(self):
         """
         Simulate network dynamics without input to set initial membrane potentials
         to resting state before primary simulation run.
-
-        Args:
-            ext_input (dict[str, torch.Tensor]): Processed input tensors mapped by
-                source ID.
-            input_window (dict[str, tuple[float, float]]): Processed time window
-                intervals.
-            device (torch.device | str): Target compute device.
         """
         with torch.no_grad():
             self.network.constrain_weights()
@@ -279,7 +272,7 @@ class NetworkSimulator:
         # and run the network without input to get resting state membrane potential
         if not self.network_is_ready:
             self._prepare_network(device)
-            self._initialize_network_activity(ext_input, input_window, device)
+            self._initialize_network_activity()
 
         # Constrain all network weights to ensure no illegal connections can be used
         self.network.constrain_weights()

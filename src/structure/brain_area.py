@@ -139,7 +139,7 @@ class BrainArea(torch.nn.Module):
         Args:
             num_columns (int): Number of cortical columns in the area.
         """
-        column_size = self.num_populations // num_columns  # will likely always be 8
+        column_size = self.num_populations // num_columns
 
         mask = torch.zeros(self.num_populations, self.num_populations)
 
