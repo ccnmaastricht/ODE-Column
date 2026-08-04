@@ -20,7 +20,5 @@ __pycache__/
 
 # Project-specific folders
 data/
-data_old/
 results/
-results_old/
 models/
