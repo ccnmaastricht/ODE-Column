@@ -11,7 +11,6 @@ from src.brain_network import BrainNetwork
 from src.utils.paths import config_path, models_path, results_path
 from src.utils.set_seed import set_seed
 from src.utils.plotting.helpers import *
-from src.utils.plotting.plot_history import plot_training_history
 import src.utils.plotting.plotstyle
 from src.utils.plotting.colors import *
 from src.utils.bistable_perception import dominance_time
@@ -97,7 +96,8 @@ def plot_time_course(network_paths, sub_fig_top, sub_fig_bottom, network_to_plot
     with torch.no_grad():
 
         i = 0
-        for stim in [[0., 0.], [0., 0.], [30., 10.], [0., 0.], [10., 30.], [0., 0.], [20., 20.], [20., 20.], [20., 20.], [20., 20.], [0., 0.]]:
+        for stim in [[0., 0.], [0., 0.], [30., 20.], [0., 0.], [20., 30.],
+                     [0., 0.], [30., 30.], [30., 30.], [30., 30.], [30., 30.], [0., 0.]]:
 
             output = network.run(stim, adjoint=False, stochastic=True, reset_state=False)
             firing_rates = network.get_firing_rates(output, population='L23e', return_as_np_array=False)
@@ -126,7 +126,10 @@ def plot_time_course(network_paths, sub_fig_top, sub_fig_bottom, network_to_plot
     sub_fig_top.set_yticks([0.0, 0.5, 1.0])
     sub_fig_top.set_xlim(time_ticks[0], time_ticks[-1])
     sub_fig_top.tick_params(labelbottom=False)
-    sub_fig_top.legend()
+    legend = sub_fig_top.legend(loc='upper right', frameon=True, edgecolor='black', framealpha=1.0,
+                       fancybox=False, borderaxespad=0, borderpad=0.3)
+    spine_lw = sub_fig_top.spines['top'].get_linewidth()
+    legend.get_frame().set_linewidth(spine_lw)
     sub_fig_top.grid(True, linewidth=0.4, linestyle='--', alpha=0.5)
 
     # Bottom plot: stimulus-driven input
@@ -136,17 +139,17 @@ def plot_time_course(network_paths, sub_fig_top, sub_fig_bottom, network_to_plot
     sub_fig_bottom.set_ylabel('Input rate (Hz)')
     sub_fig_bottom.set_xticks(time_ticks)
     sub_fig_bottom.set_xlim(time_ticks[0], time_ticks[-1])
-    sub_fig_bottom.set_ylim(-5.0, 40.0)
-    sub_fig_bottom.legend()
+    sub_fig_bottom.set_ylim(-5.0, 50.0)
+    legend = sub_fig_bottom.legend(loc='upper right', frameon=True, edgecolor='black', framealpha=1.0,
+                       fancybox=False, borderaxespad=0, borderpad=0.3)
+    legend.get_frame().set_linewidth(spine_lw)
     sub_fig_bottom.grid(True, linewidth=0.4, linestyle='--', alpha=0.5)
 
 
 def plot_bistable_perception(network_paths, sub_fig, network_to_plot=0):
     idx_path = network_paths[network_to_plot]
 
-    # dominance_duration = run_bistable_perception(idx_path)
-
-    dominance_duration = torch.rand((21, 21)) * 50.0  # TODO: note that not running real bistable perception
+    dominance_duration = run_bistable_perception(idx_path)
 
     colors = [my_green, '#ffffff', my_orange]
 
@@ -232,14 +235,13 @@ def plot_firing_rates_per_layer(firing_rates, coherences, fig, sub_fig, sub_fig_
             sub_sub_fig.set_xlabel('Time (ms)')
         sub_sub_fig.set_xlim(0, 600)
 
-    # fig.text(0.72, 0.60, "Time (ms)", ha="center", va="center", fontsize=6)
-    # fig.text(0.47, 0.77, "Firing rate (Hz)", rotation="vertical", ha="center", va="center", fontsize=6)
+    fig.text(0.02, 0.5, "Firing rate (Hz)", rotation="vertical", ha="center", va="center", fontsize=6)
 
-    # # Color bar
-    # cbar = fig.colorbar(sm, ax=list(sub_fig_dict.values()), orientation='horizontal', location='top', fraction=0.04, pad=0.1)
-    # cbar.set_label('Relative evidence in Hz')
-    # cbar.set_ticks([min(coherences), max(coherences)])
-    # cbar.set_ticklabels([f'{min(coherences):.2f}', f'{max(coherences):.2f}'])
+    # Color bar
+    cbar = fig.colorbar(sm, ax=list(sub_fig_dict.values()), orientation='horizontal', location='top', fraction=0.04, pad=0.1)
+    cbar.set_label('Relative evidence in Hz')
+    cbar.set_ticks([min(coherences), max(coherences)])
+    cbar.set_ticklabels([f'{min(coherences):.2f}', f'{max(coherences):.2f}'])
 
 
 def plot_wsi_and_divt(wsi_results, divt_results, sub_fig_wsi, sub_fig_divt, linewidth_mean=1.0):
@@ -300,30 +302,28 @@ def plot_interp_wsi_and_divt(wsi_list, divt_list, sub_fig_wsi, sub_fig_divt, lin
         x_axis.append(prev_pop_sizes + (curr_pop_size // 2))
     x_axis = np.array(x_axis)
 
-    # Smooth x for plotting
     x_smooth = np.linspace(0, population_sizes.sum(), 500)
 
-    # Color map (automatically spreads colors)
-    colors = plt.cm.tab10(np.linspace(0, 1, len(wsi_list)))
-
-    # ----- WSI -----
-    for i, wsi in enumerate(wsi_list):
-        # Fit polynomial
+    # Plot all runs
+    for wsi in wsi_list:
         coeffs = np.polyfit(x_axis, wsi, deg=3)
         poly = np.poly1d(coeffs)
-        y_smooth = poly(x_smooth)
 
-        # Plot points
-        sub_fig_wsi.plot(x_axis, wsi, color='black', marker='o', markersize=linewidth_mean*2, ls='')
+        # Thin gray curve
+        sub_fig_wsi.plot(x_smooth, poly(x_smooth), color='gray', alpha=0.6)
 
-        # Plot smooth curve
-        sub_fig_wsi.plot(x_smooth, y_smooth, '-', color='black')
+    # Mean values
+    wsi_mean = wsi_list.mean(dim=0).cpu().numpy()
+    coeffs = np.polyfit(x_axis, wsi_mean, deg=3)
+    poly = np.poly1d(coeffs)
+    sub_fig_wsi.plot(x_smooth, poly(x_smooth), color='black')
+    sub_fig_wsi.plot(x_axis, wsi_mean, 'o', color='black', markersize=linewidth_mean*2)
 
     sub_fig_wsi.set_xlim(0, population_sizes.sum())
     sub_fig_wsi.set_xticks(x_axis, ['L2/3', 'L4', 'L5', 'L6'])
     sub_fig_wsi.set_ylim([-0.1, 1.1])
     sub_fig_wsi.set_yticks([0.0, 0.5, 1.0])
-    sub_fig_wsi.set_ylabel('Choice Selectivity Index')
+    sub_fig_wsi.set_ylabel('Choice selectivity index')
     sub_fig_wsi.grid(True, axis='y', linestyle='--', alpha=0.5)
 
     # x-axis grid lines
@@ -337,22 +337,24 @@ def plot_interp_wsi_and_divt(wsi_list, divt_list, sub_fig_wsi, sub_fig_divt, lin
     ax_top.tick_params(top=False)
 
     # --------- DivT ---------
-    for i, divt in enumerate(divt_list):
-        # Fit polynomial
+    # Plot all runs
+    for divt in divt_list:
         coeffs = np.polyfit(x_axis, divt, deg=3)
         poly = np.poly1d(coeffs)
-        y_smooth = poly(x_smooth)
 
-        # Plot raw points
-        sub_fig_divt.plot(x_axis, divt, color='black', marker='o', markersize=linewidth_mean*2, ls='')
+        # Thin gray curve
+        sub_fig_divt.plot(x_smooth, poly(x_smooth), color='gray', alpha=0.6)
 
-        # Plot smooth curve
-        sub_fig_divt.plot(x_smooth, y_smooth, '-', color='black')
+    # Mean values
+    divt_mean = divt_list.mean(dim=0).cpu().numpy()
+    coeffs = np.polyfit(x_axis, divt_mean, deg=3)
+    poly = np.poly1d(coeffs)
+    sub_fig_divt.plot(x_smooth, poly(x_smooth), color='black')
+    sub_fig_divt.plot(x_axis, divt_mean, 'o', color='black', markersize=linewidth_mean*2)
 
     sub_fig_divt.set_xlim(0, population_sizes.sum())
     sub_fig_divt.set_xticks(x_axis, ['L2/3', 'L4', 'L5', 'L6'])
-    # sub_fig_divt.set_ylim([-0.001, 0.015])
-    sub_fig_divt.set_ylim([-0.005, 0.02])
+    sub_fig_divt.set_ylim([0.0, 0.016])
     sub_fig_divt.set_yticks([0.0, 0.005, 0.01, 0.015], ['0', '5', '10', '15'])
     sub_fig_divt.set_ylabel('Divergence timing (ms)')
     sub_fig_divt.grid(True, axis='y', linestyle='--', alpha=0.5)
@@ -395,11 +397,7 @@ def plot_layer_results(network_paths, fig, sub_fig_fr, sub_fig_fr_dict, sub_fig_
                         muA = muB - coherence
                     stims.append([muA, muB])
 
-                # Run the network first without input, then introduce input
-                empty_stims = np.zeros_like(stims)
-                resting_state = network.run(empty_stims, adjoint=False, stochastic=False)
                 output = network.run(stims, adjoint=False, stochastic=False, reset_state=False)
-
                 firing_rates = network.get_firing_rates(output, return_as_np_array=False)
 
                 fr_results = torch.Tensor(4, 600, len(coherences), 2)
@@ -422,12 +420,6 @@ def plot_layer_results(network_paths, fig, sub_fig_fr, sub_fig_fr_dict, sub_fig_
     wsi_all_models = torch.mean(wsi_all_models, dim=1)  # average over winner id
     divt_all_models = torch.mean(divt_all_models, dim=1)
     plot_interp_wsi_and_divt(abs(wsi_all_models).T, divt_all_models.T, sub_fig_wsi_interp, sub_fig_divt_interp)
-
-
-def plot_network_architecture(sub_fig):
-    img = plt.imread("wta_network_image.png")
-    sub_fig.imshow(img)
-    sub_fig.axis("off")
 
 
 def plot_learned_weights(network_paths, sub_fig_left, sub_fig_right):
@@ -455,9 +447,12 @@ def plot_learned_weights(network_paths, sub_fig_left, sub_fig_right):
 
     rng = np.random.default_rng(42)
 
+    group_spacing = 0.5  # distance between the two groups within a subplot
+
     for i in range(n_weights):
 
-        x = i + rng.uniform(-0.08, 0.08, size=n_runs)  # Small horizontal jitter
+        local_x = (i % 2) * group_spacing
+        x = local_x + rng.uniform(-0.08, 0.08, size=n_runs)  # Small horizontal jitter
 
         color = my_green if i % 2 == 0 else my_orange
         sub_fig = sub_fig_left if i < 2 else sub_fig_right
@@ -466,24 +461,25 @@ def plot_learned_weights(network_paths, sub_fig_left, sub_fig_right):
         sub_fig.scatter(x, weights[:, i], color=color, alpha=0.6, s=30, zorder=2)
 
         # Mean ± SD
-        sub_fig.errorbar(i, means[i], yerr=stds[i], fmt="o", color="black", capsize=5, markersize=2.0, zorder=3)
+        sub_fig.errorbar(local_x, means[i], yerr=stds[i], fmt="o", color="black", capsize=5, markersize=2.0, zorder=3)
 
-    sub_fig_right.set_xticks(range(2))
+    tick_positions = [0, group_spacing]
+    outer_margin = 0.35  # extra space between the groups and the axes borders
+
+    sub_fig_left.set_xticks(tick_positions)
     sub_fig_left.set_xticklabels(['Column A', 'Column B'])
+    sub_fig_left.set_xlim(-outer_margin, group_spacing + outer_margin)
     sub_fig_left.set_ylabel("L2/3e self-excitation weight")
-    # sub_fig.set_ylim(650, 950)
-    # sub_fig.set_yticks([700, 800, 900])
     sub_fig_left.grid(True, linewidth=0.4, linestyle='--', alpha=0.5)
 
-    sub_fig_right.set_xticks(range(2))
+    sub_fig_right.set_xticks(tick_positions)
     sub_fig_right.set_xticklabels(['Column A', 'Column B'])
+    sub_fig_right.set_xlim(-outer_margin, group_spacing + outer_margin)
     sub_fig_right.set_ylabel("Lateral inhibition weight")
-    # sub_fig_right.set_ylim(650, 950)
-    # sub_fig_right.set_yticks([700, 800, 900])
     sub_fig_right.grid(True, linewidth=0.4, linestyle='--', alpha=0.5)
 
 
-def create_wta_general_results_fig(network_paths, seed=1):
+def create_wta_general_results_fig(network_paths, seed=54):
 
     set_seed(seed)
 
@@ -514,7 +510,6 @@ def create_wta_general_results_fig(network_paths, seed=1):
         '(D)': sub_fig_bp,
         }
 
-    plot_network_architecture(sub_fig_network)
     plot_learned_weights(network_paths, sub_fig_weights_left, sub_fig_weights_right)
     plot_time_course(network_paths, sub_fig_fr_top, sub_fig_fr_bottom)
     plot_bistable_perception(network_paths, sub_fig_bp)
@@ -523,9 +518,10 @@ def create_wta_general_results_fig(network_paths, seed=1):
 
     fig.tight_layout(
         pad=1.5,
-        w_pad=1.0,
-        h_pad=1.0)
+        w_pad=3.0,
+        h_pad=2.0)
 
+    finish_plot(fig, results_path('wta', 'wta_fig.svg'))
     finish_plot(fig, results_path('wta', 'wta_fig.pdf'))
 
 
@@ -540,9 +536,7 @@ def create_wta_layers_results_fig(network_paths):
     )
 
     sub_fig_fr = gs[0:, 0].subgridspec(
-        4, 1,
-        # hspace=0.35,
-        # wspace=0.25
+        4, 1
     )
 
     sub_fig_fr_dict = {
@@ -570,21 +564,19 @@ def create_wta_layers_results_fig(network_paths):
     add_sub_fig_labels(label_mapping)
 
     fig.tight_layout(
-        pad=3.0,
+        pad=5.0,
         w_pad=3.0,
         h_pad=1.0)
 
     finish_plot(fig, results_path('wta', 'wta_layers_fig.pdf'))
+    finish_plot(fig, results_path('wta', 'wta_layers_fig.svg'))
 
 
 
 if __name__ == '__main__':
 
-    network_paths = [models_path('wta', f'wta_{i}.pt') for i in range(1, 4)]
-    history_paths = [models_path('wta', f'wta_history_{i}.pt') for i in range(1, 4)]
+    network_paths = [models_path('wta', f'wta_{i}.pt') for i in range(1, 11)]
+    history_paths = [models_path('wta', f'wta_history_{i}.pt') for i in range(1, 11)]
 
     create_wta_general_results_fig(network_paths)
-    create_wta_layers_results_fig(network_paths)
-
-    # plot_training_history(history_paths)
-
+    # create_wta_layers_results_fig(network_paths)
