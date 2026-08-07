@@ -5,18 +5,15 @@ if __name__ == "__main__":
 
     device = torch.device("cuda")
 
-    seed = 1
+    for seed in range(1, 11, 1):
 
-    train_digit_classification(
-        digits_to_include=[0,1,2,3,4,5,6,7,8,9],
-        seed=seed,
-        device=device,
-        train_with_adjoint=False,
-        train_with_noise=False,
-        batch_size=64,
-        nr_epochs=100,
-        lr=5e-2,
-        lambda_suppression=1e-1,
-        lambda_magnitude=1e-1,
-        lambda_ei=1e-1,
-        lambda_fr=1e+0)
+        train_digit_classification(
+            digits_to_include=[0,1,2,3,4,5,6,7,8,9],
+            seed=seed,
+            device=device,
+            train_with_adjoint=False,
+            train_with_noise=False,
+            batch_size=64,
+            nr_epochs=100,
+            lr=1e-2,
+            lambda_volatility=1e+0)

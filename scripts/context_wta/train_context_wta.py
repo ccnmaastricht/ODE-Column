@@ -6,12 +6,12 @@ from torch.utils.data import TensorDataset, DataLoader
 from src.brain_network import BrainNetwork
 from src.utils.paths import config_path, data_path, models_path
 from src.utils.set_seed import set_seed
-from src.utils.loss_functions import huber_loss_wta
+from src.utils.loss_functions import huber_loss_wta, compute_fr_ceiling_penalty
 from scripts.wta.train_wta import make_input_pairs, make_ds_ww, initialize_self_excitation_connection
 
 
 
-def visualize_results(pred_raw, true, stim, context, network, itr, area='mt'):
+def visualize_results(pred_raw, true, stim, context, network, itr, area):
     """
     Visualize the firing rates of L23e and the weights during training.
     """
@@ -29,9 +29,9 @@ def visualize_results(pred_raw, true, stim, context, network, itr, area='mt'):
     axes[axes_indices[0]].legend()
 
     # Plot recurrent + self-excitation + lateral inhibition weights
-    recurrent_weights = network.connections[f'recurrent_{area}_{area}'].weights
-    self_excitation_weights = network.connections[f'self_excitation_{area}_{area}'].weights
-    lateral_weights = network.connections[f'lateral_{area}_{area}'].weights
+    recurrent_weights = network.connections[f'recurrent_{area}_{area}'].W
+    self_excitation_weights = network.connections[f'self_excitation_{area}_{area}'].W
+    lateral_weights = network.connections[f'lateral_{area}_{area}'].W
 
     recurr_weights  = (recurrent_weights + self_excitation_weights + lateral_weights).detach().numpy()
     heatmap1 = axes[0, 2].imshow(recurr_weights, cmap="viridis", interpolation="nearest")
@@ -39,7 +39,7 @@ def visualize_results(pred_raw, true, stim, context, network, itr, area='mt'):
     axes[0, 2].set_title("Recurrent weights")
 
     # Plot context weights
-    context_weights_vec = network.connections[f'input_context_{area}'].weights.detach().numpy()
+    context_weights_vec = network.connections[f'input_context_{area}'].W.detach().numpy()
     context_weights = np.reshape(context_weights_vec.T, (8, 8))
     heatmap1 = axes[1, 2].imshow(context_weights, cmap="viridis", interpolation="nearest")
     fig.colorbar(heatmap1, ax=axes[1, 2])
@@ -51,9 +51,9 @@ def visualize_results(pred_raw, true, stim, context, network, itr, area='mt'):
     plt.close(fig)
 
 def random_input_pair():
-    '''
-    Makes a random pair of inputs for two columns.
-    '''
+    """
+    Make a random pair of inputs for two columns.
+    """
     muA = np.random.uniform(15.0, 35.0)
     muB = muA + np.random.uniform(5, 10.)
 
@@ -86,8 +86,9 @@ def split_dataset(states, stims, contexts, seed, test_fraction=0.1):
 
 def get_data(batch_size, network_time_params, fn, seed):
     """
-    Gets the Wang-Wong dataset and extends it to apply to a four-column architecture
-    with an extra context variable deciding the winner-column. Creates a random train/test split.
+    Get the Wang-Wong dataset and extends it to apply to a four-column architecture
+    with an extra context variable deciding the winner-column. Creates a random
+    train/test split.
     """
     dt = network_time_params['dt']
     sim_time = network_time_params['sim_time']
@@ -179,7 +180,8 @@ def initialize_network(area, nr_inputs, nr_contexts):
 
 def apply_context_weight_constraints(context_to, network, area, nr_inputs, nr_contexts):
     """
-    Apply context weight constraints if specified
+    Apply context weight constraints if specified. If 'deep_only', the context (i.e. feedback)
+    weights are only target L5e, L5i, L6e, L6i. If 'superficial_only', they only target L23e, L23i.
     """
     if context_to != 'default':
         assert context_to in ['deep_only', 'superficial_only'], (f"The only acceptable options for context_to are 'default',"
@@ -196,44 +198,25 @@ def apply_context_weight_constraints(context_to, network, area, nr_inputs, nr_co
             network.connections[f'input_context_{area}'].weights.mul_(constrained_mask)
             network.connections[f'input_context_{area}'].mask.copy_(constrained_mask)
 
-def run_batch(network, stims, context, true_states, penalty_weight, device, itr=None, plotting=False):
-    """
-    Run a batch of stimuli-context pairs through the network and computes the loss
-    between the model's activity and target activity.
-    """
-    output = network.run({'bottom_up': stims, 'context': context},
-                         adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
-
-    # Compute loss between predicted and true states
-    pred_states = network.read_out(output, mode='trajectory')
-    loss = huber_loss_wta(pred_states, true_states)
-
-    # # Add penalty for high firing rates
-    # fr_penalty = penalty_weight * (network.get_firing_rates(output) ** 4).mean()
-    # loss += fr_penalty
-
-    if plotting:
-        for i in range(16):
-            visualize_results(pred_states[:, i], true_states[i], stims[i], context[i], network, itr + f'_{i}', area='mt')
-
-    return loss, output
-
 def train_context_wta(
         fn_target_data,
         seed,
         batch_size=32,
+        lr_lateral=1e+1,
+        lr_context=1e+0,
+        fr_reg_lambda=1e-6,
         num_epochs=5,
         test_freq=10,
         train_with_adjoint=True,
         train_with_noise=True,
         context_to='default',
-        penalty_weight=1e-6,
         device=torch.device('cpu')):
     """
-    Train a BrainNetwork to perform context-dependent decision-making.
+    Train a BrainNetwork to perform context-dependent decision-making. Uses the Wang-Wong
+    model activity as a training target. Set `context_to` to 'default', 'deep_only' or
+    'superficial_only'.
     """
     set_seed(seed)
-
 
     # Initialize the network
     area = 'mt'
@@ -243,93 +226,102 @@ def train_context_wta(
     network = initialize_network(area, nr_inputs, nr_contexts)
     apply_context_weight_constraints(context_to, network, area, nr_inputs, nr_contexts)
 
-
     # Prepare training data and optimizer
     train_loader, test_states, test_stims, test_contexts = get_data(
         batch_size, network.params['model']['time_params'], fn_target_data, seed)
     test_states, test_contexts = test_states.to(device), test_contexts.to(device)
 
-    # TODO: decide on optimizer and learning rates
-    # optimizer = torch.optim.Adam([{'params': network.connections[f'lateral_{area}_{area}'].weights, 'lr': 10.0},
-    #                               {'params': network.connections[f'self_excitation_{area}_{area}'].weights, 'lr': 10.0},
-    #                               {'params': network.connections[f'input_context_{area}'].weights, 'lr': 0.1}])
+    optimizer = torch.optim.RMSprop([{'params': network.connections[f'lateral_{area}_{area}'].weights, 'lr': lr_lateral},
+                                     {'params': network.connections[f'self_excitation_{area}_{area}'].weights, 'lr': lr_lateral},
+                                     {'params': network.connections[f'input_context_{area}'].weights, 'lr': lr_context}], alpha=0.9)
 
-    optimizer = torch.optim.RMSprop([{'params': network.connections[f'lateral_{area}_{area}'].weights, 'lr': 10.0},
-                                  {'params': network.connections[f'self_excitation_{area}_{area}'].weights, 'lr': 10.0},
-                                  {'params': network.connections[f'input_context_{area}'].weights, 'lr': 1.0}], alpha=0.9)
+    def run_batch(stims, context, true_states, itr=None, plotting=False):
+        """
+        Run a batch of stimuli-context pairs through the network and computes the loss
+        between the network's activity and the target activity.
+        """
+        output = network.run({'bottom_up': stims, 'context': context},
+                             adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
+
+        # Compute loss between predicted and true states
+        pred_states = network.read_out(output, mode='trajectory')
+        huber_loss = huber_loss_wta(pred_states, true_states)
+
+        firing_rates = network.get_firing_rates(output, return_as_np_array=False)
+        fr_reg = fr_reg_lambda * compute_fr_ceiling_penalty(firing_rates)
+        loss = huber_loss + fr_reg
+
+        if plotting:
+            for i in range(16):
+                visualize_results(pred_states[:, i], true_states[i], stims[i], context[i], network, itr + f'_{i}', area=area)
+
+        return loss, fr_reg
 
     # Store losses
     train_losses = []
+    train_fr_reg = []
     test_losses = []
-
+    test_fr_reg = []
 
     # Start training loop
     for epoch in range(num_epochs):
 
-        train_loss_sum = 0.0
-
         for itr, (true_states, stim_batch, context_batch) in enumerate(train_loader):
             optimizer.zero_grad()
 
-            loss, output = run_batch(network, stim_batch, context_batch, true_states.to(device), penalty_weight, device)
+            loss, fr_reg = run_batch(stim_batch, context_batch, true_states.to(device))
 
             loss.backward()
-
-
-            # if itr > 25:
-            #     for name, param in network.named_parameters():
-            #         print(param.grad)
-            #     network.analysis.plot_firing_rates(output)
-
-
             optimizer.step()
 
-            train_loss_sum = train_loss_sum / len(train_loader)
-
-            # print(loss.item())
+            train_losses.append(loss.item())
+            train_fr_reg.append(fr_reg.item())
 
             # Test
             if itr % test_freq == 0:
                 with torch.no_grad():
 
-                    test_loss, _ = run_batch(network, test_stims, test_contexts, test_states, penalty_weight, device, f'{epoch}_{itr}', plotting=True)
+                    test_loss, test_fr_r = run_batch(test_stims, test_contexts, test_states, itr=f'{epoch}_{itr}', plotting=True)
 
-                    print('Epoch {:02d} | Iter {:02d} | Train Loss {:.4f} | Test Loss {:.4f}'.format(epoch, itr // test_freq, loss.item(), test_loss.item()))
+                    print('Epoch {:02d} | Iter {:02d} | Train Loss {:.4f} | Test Loss {:.4f}'.format(
+                        epoch, itr // test_freq, loss.item(), test_loss.item()))
 
-                    train_losses.append(loss.item())
                     test_losses.append(test_loss.item())
+                    test_fr_reg.append(test_fr_r.item())
 
     # Store training history and trained network
     history = {'train_losses': train_losses,
-               'test_losses': test_losses}
+               'train_fr_reg': train_fr_reg,
+               'test_losses': test_losses,
+               'test_fr_reg': test_fr_reg}
 
-    torch.save(history, models_path('context', f'context_history_{seed}.pt'))
-    network.save(models_path('context', f'context_{seed}.pt'))
+    torch.save(history, models_path('context', f'context_{context_to}_history_{seed}.pt'))
+    network.save(models_path('context', f'context_{context_to}_{seed}.pt'))
 
 
 
 if __name__ == '__main__':
 
     fn_target_data      = data_path('ds_wta.pt')
-    batch_size          = 32
-    num_epochs          = 10
+    num_epochs          = 3
     test_freq           = 10
     train_with_adjoint  = False
     train_with_noise    = True
     device              = torch.device('cpu')
 
-    # context_to = 'default'
-    context_to = 'superficial_only'
-    # context_to = 'deep_only'
-    seed = 1
+    context_constraints = ['default', 'superficial_only', 'deep_only']
 
-    train_context_wta(
-        fn_target_data,
-        seed,
-        batch_size=batch_size,
-        num_epochs=num_epochs,
-        test_freq=test_freq,
-        train_with_adjoint=train_with_adjoint,
-        train_with_noise=train_with_noise,
-        context_to=context_to,
-        device=device)
+    for cc in context_constraints:
+        for seed in range(1, 11):
+
+            print(f'Context to: {cc} || Seed: {seed}')
+
+            train_context_wta(
+                fn_target_data,
+                seed,
+                num_epochs=num_epochs,
+                test_freq=test_freq,
+                train_with_adjoint=train_with_adjoint,
+                train_with_noise=train_with_noise,
+                context_to=cc,
+                device=device)

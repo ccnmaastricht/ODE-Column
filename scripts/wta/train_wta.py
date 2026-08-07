@@ -12,11 +12,10 @@ from src.utils.set_seed import set_seed
 
 
 
-def make_input_pairs(test_stride=10):
+def make_input_pairs():
     """
-    Creates a grid of input pairs (A, B) such that each
-    input rate is always between 15.0 and 45.0 and the two have
-    a difference of at least 5.0 and at most 10.0.
+    Creates a grid of input pairs (A, B) such that each input rate is always between
+    15.0 and 45.0 and the two have a difference of at least 5.0 and at most 10.0.
     """
     mu_values = np.linspace(15, 45, 100)
 
@@ -32,7 +31,8 @@ def make_input_pairs(test_stride=10):
 
 def make_ds_ww(ds_file, time_steps):
     """
-    Generate or load the complete Wang-Wong dataset.
+    Generate or load the complete dataset consisting of simulated firing rates
+    from the Wang-Wong model.
     """
     if os.path.exists(ds_file):
         ds = torch.load(ds_file, weights_only=False)
@@ -84,7 +84,7 @@ def split_dataset(states, stims, seed, test_fraction=0.1):
 
 def get_data(batch_size, network_time_params, fn, seed):
     """
-    Gets the Wang-Wong dataset and creates a random train/test split.
+    Get the Wang-Wong dataset and create a random train/test split.
     """
     dt = network_time_params['dt']
     sim_time = network_time_params['sim_time']
@@ -134,9 +134,8 @@ def initialize_self_excitation_connection(network_params):
 
 def build_wta_network(area='mt', optimize_connectivity=False):
     """
-    Build the two-column WTA decision-making network.
-    If optimize_connectivity=True, the recurrent (column-intrinsic) weights
-    can be updated during training.
+    Build the two-column WTA decision-making network. If optimize_connectivity=True,
+    the recurrent (column-intrinsic) weights can be updated during training.
     """
     config = config_path('wta_params.toml')
     general_config = config_path('general_params_wta.toml')
@@ -162,6 +161,7 @@ def train_wta(
         fn_target_data,
         seed,
         batch_size=32,
+        lr=1e+1,
         num_epochs=3,
         test_freq=10,
         train_with_adjoint=True,
@@ -178,7 +178,7 @@ def train_wta(
     # Prepare train and test data, and optimizer
     train_loader, test_states, test_stims = get_data(batch_size, network.params['model']['time_params'], fn_target_data, seed)
     test_states = test_states.to(device)
-    optimizer = torch.optim.Adam(network.parameters(), lr=10.0)
+    optimizer = torch.optim.RMSprop(network.parameters(), lr=lr)
 
     # Store losses
     train_losses = []
@@ -186,8 +186,6 @@ def train_wta(
 
     # Start training loop
     for epoch in range(num_epochs):
-
-        train_loss_sum = 0.0
 
         for itr, (true_states, stim_batch) in enumerate(train_loader):
 
@@ -203,7 +201,7 @@ def train_wta(
             loss.backward()
             optimizer.step()
 
-            train_loss_sum = train_loss_sum / len(train_loader)
+            train_losses.append(loss.item())
 
             # Test
             if itr % test_freq == 0:
@@ -214,9 +212,9 @@ def train_wta(
                     pred_states = network.read_out(output, mode='trajectory')
                     test_loss = huber_loss_wta(pred_states, test_states)
 
-                    print('Epoch {:02d} | Iter {:02d} | Train Loss {:.4f} | Test Loss {:.4f}'.format(epoch, itr // test_freq, loss.item(), test_loss.item()))
+                    print('Epoch {:02d} | Iter {:02d} | Train Loss {:.4f} | Test Loss {:.4f}'.format(
+                        epoch, itr // test_freq, loss.item(), test_loss.item()))
 
-                    train_losses.append(loss.item())
                     test_losses.append(test_loss.item())
 
     # Store training history and trained network
@@ -231,10 +229,9 @@ def train_wta(
 if __name__ == '__main__':
 
     fn_target_data      = data_path('ds_wta.pt')
-    batch_size          = 32
     num_epochs          = 3
     test_freq           = 10
-    train_with_adjoint  = False
+    train_with_adjoint  = True
     train_with_noise    = True
     device              = torch.device('cpu')
 
@@ -244,7 +241,6 @@ if __name__ == '__main__':
         train_wta(
         fn_target_data,
         seed,
-        batch_size=batch_size,
         num_epochs=num_epochs,
         test_freq=test_freq,
         train_with_adjoint=train_with_adjoint,

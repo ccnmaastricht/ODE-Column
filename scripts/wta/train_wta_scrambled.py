@@ -14,10 +14,11 @@ def make_scrambled_connectivity(area, perturb_param):
     """
     Scrambles the recurrent connectivity of the specified BrainArea. Specifically,
     scrambles the synapse counts and then applies the recurrent synapse strength to
-    the results matrix.
+    the resulting matrix.
     """
     raw_connectivity = area.recurrent_synapse_counts[:8, :8].detach().cpu().numpy()
 
+    # Separate diagonal connections to not scramble these
     diagonal = np.diag(np.diag(raw_connectivity))
     non_diagonal = raw_connectivity - diagonal
 
@@ -47,6 +48,7 @@ def train_wta_scrambled_connectivity(
         seed,
         scramble_perturb_param,
         batch_size=32,
+        lr=1e+1,
         num_epochs=3,
         test_freq=10,
         train_with_adjoint=True,
@@ -69,7 +71,7 @@ def train_wta_scrambled_connectivity(
     # Prepare train and test data, and optimizer
     train_loader, test_states, test_stims = get_data(batch_size, network.params['model']['time_params'], fn_target_data, seed)
     test_states = test_states.to(device)
-    optimizer = torch.optim.Adam(network.parameters(), lr=10.0)
+    optimizer = torch.optim.RMSprop(network.parameters(), lr=lr)
 
     # Store losses
     train_losses = []
@@ -77,8 +79,6 @@ def train_wta_scrambled_connectivity(
 
     # Start training loop
     for epoch in range(num_epochs):
-
-        train_loss_sum = 0.0
 
         for itr, (true_states, stim_batch) in enumerate(train_loader):
 
@@ -94,7 +94,7 @@ def train_wta_scrambled_connectivity(
             loss.backward()
             optimizer.step()
 
-            train_loss_sum = train_loss_sum / len(train_loader)
+            train_losses.append(loss.item())
 
             # Test
             if itr % test_freq == 0:
@@ -105,7 +105,8 @@ def train_wta_scrambled_connectivity(
                     pred_states = network.read_out(output, mode='trajectory')
                     test_loss = huber_loss_wta(pred_states, test_states)
 
-                    print('Epoch {:02d} | Iter {:02d} | Train Loss {:.4f} | Test Loss {:.4f}'.format(epoch, itr // test_freq, loss.item(), test_loss.item()))
+                    print('Epoch {:02d} | Iter {:02d} | Train Loss {:.4f} | Test Loss {:.4f}'.format(
+                        epoch, itr // test_freq, loss.item(), test_loss.item()))
 
                     train_losses.append(loss.item())
                     test_losses.append(test_loss.item())
@@ -114,15 +115,33 @@ def train_wta_scrambled_connectivity(
     history = {'train_losses': train_losses,
                'test_losses': test_losses}
 
-    torch.save(history, models_path('wta_scrambled', f'wta_scrambled_{scramble_perturb_param}_{seed}.pt'))
+    torch.save(history, models_path('wta_scrambled', f'wta_scrambled_history_{scramble_perturb_param}_{seed}.pt'))
     network.save(models_path('wta_scrambled', f'wta_scrambled_{scramble_perturb_param}_{seed}.pt'))
 
 
 
 if __name__ == '__main__':
 
-    fn_target_data = data_path('ds_wta.pt')
-    seed = 1
-    perturb_param = 1e-1 # 1e-1 tiny difference; 5e-1 medium difference; 1e+0 noticeable difference
+    fn_target_data      = data_path('ds_wta.pt')
+    num_epochs          = 3
+    test_freq           = 10
+    train_with_adjoint  = True
+    train_with_noise    = True
+    device              = torch.device('cpu')
 
-    train_wta_scrambled_connectivity(fn_target_data, seed, perturb_param)
+    perturb_params = [1e-1, 5e-1, 1e+0]
+
+    for pp in perturb_params:
+        for seed in range(1, 11):
+
+            print(f'Perturb param: {pp} || Seed: {seed}')
+
+            train_wta_scrambled_connectivity(
+            fn_target_data,
+            seed=seed,
+            scramble_perturb_param=pp,
+            num_epochs=num_epochs,
+            test_freq=test_freq,
+            train_with_adjoint=train_with_adjoint,
+            train_with_noise=train_with_noise,
+            device=device)

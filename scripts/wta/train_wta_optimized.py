@@ -10,7 +10,7 @@ from src.utils.set_seed import set_seed
 
 def compute_deviation(network, original_connectivity):
     """
-    Computes the mean absolute error between the original connectivity profile
+    Compute the mean absolute error between the original connectivity profile
     and the current connectivity profile.
     """
     with torch.no_grad():
@@ -23,6 +23,8 @@ def train_wta_optimized_connectivity(
         fn_target_data,
         seed,
         batch_size=32,
+        lr_lateral=1e+1,
+        lr_recurrent=3e+0,
         num_epochs=3,
         test_freq=10,
         train_with_adjoint=True,
@@ -44,9 +46,9 @@ def train_wta_optimized_connectivity(
     # Prepare train and test data, and optimizer
     train_loader, test_states, test_stims = get_data(batch_size, network.params['model']['time_params'], fn_target_data, seed)
     test_states = test_states.to(device)
-    optimizer = torch.optim.Adam([{'params': network.connections['lateral_mt_mt'].weights, 'lr': 10.0},
-                                  {'params': network.connections['self_excitation_mt_mt'].weights, 'lr': 10.0},
-                                  {'params': network.connections['recurrent_mt_mt'].weights, 'lr': 3.0}])
+    optimizer = torch.optim.RMSprop([{'params': network.connections['lateral_mt_mt'].weights, 'lr': lr_lateral},
+                                     {'params': network.connections['self_excitation_mt_mt'].weights, 'lr': lr_lateral},
+                                     {'params': network.connections['recurrent_mt_mt'].weights, 'lr': lr_recurrent}])
 
     # Store losses
     train_losses = []
@@ -55,8 +57,6 @@ def train_wta_optimized_connectivity(
 
     # Start training loop
     for epoch in range(num_epochs):
-
-        train_loss_sum = 0.0
 
         for itr, (true_states, stim_batch) in enumerate(train_loader):
 
@@ -72,7 +72,7 @@ def train_wta_optimized_connectivity(
             loss.backward()
             optimizer.step()
 
-            train_loss_sum = train_loss_sum / len(train_loader)
+            train_losses.append(loss.item())
 
             # Test
             if itr % test_freq == 0:
@@ -91,7 +91,6 @@ def train_wta_optimized_connectivity(
                         test_loss.item(),
                         connectivity_deviation))
 
-                    train_losses.append(loss.item())
                     test_losses.append(test_loss.item())
                     connectivity_deviations.append(connectivity_deviation)
 
@@ -104,10 +103,27 @@ def train_wta_optimized_connectivity(
     network.save(models_path('wta_optimized', f'wta_optimized_{seed}.pt'))
 
 
+
 if __name__ == '__main__':
 
-    fn_target_data = data_path('ds_wta.pt')
-    seed = 1
+    fn_target_data      = data_path('ds_wta.pt')
+    lr_recurrent        = 1e-1
+    num_epochs          = 3
+    test_freq           = 10
+    train_with_adjoint  = True
+    train_with_noise    = True
+    device              = torch.device('cpu')
 
-    train_wta_optimized_connectivity(fn_target_data, seed)
+    for seed in range(1, 11):
+        print('Seed:', seed)
+
+        train_wta_optimized_connectivity(
+        fn_target_data,
+        seed=seed,
+        lr_recurrent=lr_recurrent,
+        num_epochs=num_epochs,
+        test_freq=test_freq,
+        train_with_adjoint=train_with_adjoint,
+        train_with_noise=train_with_noise,
+        device=device)
 
