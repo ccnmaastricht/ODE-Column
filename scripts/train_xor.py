@@ -2,7 +2,9 @@ import torch
 
 from src.utils.set_seed import set_seed
 from src.brain_network import BrainNetwork
-from src.utils.loss_functions import compute_ei_ratio_penalty
+
+
+# Todo: check if can be trained; maybe add volatility penalty
 
 
 
@@ -40,10 +42,7 @@ def run_xor_batch(train_with_adjoint, train_with_noise, batch_size, device):
         network.analysis.plot_firing_rates(output)
 
         loss = ((model_read_out - true_labels) ** 2).mean()  # mse loss
-        ei_ratio_penalty = compute_ei_ratio_penalty(network)
-        ei_weight = 1e-3
-
-        total_loss += (loss + (ei_ratio_penalty * ei_weight))
+        total_loss += loss
 
     avg_loss = total_loss / nr_batches
     return avg_loss

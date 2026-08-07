@@ -1,21 +1,14 @@
 from src.brain_network import BrainNetwork
 
 
+# Todo: Check if runs; and think about anything else to showcase here
+
+
 if __name__ == '__main__':
 
-    # Building the network
+    # Build the network
     config_path = '../config/example_params.toml'
     network = BrainNetwork.from_toml(config_path)
-
-    # network.add_area(area_name='v1', unique_id='v1a', size=2)
-    # network.add_area(area_name='v1', unique_id='v1b', size=1)
-    #
-    # network.add_feedforward_connection(source='v1a', target='v1b', trainable=True)
-    # network.add_feedback_connection(source='v1b', target='v1a', trainable=True)
-    # network.add_lateral_connection(area_name='v1a', trainable=True)
-    #
-    # network.add_input_connection(target_area='v1a', input_size=2, trainable=True)
-    # network.add_output_connection(source_area='v1b', trainable=True)
 
     network.add_area(area_name='v1', size=2)
     network.add_area(area_name='v2', size=1)
@@ -27,39 +20,18 @@ if __name__ == '__main__':
     network.add_input_connection(target_area='v1', input_size=2, trainable=True)
     network.add_output_connection(source_area='v2', trainable=True)
 
-    # network.add_area(area_name='v1', size=4, intrinsic_trainable=True, background_trainable=True)
-    # network.add_area(area_name='v2', size=4)
-    #
-    # network.add_feedforward_connection(source='v1', target='v2', trainable=True,
-    #                              receptive_field_size=1,
-    #                              stride=1,
-    #                                    grid_organization=True)
-    # network.add_feedback_connection(source='v2', target='v1', trainable=True)
-    # network.add_lateral_connection(area_name='v1',
-    #                                trainable=True,
-    #                              receptive_field_size=2,
-    #                              stride=2)
-    #
-    # network.add_input_connection(target_area='v1',
-    #                              input_size=9,
-    #                              trainable=True,
-    #                              receptive_field_size=2,
-    #                              stride=1,
-    #                              grid_organization=True)
-    # network.add_output_connection(source_area='v2', trainable=True)
+    # Check network
+    network.analysis.summarize_connections()
+    network.analysis.visualize_weights()
 
-    # Stimulus batch (size = 3)
+    # Set stimuli, shape = (batch_size, input_size)
     stim = [[ 0., 10.],
             [ 0., 20.],
             [ 0., 30.]]
 
-    # stim = [[20., 0., 0., 0., 0., 0., 0., 0., 0.],
-    #         [0., 0., 0., 20., 0., 0., 0., 20., 0.],
-    #         [0., 0., 10.,0., 0., 0., 0., 0., 0.]]
-
-    # Run simulation
+    # Run the network simulation with the stimuli
     output = network.run(stim, adjoint=False, stochastic=False, device='cpu')
     model_read_out = network.read_out(output, mode='classification')
 
     # Plot all firing rates
-    network.analysis.plot_firing_rates(output, population=['L23e', 'L5e'])
+    network.analysis.plot_firing_rates(output)

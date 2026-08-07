@@ -13,10 +13,7 @@ from torchdiffeq import odeint
 from scipy.integrate import solve_ivp
 
 
-
-'''
-Train a neural ODE on a Hopf bifurcation trajectory with a sine wave as variable input mu. 
-'''
+# Todo: check if can train and edit where necessary
 
 
 
@@ -63,10 +60,6 @@ def visualize_hopf(true_y, pred_y, ii, val_loss, train_loss):
     plt.savefig('../results_old/png/{:03d}'.format(ii))
     plt.close(fig)
 
-
-'''
-Loss functions
-'''
 def huber_loss(y_pred, y_true):
     hub_loss = torch.nn.SmoothL1Loss(beta=1.0)
     return hub_loss(y_pred, y_true)
@@ -178,7 +171,7 @@ def make_hopf_ds(save=True):
 
 if __name__ == '__main__':
 
-    # Set params for Hopf bifurcation
+    # Params
     ds_file          = '../data/ds_bifurcation.pkl'
     nr_samples       = 5000
     batch_size       = 32
