@@ -229,7 +229,7 @@ class NetworkSimulator:
             self.network.constrain_weights()
 
             sim_wrapper = NetworkOdeWrapper(self.network, None, None)
-            resting_state = odeint(sim_wrapper, self.initial_state, self.time_vec)
+            resting_state = odeint(sim_wrapper, self.initial_state, self.time_vec, method='euler')
 
             membrane_potential_resting_state = resting_state[-1, :, :self.network.num_populations]
             self.initial_state[:, :self.network.num_populations] = membrane_potential_resting_state
