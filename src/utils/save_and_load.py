@@ -1,5 +1,4 @@
 import tomllib
-import pickle
 
 
 def load_config(fn):
