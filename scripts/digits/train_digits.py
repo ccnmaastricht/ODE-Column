@@ -10,7 +10,7 @@ from torch.utils.data import TensorDataset, DataLoader
 from src.brain_network import BrainNetwork
 from src.utils.paths import config_path, models_path
 from src.utils.set_seed import set_seed
-from src.utils.loss_functions import compute_fr_volatility_penalty
+from src.utils.loss_functions import compute_fr_volatility_penalty, compute_fr_ceiling_penalty
 
 
 
@@ -61,6 +61,7 @@ def train_digit_classification(
         batch_size=64,
         lr=1e-2,
         lambda_volatility=1e+0,
+        lambda_fr_reg=1e-6,
         nr_epochs=100,
         train_with_adjoint=True,
         train_with_noise=False):
@@ -117,19 +118,25 @@ def train_digit_classification(
         firing_rates = network.get_firing_rates(output, return_as_np_array=False)
         volatility_penalty = compute_fr_volatility_penalty(firing_rates)
 
-        loss = ce_loss + (lambda_volatility * volatility_penalty)
+        firing_rates = network.get_firing_rates(output, return_as_np_array=False)
+        fr_reg = compute_fr_ceiling_penalty(firing_rates)
+
+        loss = ce_loss + (lambda_volatility * volatility_penalty) + (fr_reg * lambda_fr_reg)
         acc = (labels == torch.argmax(model_predictions, dim=1)).float().mean()
 
-        return loss, ce_loss, (lambda_volatility * volatility_penalty), acc, model_predictions
+        return (loss, ce_loss, (lambda_volatility * volatility_penalty),
+                (fr_reg * lambda_fr_reg), acc, model_predictions)
 
 
     # Store history during training
     history = {'train_losses': [],
                'train_ce': [],
                'train_volatility': [],
+               'train_fr_reg': [],
                'test_losses': [],
                'test_ce': [],
                'test_volatility': [],
+               'test_fr_reg': [],
                'test_accuracy': []}
 
 
@@ -141,7 +148,7 @@ def train_digit_classification(
             start = time.time()
             optimizer.zero_grad()
 
-            loss, ce_loss, volatility, acc, preds = run_digits_batch(train_stims.to(device), train_labels)
+            loss, ce_loss, volatility, fr_reg, acc, preds = run_digits_batch(train_stims.to(device), train_labels)
 
             loss.backward()
             optimizer.step()
@@ -150,11 +157,12 @@ def train_digit_classification(
             history['train_losses'].append(loss.item())
             history['train_ce'].append(ce_loss.item())
             history['train_volatility'].append(volatility.item())
+            history['train_fr_reg'].append(fr_reg.item())
 
         # Evaluate with test set, after every epoch
-        with torch.no_grad():
+        with (torch.no_grad()):
 
-            test_loss, test_ce_loss, test_volatility, test_acc, test_preds = run_digits_batch(X_test, y_test)
+            test_loss, test_ce, test_volatility, test_fr_reg, test_acc, test_preds =run_digits_batch(X_test, y_test)
 
             print('Test loss | {:.5f}'.format(test_loss.item()))
             print('Volatility {:.5f}'.format(test_volatility.item()))
@@ -163,8 +171,9 @@ def train_digit_classification(
             print(torch.concat((test_preds, y_test.to(device).unsqueeze(1)), dim=-1))
 
             history['test_losses'].append(test_loss.item())
-            history['test_ce'].append(test_ce_loss.item())
+            history['test_ce'].append(test_ce.item())
             history['test_volatility'].append(test_volatility.item())
+            history['test_fr_reg'].append(test_fr_reg.item())
             history['test_accuracy'].append(test_acc.item())
 
         # Store training history and trained network
