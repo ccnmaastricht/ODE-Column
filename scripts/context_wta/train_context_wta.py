@@ -281,7 +281,7 @@ def train_context_wta(
             if itr % test_freq == 0:
                 with torch.no_grad():
 
-                    test_loss, test_fr_r = run_batch(test_stims, test_contexts, test_states, itr=f'{epoch}_{itr}', plotting=True)
+                    test_loss, test_fr_r = run_batch(test_stims, test_contexts, test_states, itr=f'{epoch}_{itr}', plotting=False)
 
                     print('Epoch {:02d} | Iter {:02d} | Train Loss {:.4f} | Test Loss {:.4f}'.format(
                         epoch, itr // test_freq, loss.item(), test_loss.item()))
@@ -305,7 +305,7 @@ if __name__ == '__main__':
     fn_target_data      = data_path('ds_wta.pt')
     num_epochs          = 3
     test_freq           = 10
-    train_with_adjoint  = False
+    train_with_adjoint  = True
     train_with_noise    = True
     device              = torch.device('cpu')
 

@@ -3,7 +3,7 @@ import torch
 from train_wta import build_wta_network, get_data
 
 from src.utils.paths import data_path, models_path
-from src.utils.loss_functions import huber_loss_wta
+from src.utils.loss_functions import huber_loss_wta, compute_fr_ceiling_penalty
 from src.utils.set_seed import set_seed
 
 
@@ -25,6 +25,7 @@ def train_wta_optimized_connectivity(
         batch_size=32,
         lr_lateral=1e+1,
         lr_recurrent=3e+0,
+        lambda_fr_reg=1e-6,
         num_epochs=3,
         test_freq=10,
         train_with_adjoint=True,
@@ -52,7 +53,9 @@ def train_wta_optimized_connectivity(
 
     # Store losses
     train_losses = []
+    train_fr_reg = []
     test_losses = []
+    test_fr_reg = []
     connectivity_deviations = []
 
     # Start training loop
@@ -65,14 +68,18 @@ def train_wta_optimized_connectivity(
 
             output = network.run(stim_batch, adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
 
-            # Compute loss between predicted and true states
             pred_states = network.read_out(output, mode='trajectory')
-            loss = huber_loss_wta(pred_states, true_states)
+            huber_loss = huber_loss_wta(pred_states, true_states)
+
+            firing_rates = network.get_firing_rates(output, return_as_np_array=False)
+            fr_reg = compute_fr_ceiling_penalty(firing_rates) * lambda_fr_reg
+            loss = huber_loss + fr_reg
 
             loss.backward()
             optimizer.step()
 
             train_losses.append(loss.item())
+            train_fr_reg.append(fr_reg.item())
 
             # Test
             if itr % test_freq == 0:
@@ -80,7 +87,11 @@ def train_wta_optimized_connectivity(
                     output = network.run(test_stims, adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
 
                     pred_states = network.read_out(output, mode='trajectory')
-                    test_loss = huber_loss_wta(pred_states, test_states)
+                    test_huber_loss = huber_loss_wta(pred_states, test_states)
+
+                    firing_rates = network.get_firing_rates(output, return_as_np_array=False)
+                    fr_reg_test = compute_fr_ceiling_penalty(firing_rates) * lambda_fr_reg
+                    test_loss = test_huber_loss + fr_reg_test
 
                     connectivity_deviation = compute_deviation(network, original_connectivity)
 
@@ -92,11 +103,14 @@ def train_wta_optimized_connectivity(
                         connectivity_deviation))
 
                     test_losses.append(test_loss.item())
+                    test_fr_reg.append(fr_reg_test.item())
                     connectivity_deviations.append(connectivity_deviation)
 
     # Store training history and trained network
     history = {'train_losses': train_losses,
+               'train_fr_reg': train_fr_reg,
                'test_losses': test_losses,
+               'test_fr_reg': test_fr_reg,
                'connectivity_deviations': connectivity_deviations}
 
     torch.save(history, models_path('wta_optimized', f'wta_optimized_history_{seed}.pt'))

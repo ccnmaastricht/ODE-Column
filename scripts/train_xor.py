@@ -4,13 +4,12 @@ from src.utils.set_seed import set_seed
 from src.brain_network import BrainNetwork
 
 
-# Todo: check if can be trained; maybe add volatility penalty
-
-
 
 def make_xor_ds():
-    """ Makes one mini XOR dataset with the 4 possible combinations.
-     Returns the shuffled datasets and their target classification. """
+    """
+    Makes one mini XOR dataset with the 4 possible combinations.
+    Returns the shuffled datasets and their target classification.
+    """
     xor_combos = torch.tensor([[20.,  0.],
                                [ 0., 20.],
                                [20., 20.],
@@ -21,8 +20,10 @@ def make_xor_ds():
     return xor_shuffled, xor_targets.unsqueeze(1)
 
 def run_xor_batch(train_with_adjoint, train_with_noise, batch_size, device):
-    """ Runs multiple XOR batches through the network and computes
-    the average loss over all batches. """
+    """
+    Runs multiple XOR batches through the network and computes
+    the average loss over all batches.
+    """
     nr_batches = batch_size//4
     total_loss = 0.0
 
@@ -39,8 +40,6 @@ def run_xor_batch(train_with_adjoint, train_with_noise, batch_size, device):
         )
         model_read_out = network.read_out(output, mode='classification')
 
-        network.analysis.plot_firing_rates(output)
-
         loss = ((model_read_out - true_labels) ** 2).mean()  # mse loss
         total_loss += loss
 
@@ -51,12 +50,12 @@ def run_xor_batch(train_with_adjoint, train_with_noise, batch_size, device):
 
 if __name__ == '__main__':
 
-    # Params
-    batch_size              = 16
+    # Training params
+    batch_size              = 4
     nr_epochs               = 100
     lr                      = 1.0
-    train_with_adjoint      = True
-    train_with_noise        = True
+    train_with_adjoint      = False
+    train_with_noise        = False
     seed                    = 1
     device                  = torch.device('cpu')
 
@@ -69,7 +68,7 @@ if __name__ == '__main__':
     network.add_area(area_name='v1', size=2)
     network.add_area(area_name='v2', size=1)
 
-    network.add_input_connection(target_area='v1', input_size=2, trainable=True)
+    network.add_input_connection(target_area='v1', input_size=2, trainable=True, scale=0.5)
     network.add_feedforward_connection(source='v1', target='v2', trainable=True, scale=10.0)
     network.add_output_connection(source_area='v2', trainable=False)
 
@@ -90,5 +89,6 @@ if __name__ == '__main__':
         # Test
         with torch.no_grad():
             test_loss = run_xor_batch(train_with_adjoint, train_with_noise, 4, device)
-            print('Iter {:02d} | Train Loss {:.4f} | Test Loss {:.4f}'.format(itr + 1, loss.item(), test_loss.item()))
+            print('Iter {:02d} | Train Loss {:.4f} | Test Loss {:.4f}'.format(
+                itr + 1, loss.item(), test_loss.item()))
 

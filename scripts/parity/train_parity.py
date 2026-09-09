@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 from src.brain_network import BrainNetwork
 from src.utils.set_seed import set_seed
-from src.utils.loss_functions import compute_fr_volatility_penalty
+from src.utils.loss_functions import compute_fr_ceiling_penalty, compute_fr_volatility_penalty
 from src.utils.paths import config_path, models_path
 
 
@@ -99,6 +99,7 @@ def train_parity(
         batch_size=8,
         lr=5e-1,
         lambda_volatility=1e-1,
+        lambda_fr_reg=1e-6,
         input_perturbation=0.0,
         num_epochs=1000,
         test_freq=10,
@@ -144,33 +145,41 @@ def train_parity(
         volatility_penalty = compute_fr_volatility_penalty(firing_rates, max_mean_sq_d=0.0)
         loss += (volatility_penalty * lambda_volatility)
 
+        # Add firing rates ceiling penalty
+        firing_rates = network.get_firing_rates(output, return_as_np_array=False)
+        fr_reg = compute_fr_ceiling_penalty(firing_rates)
+        loss += (fr_reg * lambda_fr_reg)
+
         # Compute the accuracy
         acc = (labels == torch.argmax(model_read_out, dim=1)).float().mean()
 
-        return output, loss, (volatility_penalty * lambda_volatility), acc
+        return output, loss, (volatility_penalty * lambda_volatility), (fr_reg * lambda_fr_reg), acc
 
     # Track history
-    losses = []
-    volatility = []
-    test_losses = []
-    test_volatility = []
-    acc_no_noise = []
-    acc_low_noise = []
-    acc_high_noise = []
+    history = {'train_losses': [],
+               'volatility': [],
+               'fr_regularization': [],
+               'test_losses': [],
+               'test_volatility': [],
+               'test_fr_reg': [],
+               'accuracy_no_noise': [],
+               'accuracy_low_noise': [],
+               'accuracy_high_noise': []}
 
     # Training loop
     for epoch in range(num_epochs):
         optimizer.zero_grad()
 
         train_inputs, train_labels = make_ds(batch_size, noise_std=input_perturbation)
-        raw_output, loss, volatility_penalty, _ = run_batch(train_inputs.to(device), train_labels.to(device))
+        raw_output, loss, volatility_penalty, fr_reg_penalty, _ = run_batch(train_inputs.to(device), train_labels.to(device))
 
         loss.backward()
         optimizer.step()
         scheduler.step()
 
-        losses.append(loss.item())
-        volatility.append(volatility_penalty.item())
+        history['train_losses'].append(loss.item())
+        history['volatility'].append(volatility_penalty.item())
+        history['fr_regularization'].append(fr_reg_penalty.item())
 
         # Test with no noise, low noise and high noise in inputs
         if epoch % test_freq == 0:
@@ -180,32 +189,23 @@ def train_parity(
             for noise in [0.0, 0.2, 0.5]:
 
                 test_inputs, test_labels = make_ds(batch_size*8, noise_std=noise)
-                test_output, test_loss, test_vol, acc = run_batch(test_inputs.to(device), test_labels.to(device))
+                test_output, test_loss, test_vol, test_fr_reg, acc = run_batch(test_inputs.to(device), test_labels.to(device))
 
                 if noise == input_perturbation:
-                    test_losses.append(test_loss.item())
-                    test_volatility.append(test_vol.item())
-
-                    # Visualize
-                    visualize_results(test_output, network, test_inputs, test_loss.item(), epoch)
-                    visualize_weights(network, epoch)
+                    history['test_losses'].append(test_loss.item())
+                    history['test_volatility'].append(test_vol.item())
+                    history['test_fr_reg'].append(test_fr_reg.item())
 
                 test_accuracy.append(acc)
 
-            acc_no_noise.append(test_accuracy[0])
-            acc_low_noise.append(test_accuracy[1])
-            acc_high_noise.append(test_accuracy[2])
+            history['accuracy_no_noise'].append(test_accuracy[0])
+            history['accuracy_low_noise'].append(test_accuracy[1])
+            history['accuracy_high_noise'].append(test_accuracy[2])
 
             print('Epoch {:02d} | Train Loss {:.4f} | No noise {:.2f} | Low noise {:.2f} | High noise {:.2f}'.format(
                 epoch, loss.item(), test_accuracy[0], test_accuracy[1], test_accuracy[2]))
 
     # Store training history and trained network
-    history = {'train_losses': losses,
-               'volatility': volatility,
-               'accuracy_no_noise': acc_no_noise,
-               'accuracy_low_noise': acc_low_noise,
-               'accuracy_high_noise': acc_high_noise}
-
     torch.save(history, models_path('parity', f'parity_history_{seed}.pt'))
     network.save(models_path('parity', f'parity_{seed}.pt'))
 
@@ -215,11 +215,11 @@ if __name__ == '__main__':
 
     num_epochs          = 501
     test_freq           = 50
-    train_with_adjoint  = False
+    train_with_adjoint  = True
     train_with_noise    = False
     device              = torch.device('cpu')
 
-    for seed in range(8, 11):
+    for seed in range(1, 11):
         print('Seed:', seed)
 
         train_parity(

@@ -7,7 +7,7 @@ from torch.utils.data import TensorDataset, DataLoader
 from src.brain_network import BrainNetwork
 from src.ww_model import DM
 from src.utils.paths import config_path, data_path, models_path
-from src.utils.loss_functions import huber_loss_wta
+from src.utils.loss_functions import huber_loss_wta, compute_fr_ceiling_penalty
 from src.utils.set_seed import set_seed
 
 
@@ -162,6 +162,7 @@ def train_wta(
         seed,
         batch_size=32,
         lr=1e+1,
+        lambda_fr_reg=1e-6,
         num_epochs=3,
         test_freq=10,
         train_with_adjoint=True,
@@ -182,7 +183,9 @@ def train_wta(
 
     # Store losses
     train_losses = []
+    train_fr_reg = []
     test_losses = []
+    test_fr_reg = []
 
     # Start training loop
     for epoch in range(num_epochs):
@@ -194,14 +197,18 @@ def train_wta(
 
             output = network.run(stim_batch, adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
 
-            # Compute loss between predicted and true states
             pred_states = network.read_out(output, mode='trajectory')
-            loss = huber_loss_wta(pred_states, true_states)
+            huber_loss = huber_loss_wta(pred_states, true_states)
+
+            firing_rates = network.get_firing_rates(output, return_as_np_array=False)
+            fr_reg = compute_fr_ceiling_penalty(firing_rates) * lambda_fr_reg
+            loss = huber_loss + fr_reg
 
             loss.backward()
             optimizer.step()
 
             train_losses.append(loss.item())
+            train_fr_reg.append(fr_reg.item())
 
             # Test
             if itr % test_freq == 0:
@@ -210,16 +217,23 @@ def train_wta(
                     output = network.run(test_stims, adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
 
                     pred_states = network.read_out(output, mode='trajectory')
-                    test_loss = huber_loss_wta(pred_states, test_states)
+                    test_huber_loss = huber_loss_wta(pred_states, test_states)
+
+                    firing_rates = network.get_firing_rates(output, return_as_np_array=False)
+                    fr_reg_test = compute_fr_ceiling_penalty(firing_rates) * lambda_fr_reg
+                    test_loss = test_huber_loss + fr_reg_test
 
                     print('Epoch {:02d} | Iter {:02d} | Train Loss {:.4f} | Test Loss {:.4f}'.format(
                         epoch, itr // test_freq, loss.item(), test_loss.item()))
 
                     test_losses.append(test_loss.item())
+                    test_fr_reg.append(fr_reg_test.item())
 
     # Store training history and trained network
     history = {'train_losses': train_losses,
-               'test_losses': test_losses}
+               'train_fr_reg': train_fr_reg,
+               'test_losses': test_losses,
+               'test_fr_reg': test_fr_reg}
 
     torch.save(history, models_path('wta', f'wta_history_{seed}.pt'))
     network.save(models_path('wta', f'wta_{seed}.pt'))
