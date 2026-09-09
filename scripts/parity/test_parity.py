@@ -102,7 +102,7 @@ def plot_history(history_paths, sub_fig_history):
 
     sub_fig_history.set_ylabel('CE loss & accuracy')
     sub_fig_history.set_xlabel('Epoch')
-    sub_fig_history.set_xticks([0, 500, 1000])
+    sub_fig_history.set_xticks([0, 250, 500])
 
 
 def make_parity_results_figure(network_paths, history_paths):
@@ -144,7 +144,7 @@ def make_parity_results_figure(network_paths, history_paths):
 
 if __name__ == '__main__':
 
-    network_paths = [models_path('parity', f'parity_{i}.pt') for i in range(1, 7)]
-    history_paths = [models_path('parity', f'parity_history_{i}.pt') for i in range(1, 7)]
+    network_paths = [models_path('parity', f'parity_{i}.pt') for i in range(1, 11)]
+    history_paths = [models_path('parity', f'parity_history_{i}.pt') for i in range(1, 11)]
 
     make_parity_results_figure(network_paths, history_paths)

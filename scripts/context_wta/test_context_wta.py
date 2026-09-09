@@ -99,7 +99,10 @@ def visualize_learned_weights(network_paths, sub_fig_weights, title, color):
         spine.set_linewidth(0.6)
 
     cbar = heatmap.collections[0].colorbar
-    cbar.set_ticks([0, 100, 200, 300])
+    if np.max(mean_matrix) > 300:
+        cbar.set_ticks([0, 100, 200, 300])
+    elif np.max(mean_matrix) < 300:
+        cbar.set_ticks([0, 100, 200])
 
     for spine in cbar.ax.spines.values():
         spine.set_visible(True)

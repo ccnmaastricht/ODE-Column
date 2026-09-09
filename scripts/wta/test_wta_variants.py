@@ -95,8 +95,8 @@ def plot_opt_csi_and_divt(paths, sub_fig_csi_opt, sub_fig_divt_opt, marker_size=
 
     sub_fig_csi_opt.set_xlim(0, population_sizes.sum())
     sub_fig_csi_opt.set_xticks(x_axis, ['L2/3', 'L4', 'L5', 'L6'])
-    sub_fig_csi_opt.set_ylim([-0.1, 1.1])
-    sub_fig_csi_opt.set_yticks([0.0, 0.5, 1.0])
+    sub_fig_csi_opt.set_ylim([-0.6, 1.1])
+    sub_fig_csi_opt.set_yticks([-0.5, 0.0, 0.5, 1.0])
     sub_fig_csi_opt.set_ylabel('Choice selectivity index')
     sub_fig_csi_opt.grid(True, axis='y', linestyle='--', alpha=0.5)
 
@@ -132,7 +132,7 @@ def plot_opt_csi_and_divt(paths, sub_fig_csi_opt, sub_fig_divt_opt, marker_size=
 
     sub_fig_divt_opt.set_xlim(0, population_sizes.sum())
     sub_fig_divt_opt.set_xticks(x_axis, ['L2/3', 'L4', 'L5', 'L6'])
-    sub_fig_divt_opt.set_ylim([0.0, 0.016])
+    sub_fig_divt_opt.set_ylim([0.0, 0.020])
     sub_fig_divt_opt.set_yticks([0.0, 0.005, 0.01, 0.015], ['0', '5', '10', '15'])
     sub_fig_divt_opt.set_ylabel('Divergence timing (ms)')
     sub_fig_divt_opt.grid(True, axis='y', linestyle='--', alpha=0.5)
@@ -246,7 +246,7 @@ def plot_opt_fit(paths, csi, divt, sub_fig_csi_opt_fit, sub_fig_divt_opt_fit, sc
     original_connectivity = get_orig_connectivity()
 
     deviations = []
-    csi_fits = [0.76, 0.71, 0.65, 0.75, 0.74, 0.78, 0.61, 0.65, 0.65, 0.71]
+    csi_fits = [0.76, 0.71, 0.65, 0.75, 0.74, 0.58, 0.61, 0.65, 0.65, 0.71]
     divt_fits = [0.82, 0.81, 0.75, 0.75, 0.74, 0.78, 0.75, 0.85, 0.77, 0.81]
 
     for network_i, network_fn in enumerate(paths):
@@ -282,14 +282,14 @@ def plot_scr_fit(all_paths, scr_csi, scr_divt, sub_fig_csi_scr_fit, sub_fig_divt
     original_connectivity = get_orig_connectivity()
 
     csi_fits = [
-        [0.7, 0.65, 0.69, 0.4, 0.6, 0.57],
-        [0.3, 0.45, 0.36, 0.37, 0.27, 0.29],
-        [0.2, 0.32]
+        [0.7, 0.65, 0.69, 0.4, 0.6, 0.57, 0.55, 0.63, 0.67, 0.51],
+        [0.3, 0.45, 0.36, 0.37, 0.27],
+        [0.2]
     ]
     divt_fits = [
-        [0.78, 0.65, 0.73, 0.55, 0.63, 0.66],
-        [0.37, 0.52, 0.47, 0.48, 0.3, 0.25],
-        [0.25, 0.3]
+        [0.78, 0.65, 0.73, 0.55, 0.63, 0.66, 0.61, 0.69, 0.59, 0.68],
+        [0.37, 0.52, 0.47, 0.48, 0.3],
+        [0.25]
     ]
 
     # Loop through all the scrambled levels
@@ -405,11 +405,16 @@ if __name__ == '__main__':
     optimized_paths = [models_path('wta_optimized', f'wta_optimized_{i}.pt') for i in range(1, 11)]
 
     scrambled_paths_low = [models_path('wta_scrambled', f'wta_scrambled_0.1_{i}.pt')
-                           for i in [1, 2, 3, 5, 8, 9]]
+                           for i in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]
     scrambled_paths_medium = [models_path('wta_scrambled', f'wta_scrambled_0.5_{i}.pt')
-                              for i in [1, 2, 4, 5, 6, 9]]
+                              for i in [4, 6, 7, 8, 9]]
     scrambled_paths_high = [models_path('wta_scrambled', f'wta_scrambled_1.0_{i}.pt')
-                            for i in [7, 9]]
+                            for i in [10]]
+
+    # history_paths = [models_path('wta_scrambled', f'wta_scrambled_history_1.0_{i}.pt') for i in range(1, 11)]
+    # for path in history_paths:
+    #     history = torch.load(path, weights_only=False)
+    #     print(history['test_losses'])
 
     make_wta_variants_figure(optimized_paths, scrambled_paths_low, scrambled_paths_medium, scrambled_paths_high)
 
