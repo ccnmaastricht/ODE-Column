@@ -14,6 +14,31 @@ from src.utils.loss_functions import compute_fr_volatility_penalty, compute_fr_c
 
 
 
+def get_data(batch_size, seed):
+    """"""
+    transform = transforms.Compose([transforms.ToTensor(), transforms.Lambda(lambda x: x.flatten() * 10)])
+    train_dataset = torchvision.datasets.MNIST(root='./data', train=True, transform=transform, download=True)
+    labels = train_dataset.targets
+
+    generator = torch.Generator().manual_seed(seed)
+    val_indices = []
+    for class_idx in range(10):
+        class_indices = torch.where(labels == class_idx)[0]
+        perm = torch.randperm(len(class_indices), generator=generator)
+        val_indices.extend(class_indices[perm[:20]])
+    val_indices = torch.tensor(val_indices)
+
+    X_val = train_dataset.data[val_indices].float() / 255.0 * 10
+    X_val = X_val.flatten(start_dim=1)
+    y_val = train_dataset.targets[val_indices]
+
+    all_indices = torch.arange(len(train_dataset))
+    train_indices = all_indices[~torch.isin(all_indices, val_indices)]
+    train_dataset = Subset(train_dataset, train_indices)
+    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+
+    return train_loader, X_val, y_val
+
 def train_mnist(
         seed,
         device,
@@ -42,26 +67,7 @@ def train_mnist(
 
 
     # Prepare train set and validation set
-    transform = transforms.Compose([transforms.ToTensor(), transforms.Lambda(lambda x: x.flatten() * 10)])
-    train_dataset = torchvision.datasets.MNIST(root='./data', train=True, transform=transform, download=True)
-    labels = train_dataset.targets
-
-    generator = torch.Generator().manual_seed(seed)
-    val_indices = []
-    for class_idx in range(10):
-        class_indices = torch.where(labels == class_idx)[0]
-        perm = torch.randperm(len(class_indices), generator=generator)
-        val_indices.extend(class_indices[perm[:20]])
-    val_indices = torch.tensor(val_indices)
-
-    X_val = train_dataset.data[val_indices].float() / 255.0 * 10
-    X_val = X_val.flatten(start_dim=1)
-    y_val = train_dataset.targets[val_indices]
-
-    all_indices = torch.arange(len(train_dataset))
-    train_indices = all_indices[~torch.isin(all_indices, val_indices)]
-    train_dataset = Subset(train_dataset, train_indices)
-    train_loader = DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader, X_val, y_val = get_data(batch_size, seed)
 
 
     # Loss function and optimizer
@@ -139,7 +145,7 @@ def train_mnist(
 if __name__ == '__main__':
 
     seed = 1
-    device = torch.device('cuda')
+    device = torch.device('mps')
 
     train_mnist(seed, device)
 
