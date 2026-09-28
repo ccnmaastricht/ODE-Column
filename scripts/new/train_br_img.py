@@ -1,5 +1,4 @@
 import torch
-import matplotlib.pyplot as plt
 
 from src.brain_network import BrainNetwork
 from src.utils.paths import config_path, models_path
@@ -48,7 +47,7 @@ def show_longer_adaptation(network):
 
     network.analysis.plot_firing_rates(output, population='L23e')
 
-def get_data_batch(batch_size, stim_strength=20.):
+def get_data_batch(batch_size, stim_strength=20., img_strength=5.):
     """"""
 
     adapter_versions = torch.tensor([
@@ -58,7 +57,8 @@ def get_data_batch(batch_size, stim_strength=20.):
     adapter_stims = torch.tile(adapter_versions, (batch_size//2, 1))
     adapter_stims = adapter_stims[torch.randperm(adapter_stims.size(0))]
 
-    imagery_input = adapter_stims
+    scale = img_strength / stim_strength
+    imagery_input = adapter_stims * scale
 
     br_stims = torch.tensor([
         [stim_strength, stim_strength]
@@ -79,7 +79,8 @@ def train_br_img_exp(
 
     # Initialize network
     config = config_path('br_img_params.toml')
-    network = BrainNetwork.from_toml(config)
+    general_config = config_path('br_img_general_params.toml')
+    network = BrainNetwork.from_toml(config, general_config)
 
     network.add_area('v1', 2)
     network.add_input_connection('v1', 2, unique_id='bottom_up',
@@ -121,8 +122,8 @@ def train_br_img_exp(
                                   input_window=[0.0, 0.75], reset_state=False,
                                   stochastic=train_with_noise, adjoint=train_with_adjoint)
         output = torch.concat([resting_state, adap_activity, img_activity, br_activity], dim=0)
-        if itr > 1:
-            network.analysis.plot_firing_rates(output, population='L23e')
+        # if itr > 1:
+        #     network.analysis.plot_firing_rates(output, population='L23e')
 
         model_activations = network.read_out(br_activity, mode='classification')
 
@@ -136,14 +137,6 @@ def train_br_img_exp(
         incorrect = masked.max(dim=1).values
 
         loss = torch.relu(margin - correct + incorrect).mean()
-
-        # print(model_activations)
-        # print(target_class)
-        # print(correct)
-        # print(incorrect)
-        # print(margin - correct + incorrect)
-        # print(loss.item())
-
         return loss
 
 
@@ -158,6 +151,8 @@ def train_br_img_exp(
 
         print('Iter {:02d} | Train loss | {:.5f}'.format(itr, loss.item()))
 
+        # Save network
+        network.save(models_path('br_img', f'br_img_{seed}.pt'))
 
 
 
