@@ -17,7 +17,7 @@ from src.utils.loss_functions import compute_fr_volatility_penalty, compute_fr_c
 def get_data(batch_size, seed):
     """"""
     transform = transforms.Compose([transforms.ToTensor(), transforms.Lambda(lambda x: x.flatten() * 10)])
-    train_dataset = torchvision.datasets.MNIST(root='./data', train=True, transform=transform, download=True)
+    train_dataset = torchvision.datasets.MNIST(root='../data', train=True, transform=transform, download=False)
     labels = train_dataset.targets
 
     generator = torch.Generator().manual_seed(seed)
