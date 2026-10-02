@@ -188,7 +188,7 @@ ColumnModel/
 
 ## Requirements
 
-Ensure you have Python 3.10+ installed along with the required dependencies:
+Ensure you have Python 3.12+ installed along with the required dependencies:
 
 ```bash
 pip install torch torchdiffeq torchsde numpy scipy matplotlib scikit-learn tomllib
