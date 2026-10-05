@@ -12,13 +12,15 @@ class NetworkReadout:
 
     Attributes:
         network (BrainNetwork): Reference to the target brain network.
-        layer_labels (list[str]): Names of laminar populations (`['L23e', 'L23i', ...]`).
+        population_labels (list[str]): Names of laminar populations (e.g. `['L23e', 'L23i', ...]`).
+        num_populations_per_col (int): Number of populations per column.
     """
 
     def __init__(self, network):
 
         self.network = network
-        self.layer_labels = ['L23e', 'L23i', 'L4e', 'L4i', 'L5e', 'L5i', 'L6e', 'L6i']
+        self.population_labels = network.params['general']['population_labels']
+        self.num_populations_per_col = len(self.population_labels)
 
     def get_firing_rates(
             self,
@@ -61,7 +63,7 @@ class NetworkReadout:
         sample_list     = np.arange(firing_rates.shape[1])
         area_list       = self.network.areas.keys()
         column_list     = {area_id: np.arange(area.num_columns) for area_id, area in self.network.areas.items()}
-        pop_list        = np.arange(8)
+        pop_list        = np.arange(self.num_populations_per_col)
 
         if area is not None:
             area_slices = self.network.area_slices[area]
@@ -74,8 +76,8 @@ class NetworkReadout:
 
         firing_rates = {area_id: fr.reshape(fr.shape[0],
                                          fr.shape[1],
-                                         fr.shape[2] // 8,
-                                         8)
+                                         fr.shape[2] // self.num_populations_per_col,
+                                         self.num_populations_per_col)
                         for area_id, fr  in firing_rates.items()}
 
         if sample is not None:
@@ -97,7 +99,7 @@ class NetworkReadout:
 
             for i, pop in enumerate(population):
                 if isinstance(pop, str):
-                    population[i] = self.layer_labels.index(pop)
+                    population[i] = self.population_labels.index(pop)
 
             firing_rates = {area : fr[:, :, :, population] for area, fr in firing_rates.items()}
 
@@ -168,7 +170,7 @@ class NetworkReadout:
                 shape `(time_steps, batch_size, 2 * total_populations)`.
             mode (str): Evaluation mode, either `'trajectory'` (full time-series) or
                 `'classification'` (window-averaged).
-            sum_per_col (bool): Whether to sum firing rates across all 8 laminar
+            sum_per_col (bool): Whether to sum firing rates across all laminar
                 populations within each column.
 
         Returns:
@@ -179,11 +181,15 @@ class NetworkReadout:
         Raises:
             AssertionError: Raised if readout mode is not `'trajectory'` or
                 `'classification'`.
+            AssertionError: Raised if network has no initialized output connections.
         """
         assert mode == 'trajectory' or mode == 'classification', (f"Invalid mode for read-out. "
                                                                   f"Acceptable modes are 'trajectory' or 'classification'.")
 
         output_conns = {name : conn for name, conn in self.network.connections.items() if conn.conn_type == 'output'}
+        assert bool(output_conns) == True, (f"Network has no output connections to read-out from. "
+                                            f"Please use BrainNetwork.add_output_connection() to initialize an output connection.")
+
         read_outs = {}
 
         for conn_name, output_conn in output_conns.items():
@@ -192,7 +198,8 @@ class NetworkReadout:
             read_out = fr_output_area * output_conn.W
 
             if sum_per_col:
-                read_out_reshape = torch.reshape(read_out, (read_out.shape[0], read_out.shape[1], read_out.shape[2] // 8, 8))
+                read_out_reshape = torch.reshape(read_out, (read_out.shape[0], read_out.shape[1],
+                                                            read_out.shape[2] // self.num_populations_per_col, self.num_populations_per_col))
                 read_out = torch.sum(read_out_reshape, dim=-1)
 
             if mode == 'classification':

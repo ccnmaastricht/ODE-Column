@@ -537,7 +537,7 @@ class BrainNetwork(torch.nn.Module):
         if not self.network_is_finalized:
 
             self.num_populations = sum(area.num_populations for area in self.areas.values())
-            self.num_columns = self.num_populations // 8
+            self.num_columns = sum(area.num_columns for area in self.areas.values())
 
             # Area order in state and slices per area
             idx = 0
@@ -628,7 +628,7 @@ class BrainNetwork(torch.nn.Module):
         Args:
             raw_output (torch.Tensor): Simulation output state trajectory tensor.
             mode (str): Evaluation mode (`'trajectory'` or `'classification'`).
-            sum_per_col (bool, optional): Whether to sum rates across all 8 column populations. Defaults to True.
+            sum_per_col (bool, optional): Whether to sum rates across all column populations. Defaults to True.
 
         Returns:
             torch.Tensor | dict[str, torch.Tensor]: Processed readout tensor or dictionary of readout tensors.

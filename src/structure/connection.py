@@ -176,7 +176,8 @@ class Connection(torch.nn.Module):
         init_weights = self._init_weights(init, size_source, size_target, synapse_strength, std, scale)
 
         receptive_field_mask = self._make_receptive_field_mask(size_source, size_target, receptive_field_size, stride, grid_organization)
-        rf_mask = receptive_field_mask.repeat_interleave(8, dim=0).repeat_interleave(8, dim=1)
+        nr_pops = len(params['general']['population_labels'])
+        rf_mask = receptive_field_mask.repeat_interleave(nr_pops, dim=0).repeat_interleave(nr_pops, dim=1)
 
         mask = torch.tile(mask, (size_target, size_source))
         mask *= rf_mask
@@ -357,7 +358,8 @@ class Connection(torch.nn.Module):
 
         receptive_field_mask = self._make_receptive_field_mask(size_input, size_target_area, receptive_field_size,
                                                                stride, grid_organization)
-        rf_mask = receptive_field_mask.repeat_interleave(8, dim=0)
+        nr_pops = len(params['general']['population_labels'])
+        rf_mask = receptive_field_mask.repeat_interleave(nr_pops, dim=0)
 
         mask = torch.tile(mask, (size_target_area, size_input))
         mask *= rf_mask

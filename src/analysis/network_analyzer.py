@@ -11,13 +11,13 @@ class NetworkAnalyzer:
 
     Attributes:
         network (BrainNetwork): Reference to the target brain network.
-        layer_labels (list[str]): Names of laminar populations (`['L23e', 'L23i', ...]`).
+        population_labels (list[str]): Names of populations.
     """
 
     def __init__(self, network):
 
         self.network = network
-        self.layer_labels = network.readout.layer_labels
+        self.population_labels = network.readout.population_labels
 
     def plot_firing_rates(self, raw_state, sample=None, area=None, column=None, population=None):
         """
@@ -45,7 +45,7 @@ class NetworkAnalyzer:
                 for col in range(len(column_list[area_])):
                     for pop in range(len(pop_list)):
 
-                        pop_name = self.layer_labels[pop_list[pop]]
+                        pop_name = self.population_labels[pop_list[pop]]
                         label = f'{area_}_col{column_list[area_][col]}_{pop_name}'
                         plt.plot(firing_rates[area_][:, sample_, col, pop], label=label)
 
