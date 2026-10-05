@@ -1,3 +1,5 @@
+population_labels = ['L23e', 'L23i', 'L4e', 'L4i', 'L5e', 'L5i', 'L6e', 'L6i']
+
 adaptation_strength = [1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 background_drive = 8.0
 capacitance = 250e-6
