@@ -124,7 +124,7 @@ class NetworkReadout:
 
         return firing_rates
 
-    def _classification_read_out(self, fr_full_sim_time):
+    def _classification_read_out(self, fr_full_sim_time, classification_window):
         """
         Compute time-averaged population firing rates over a specified classification
         window interval.
@@ -132,6 +132,10 @@ class NetworkReadout:
         Args:
             fr_full_sim_time (torch.Tensor): Full time-series firing rate tensor, shape
                 `(time_steps, batch_size, output_dims)`.
+            classification_window (tuple[float, float] | None, optional): Start and end
+                time in seconds of the averaging window, e.g. `(0.5, 1.0)`. If None,
+                falls back to `classification_window` under `[time_params]` in the TOML
+                configuration file.
 
         Returns:
             torch.Tensor: Time-averaged firing rate tensor across classification
@@ -142,10 +146,15 @@ class NetworkReadout:
                 simulation duration.
         """
         time_params = self.network.params['model']['time_params']
-        assert 'classification_window' in time_params, (f"If mode is set to 'classification', please set "
-                                                        f"a classification_window in model_params.toml under [time_params].")
 
-        time_window = time_params['classification_window']
+        if classification_window is None:
+            assert 'classification_window' in time_params, (
+                f"If mode is set to 'classification', please set a classification_window "
+                f"in model_params.toml under [time_params], or pass it directly to read_out().")
+            time_window = time_params['classification_window']
+        else:
+            time_window = classification_window
+
         sim_time = time_params['sim_time']
         dt = time_params['dt']
 
@@ -160,7 +169,8 @@ class NetworkReadout:
 
         return torch.mean(fr_window_slice, dim=0)
 
-    def read_out(self, raw_output, mode, sum_per_col):
+
+    def read_out(self, raw_output, mode, sum_per_col, classification_window):
         """
         Compute task readout outputs from target output connections using either
         continuous trajectory or classification window averaging.
@@ -172,6 +182,11 @@ class NetworkReadout:
                 `'classification'` (window-averaged).
             sum_per_col (bool): Whether to sum firing rates across all laminar
                 populations within each column.
+            classification_window (tuple[float, float] | None, optional): Start and end
+                time in seconds of the averaging window, e.g. `(0.5, 1.0)`. Only used
+                when `mode='classification'`. If None, falls back to
+                `classification_window` under `[time_params]` in the TOML configuration
+                file.
 
         Returns:
             torch.Tensor | dict[str, torch.Tensor]: Processed readout tensor for a
@@ -203,7 +218,7 @@ class NetworkReadout:
                 read_out = torch.sum(read_out_reshape, dim=-1)
 
             if mode == 'classification':
-                read_out = self._classification_read_out(read_out)
+                read_out = self._classification_read_out(read_out, classification_window)
 
             read_outs[conn_name] = read_out
 

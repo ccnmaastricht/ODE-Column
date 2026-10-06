@@ -11,12 +11,16 @@ class NetworkOdeWrapper(torch.nn.Module):
     ext_input (dict[str, torch.Tensor] | None): External drive inputs.
     input_windows (dict[str, tuple[float, float]]): Active time windows for
         external inputs.
+    noise_amplitude (int): Noise amplitude applied to the membrane potential
+        dynamics.
 
     Attributes:
         network (BrainNetwork): Reference to the underlying network model.
         ext_input (dict[str, torch.Tensor] | None): External input drive dictionary.
         input_windows (dict[str, tuple[float, float]]): Active time windows for
             external inputs.
+        noise_amplitude (float): Noise amplitude applied to the membrane potential
+            dynamics.
         noise_type (str): SDE noise specification class parameter set to "diagonal".
         sde_type (str): SDE integration scheme class parameter set to "ito".
     """
@@ -24,13 +28,14 @@ class NetworkOdeWrapper(torch.nn.Module):
     noise_type = "diagonal"
     sde_type = "ito"
 
-    def __init__(self, network, ext_input, input_windows):
+    def __init__(self, network, ext_input, input_windows, noise_amplitude):
 
         super().__init__()
 
         self.network = network
         self.ext_input = ext_input
         self.input_windows = input_windows
+        self.noise_amplitude = noise_amplitude
 
     def forward(self, t, state):
         """
@@ -66,4 +71,5 @@ class NetworkOdeWrapper(torch.nn.Module):
         """
         return self.network.dynamics.diffusion(
             t,
-            state)
+            state,
+            self.noise_amplitude)

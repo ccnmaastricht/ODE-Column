@@ -91,8 +91,8 @@ A minimal training script demonstrating exclusive-OR (XOR) classification: [`scr
 Initializing a `BrainNetwork` instance requires two configuration files located in the `config/` folder 
 containing network parameters: 
 - **Model-specific (application-specific) parameters**
-  - Should contain at least `[time_params]dt` and `[time_params]sim_time` to allow network simulation and should 
-    contain the appropriate connection weight initializations and masks (e.g. feedforward, lateral) for network 
+  - Contains `[time_params]dt` and `[time_params]sim_time` to allow network simulation and 
+    the appropriate connection weight initializations and masks (e.g. feedforward, lateral) for network 
     construction. 
 - **General parameters**
   - Contains parameters that are generally applicable to all network applications, e.g. time constants, population 

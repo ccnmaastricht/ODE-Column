@@ -558,17 +558,26 @@ class BrainNetwork(torch.nn.Module):
         for connection in self.connections.values():
             connection.constrain()
 
-    def run(self, ext_input=None, input_window=None, adjoint=False, stochastic=False, reset_state=True, device="cpu"):
+    def run(self, ext_input=None, dt=None, sim_time=None, input_window=None, adjoint=False, stochastic=False,
+            noise_amplitude=3.0, method='default', reset_state=True, device="cpu"):
         """
         Delegate numerical integration of network dynamics to the simulation engine across specified time windows.
 
         Args:
             ext_input (dict | torch.Tensor | None, optional): External drive input specification. Defaults to None.
                 If None, the network will run at resting state.
-            input_window (dict | tuple | None, optional): Active time window intervals. Defaults to None.
-                If None, `input_window` from TOML configuration file will be used.
+            dt (float | None, optional): Integration timestep size in seconds. If None, uses the value set
+                under `[time_params] dt` in the TOML configuration file. Defaults to None.
+            sim_time (float | None, optional): Total simulation duration in seconds. If None, uses the value set
+                under `[time_params] sim_time` in the TOML configuration file. Defaults to None.
+            input_window (dict | tuple | None, optional): Active time window intervals.
+                If None, `input_window` from TOML configuration file will be used. Defaults to None.
             adjoint (bool, optional): Whether to use adjoint solver variants. Defaults to False.
             stochastic (bool, optional): Whether to simulate stochastic dynamics with noise. Defaults to False.
+            noise_amplitude (float): Noise amplitude applied to the membrane potential dynamics if stochastic=True.
+                Defaults to 3.0.
+            method (str): Numerical solver used by neural ODE. Defaults to "dopri5" for deterministic mode and
+                defaults to "srk" for stochastic mode (if stochastic=True).
             reset_state (bool, optional): Whether to reset initial state to resting state. If False, will use the
                 last state of the previous simulation as the current initial state. Defaults to True.
             device (torch.device | str, optional): Compute device for execution. Defaults to "cpu".
@@ -580,9 +589,13 @@ class BrainNetwork(torch.nn.Module):
         """
         return self.simulator.run(
             ext_input=ext_input,
+            dt=dt,
+            sim_time=sim_time,
             input_window=input_window,
             adjoint=adjoint,
             stochastic=stochastic,
+            noise_amplitude=noise_amplitude,
+            method=method,
             reset_state=reset_state,
             device=device)
 
@@ -620,7 +633,7 @@ class BrainNetwork(torch.nn.Module):
             return_as_np_array=return_as_np_array,
             return_as_dict=return_as_dict)
 
-    def read_out(self, raw_output, mode, sum_per_col=True):
+    def read_out(self, raw_output, mode, sum_per_col=True, classification_window=None):
         """
         Compute task output readouts from raw simulation state trajectories using continuous or classification
         time averaging.
@@ -629,6 +642,9 @@ class BrainNetwork(torch.nn.Module):
             raw_output (torch.Tensor): Simulation output state trajectory tensor.
             mode (str): Evaluation mode (`'trajectory'` or `'classification'`).
             sum_per_col (bool, optional): Whether to sum rates across all column populations. Defaults to True.
+            classification_window (tuple[float, float] | None, optional): Start and end time in seconds of the
+                averaging window, e.g. `(0.5, 1.0)`. Only used when `mode='classification'`. If None, falls back
+                to `classification_window` under `[time_params]` in the TOML configuration file. Defaults to None.
 
         Returns:
             torch.Tensor | dict[str, torch.Tensor]: Processed readout tensor or dictionary of readout tensors.
@@ -636,7 +652,8 @@ class BrainNetwork(torch.nn.Module):
         return self.readout.read_out(
             raw_output=raw_output,
             mode=mode,
-            sum_per_col=sum_per_col)
+            sum_per_col=sum_per_col,
+            classification_window=classification_window)
 
     def save(self, path):
         """

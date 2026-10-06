@@ -28,15 +28,40 @@ class NetworkSimulator:
     def __init__(self, network):
 
         self.network        = network
-
-        time_params         = network.params['model']['time_params']
-        self.dt             = time_params['dt']
-        self.sim_time       = time_params['sim_time']
-        self.input_window   = time_params['input_window']
+        self.time_params    = network.params['model']['time_params']
 
         self.previous_network_state = None
 
         self.network_is_ready = False
+
+    def _set_time_params(self, dt, sim_time, device):
+        """
+        Retrieve timestep (dt) and simulation time (sim_time) either from user-specified
+        input or from TOML configuration file.
+
+        Args:
+            dt (float | None): Timestep used in simulation.
+            sim_time (float | None): Total simulation duration in seconds.
+            device (torch.device | str): Target compute device.
+
+        Raises:
+            AssertionError: Raised if either of the time parameters is unspecified.
+        """
+        if dt is None:
+            assert 'dt' in self.time_params, (f"No 'dt' specified. Please set 'dt' under ['time_params'] "
+                                              f"in the TOML configuration file or pass it directly to BrainNetwork.run().")
+            self.dt = self.time_params['dt']
+        else:
+            self.dt = dt
+
+        if sim_time is None:
+            assert 'sim_time' in self.time_params, (f"No 'sim_time' specified. Please set 'sim_time' under ['time_params'] "
+                                                    f"in the TOML configuration file or pass it directly to BrainNetwork.run().")
+            self.sim_time = self.time_params['sim_time']
+        else:
+            self.sim_time = sim_time
+
+        self.time_vec = torch.arange(0, self.sim_time, self.dt, device=device)
 
     def _infer_batch_size(self, ext_input):
         """
@@ -129,10 +154,10 @@ class NetworkSimulator:
                          for conn in self.network.connections.values()
                          if conn.conn_type == "input"}
 
-        assert ext_input.keys() == input_connections.keys(), (f"Mismatch found between specified inputs ({list(ext_input.keys())}) "
-                                                              f"and specified input connection sources ({list(input_connections.keys())}).")
-
-        for source_id, connection in input_connections.items():
+        for source_id in ext_input.keys():
+            assert source_id in input_connections.keys(), (f"Mismatch found between specified input '{source_id}' "
+                                                           f"and specified input connection sources ({list(input_connections.keys())}).")
+            connection = input_connections[source_id]
             assert ext_input[source_id].shape[1] == connection.weights.shape[1], (f"Input tensor '{source_id}' shape (x, {ext_input[source_id].shape[1]}) "
                                                                                   f"does not match with input weights shape (x, {connection.weights.shape[1]}).")
 
@@ -168,12 +193,18 @@ class NetworkSimulator:
             tuple[dict[str, torch.Tensor] | None, dict[str, tuple[float, float]] | None, int]:
                 Tuple containing processed input dictionary, time window dictionary,
                 and inferred batch size.
+
+        Raises:
+            AssertionError: Raised if input_window is unspecified.
         """
         if ext_input is None:
             return None, None, 1
 
         if input_window is None:
-            input_window = self.input_window
+            assert 'input_window' in self.time_params, (f"No 'input_window' specified. Either set 'input_window' "
+                                                        f"under ['time_params'] in the TOML configuration file or "
+                                                        f"in BrainNetwork.run(). ")
+            input_window = self.time_params['input_window']
 
         ext_input = self._make_input_dict(ext_input, ['input'])
         input_window = self._make_input_dict(input_window, ext_input.keys())
@@ -206,8 +237,8 @@ class NetworkSimulator:
 
     def _prepare_network(self, device):
         """
-        Finalize network layout, move network parameters to target device, construct
-        time vector, and initialize zeroed state.
+        Finalize network layout, move network parameters to target device
+        and initialize zeroed state.
 
         Args:
             device (torch.device | str): Target compute device.
@@ -215,7 +246,6 @@ class NetworkSimulator:
         self.network = self.network.to(device)
         self.network.finalize()
 
-        self.time_vec = torch.arange(0, self.sim_time, self.dt, device=device)
         self.initial_state = torch.zeros(1, self.network.num_populations * 2, device=device)
 
         self.network_is_ready = True
@@ -228,7 +258,7 @@ class NetworkSimulator:
         with torch.no_grad():
             self.network.constrain_weights()
 
-            sim_wrapper = NetworkOdeWrapper(self.network, None, None)
+            sim_wrapper = NetworkOdeWrapper(self.network, None, None, 0.0)
             resting_state = odeint(sim_wrapper, self.initial_state, self.time_vec, method='euler')
 
             membrane_potential_resting_state = resting_state[-1, :, :self.network.num_populations]
@@ -245,18 +275,24 @@ class NetworkSimulator:
         """
         self.previous_network_state = network_output[-1]
 
-    def run(self, ext_input, input_window, adjoint, stochastic, reset_state, device):
+    def run(self, ext_input, dt, sim_time, input_window, adjoint, stochastic,
+            noise_amplitude, method, reset_state, device):
         """
         Execute numerical simulation using standard ODE, adjoint ODE, SDE, or adjoint
         SDE solvers.
 
         Args:
             ext_input (dict | torch.Tensor | None): External input drive tensors.
+            dt (float | None): Integration timestep size in seconds.
+            sim_time (float | None): Total simulation duration in seconds.
             input_window (dict | tuple | None): Active time window interval tuples.
             adjoint (bool): Whether to use adjoint sensitivity method solver variants
                 (`odeint_adjoint` / `sdeint_adjoint`).
             stochastic (bool): Whether to simulate stochastic dynamics with noise
                 (`sdeint`) or deterministic dynamics (`odeint`).
+            noise_amplitude (float): Noise amplitude applied to the membrane potential
+                dynamics if stochastic=True.
+            method (str): Numerical solver used by neural ODE.
             reset_state (bool): Whether to reset initial state to resting state or
                 carry over `previous_network_state`.
             device (torch.device | str): Target compute device for execution.
@@ -265,6 +301,9 @@ class NetworkSimulator:
             torch.Tensor: Simulation output trajectory tensor of shape
                 `(time_steps, batch_size, 2 * total_populations)`.
         """
+        # Set the timestep (dt), simulation time and time_vec
+        self._set_time_params(dt, sim_time, device)
+
         # Prepare the external input for simulation and infer the batch size
         ext_input, input_window, batch_size = self._prepare_input_for_sim(ext_input, input_window, device)
 
@@ -285,22 +324,28 @@ class NetworkSimulator:
             initial_state = self.previous_network_state
 
         # Initialize the wrapper and set the external input
-        sim_wrapper = NetworkOdeWrapper(self.network, ext_input, input_window)
+        sim_wrapper = NetworkOdeWrapper(self.network, ext_input, input_window, noise_amplitude)
+
+        # Set the default method if none is specified
+        if method == 'default' and not stochastic:
+            method = 'dopri5'
+        if method == 'default' and stochastic:
+            method = 'srk'
 
         # Run the network simulation with the specified ODE variant
         if not adjoint and not stochastic:
-            network_output = odeint(sim_wrapper, initial_state, self.time_vec)
+            network_output = odeint(sim_wrapper, initial_state, self.time_vec, method=method)
 
         elif adjoint and not stochastic:
-            network_output = odeint_adjoint(sim_wrapper, initial_state, self.time_vec)
+            network_output = odeint_adjoint(sim_wrapper, initial_state, self.time_vec, method=method)
 
         elif not adjoint and stochastic:
             network_output = sdeint(sim_wrapper, initial_state, self.time_vec,
-                            names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
+                            names={'drift': 'forward', 'diffusion': 'diffusion'}, method=method)
 
         elif adjoint and stochastic:
             network_output = sdeint_adjoint(sim_wrapper, initial_state, self.time_vec,
-                                    names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
+                                    names={'drift': 'forward', 'diffusion': 'diffusion'}, method=method)
 
         self._store_last_state(network_output)
 
