@@ -91,6 +91,9 @@ class Connection(torch.nn.Module):
         Returns:
             torch.Tensor: Randomly initialized weight matrix of shape `(size_target, size_source)`.
         """
+        if self.dales_law_constraint:
+            init[..., 1::2] *= -1
+
         init *= synapse_strength
         init = torch.tile(init, (size_target, size_source))
 
