@@ -97,7 +97,7 @@ class Connection(torch.nn.Module):
         init *= synapse_strength
         init = torch.tile(init, (size_target, size_source))
 
-        rand_weights = abs(torch.normal(mean=init, std=std))
+        rand_weights = torch.normal(mean=init, std=std)
         rand_weights *= scale
         return rand_weights
 
