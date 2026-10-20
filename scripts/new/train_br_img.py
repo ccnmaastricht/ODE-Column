@@ -9,40 +9,40 @@ from train_memory import initialize_self_excitation_connection, initialize_lat_i
 
 def show_adaptation(network):
 
-    output1 = network.run([0., 20.], input_window=[0.5, 1.0])
-    output2 = network.run([0., 20.], input_window=[0.0, 1.0], reset_state=False)
-    output3 = network.run([0., 0.], input_window=[0.0, 1.0], reset_state=False)
-    output4 = network.run([20., 20.], input_window=[0.0, 0.75], reset_state=False)
+    output1 = network.run({'bottom_up': [ 0., 20.]}, sim_time=1.0, input_window=[0.5, 1.0])
+    output2 = network.run({'bottom_up': [ 0., 20.]}, sim_time=1.0, input_window=[0.0, 1.0], reset_state=False)
+    output3 = network.run({'bottom_up': [ 0.,  0.]}, sim_time=1.0, input_window=[0.0, 1.0], reset_state=False)
+    output4 = network.run({'bottom_up': [20., 20.]}, sim_time=1.0, input_window=[0.0, 0.75], reset_state=False)
     output = torch.concat([output1, output2, output3, output4], dim=0)
 
     network.analysis.plot_firing_rates(output, population='L23e')
 
 def show_weak_perception(network):
 
-    output1 = network.run([0., 0.], input_window=[0.0, 1.0])
-    output2 = network.run([0., 10.], input_window=[0.0, 0.5], reset_state=False)
-    output3 = network.run([0., 0.], input_window=[0.0, 0.5], reset_state=False)
-    output4 = network.run([20., 20.], input_window=[0.0, 0.75], reset_state=False)
+    output1 = network.run({'bottom_up': [ 0.,  0.]}, sim_time=1.0, input_window=[0.0, 1.0])
+    output2 = network.run({'bottom_up': [ 0., 10.]}, sim_time=1.0, input_window=[0.0, 0.5], reset_state=False)
+    output3 = network.run({'bottom_up': [ 0.,  0.]}, sim_time=1.0, input_window=[0.0, 0.5], reset_state=False)
+    output4 = network.run({'bottom_up': [20., 20.]}, sim_time=1.0, input_window=[0.0, 0.75], reset_state=False)
     output = torch.concat([output1, output2, output3, output4], dim=0)
 
     network.analysis.plot_firing_rates(output, population='L23e')
 
 def show_adaptation_and_weak_perception(network):
 
-    output1 = network.run([0., 20.], input_window=[0.5, 1.0])
-    output2 = network.run([0., 20.], input_window=[0.0, 1.0], reset_state=False)
-    output3 = network.run([0., 10.], input_window=[0.0, 0.5], reset_state=False)
-    output4 = network.run([20., 20.], input_window=[0.0, 0.75], reset_state=False)
+    output1 = network.run({'bottom_up': [ 0., 20.]}, sim_time=1.0, input_window=[0.5, 1.0])
+    output2 = network.run({'bottom_up': [ 0., 20.]}, sim_time=1.0, input_window=[0.0, 1.0], reset_state=False)
+    output3 = network.run({'bottom_up': [ 0., 10.]}, sim_time=1.0, input_window=[0.0, 0.5], reset_state=False)
+    output4 = network.run({'bottom_up': [20., 20.]}, sim_time=1.0, input_window=[0.0, 0.75], reset_state=False)
     output = torch.concat([output1, output2, output3, output4], dim=0)
 
     network.analysis.plot_firing_rates(output, population='L23e')
 
 def show_longer_adaptation(network):
 
-    output1 = network.run([0., 0.], input_window=[0.0, 3.0], stochastic=train_with_noise)
-    output2 = network.run([0., 20.], input_window=[0.0, 3.0], reset_state=False, stochastic=train_with_noise)
-    output3 = network.run([0., 0.], input_window=[0.0, 3.0], reset_state=False, stochastic=train_with_noise)
-    output4 = network.run([20., 20.], input_window=[0.0, 0.75], reset_state=False, stochastic=train_with_noise)
+    output1 = network.run({'bottom_up': [ 0.,  0.]}, input_window=[0.0, 3.0])
+    output2 = network.run({'bottom_up': [ 0., 20.]}, input_window=[0.0, 3.0], reset_state=False)
+    output3 = network.run({'bottom_up': [ 0.,  0.]}, input_window=[0.0, 3.0], reset_state=False)
+    output4 = network.run({'bottom_up': [20., 20.]}, input_window=[0.0, 0.75], reset_state=False)
     output = torch.concat([output1, output2, output3, output4], dim=0)
 
     network.analysis.plot_firing_rates(output, population='L23e')
@@ -79,7 +79,7 @@ def train_br_img_exp(
 
     # Initialize network
     config = config_path('br_img_params.toml')
-    general_config = config_path('br_img_general_params.toml')
+    general_config = config_path('general_params_br_img.toml')
     network = BrainNetwork.from_toml(config, general_config)
 
     network.add_area('v1', 2)
@@ -110,15 +110,16 @@ def train_br_img_exp(
 
         # Exp sequence: 3s rest -> 3s adapter -> 3s imagery -> 0.75s binocular rivalry -> 2.15s rest
         resting_state = network.run({'bottom_up': torch.zeros_like(adapter_stims),
-                                     'top_down': torch.zeros_like(imagery_input)},
+                                    'top_down': torch.zeros_like(imagery_input)},
+                                    input_window=[0.0, 3.0],
                                     stochastic=train_with_noise, adjoint=train_with_adjoint)
-        adap_activity = network.run({'bottom_up': adapter_stims, 'top_down': torch.zeros_like(imagery_input)},
+        adap_activity = network.run({'bottom_up': adapter_stims},
                                     input_window=[0.0, 3.0], reset_state=False,
                                     stochastic=train_with_noise, adjoint=train_with_adjoint)
-        img_activity = network.run({'top_down': imagery_input, 'bottom_up': torch.zeros_like(adapter_stims)},
+        img_activity = network.run({'top_down': imagery_input},
                                    input_window=[0.0, 3.0], reset_state=False,
                                    stochastic=train_with_noise, adjoint=train_with_adjoint)
-        br_activity = network.run({'bottom_up': br_stims, 'top_down': torch.zeros_like(imagery_input)},
+        br_activity = network.run({'bottom_up': br_stims},
                                   input_window=[0.0, 0.75], reset_state=False,
                                   stochastic=train_with_noise, adjoint=train_with_adjoint)
         output = torch.concat([resting_state, adap_activity, img_activity, br_activity], dim=0)
