@@ -4,7 +4,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=48:00:00
+#SBATCH --time=72:00:00
 #SBATCH --output=/data/slurm_logs/slurm_job%j_train_digits.out
 #SBATCH --error=/data/slurm_logs/slurm_job%j_train_digits.err
 
@@ -18,4 +18,4 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # Run your code
 cd /home/dasja/projects/ODE-Column
-python -m scripts.train_mnist
+python -m scripts.new.train_mnist

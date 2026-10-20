@@ -17,7 +17,7 @@ from src.utils.loss_functions import compute_fr_volatility_penalty, compute_fr_c
 def get_data(batch_size, seed):
     """"""
     transform = transforms.Compose([transforms.ToTensor(), transforms.Lambda(lambda x: x.flatten() * 10)])
-    train_dataset = torchvision.datasets.MNIST(root='../data', train=True, transform=transform, download=False)
+    train_dataset = torchvision.datasets.MNIST(root='./data', train=True, transform=transform, download=False)
     labels = train_dataset.targets
 
     generator = torch.Generator().manual_seed(seed)
@@ -46,6 +46,7 @@ def train_mnist(
         lr=1e-2,
         lambda_volatility=1e+0,
         lambda_ceiling=1e-6,
+        nr_epochs=5,
         test_freq=30):
     """
     Training a network to classify the MNIST dataset of handwritten digits (28x28)
@@ -56,23 +57,34 @@ def train_mnist(
     config = config_path('digits_params.toml')
     network = BrainNetwork.from_toml(config)
 
-    network.add_area('v1', 169)
+    nr_columns_per_rf = 2
+
+    network.add_area('v1', 144 * nr_columns_per_rf)
     network.add_area('v2', 10)
 
-    network.add_input_connection('v1', 784, receptive_field_size=4, stride=2,
-                                 grid_organization=True, std=1.0, scale=0.2)
+    network.add_input_connection('v1', 784, receptive_field_size=6, stride=2,
+                                 grid_organization=True, std=1.0, scale=0.1)
+    network.add_lateral_connection('v1', receptive_field_size=nr_columns_per_rf, stride=nr_columns_per_rf)
     network.add_feedforward_connection('v1', 'v2', std=1.0, scale=0.3)
     network.add_lateral_connection('v2')
     network.add_output_connection('v2')
+
+    # # Load in trained network
+    # network_path = models_path('mnist', f'mnist_1.pt')
+    # network = BrainNetwork.load(network_path)
 
 
     # Prepare train set and validation set
     train_loader, X_val, y_val = get_data(batch_size, seed)
 
 
-    # Loss function and optimizer
+    # Loss function, optimzer, scheduler
     criterion = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(network.parameters(), lr=lr)
+    optimizer = torch.optim.AdamW(network.parameters(), lr=1e-3, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=len(train_loader) * nr_epochs,
+        eta_min=1e-5)
 
 
     # Store training history
@@ -89,7 +101,7 @@ def train_mnist(
 
     def run_mnist_batch(images, labels):
         """"""
-        output = network.run(images, device=device)
+        output = network.run(images, adjoint=True, method='rk4', device=device)
 
         model_predictions = network.read_out(output, mode='classification')
         firing_rates = network.get_firing_rates(output, return_as_np_array=False)
@@ -105,47 +117,50 @@ def train_mnist(
 
 
     # Training loop
-    for iteration, (train_images, train_labels) in enumerate(train_loader):
-        start = time.time()
-        optimizer.zero_grad()
+    for epoch in range(nr_epochs):
+        for iteration, (train_images, train_labels) in enumerate(train_loader):
+            start = time.time()
+            optimizer.zero_grad()
 
-        loss, ce_loss, volatility, ceiling, acc = run_mnist_batch(train_images.to(device), train_labels.to(device))
+            loss, ce_loss, volatility, ceiling, acc = run_mnist_batch(train_images.to(device), train_labels.to(device))
 
-        loss.backward()
-        optimizer.step()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(network.parameters(), max_norm=1.0)
+            optimizer.step()
+            scheduler.step()
 
-        print('Train loss, accuracy | {:.5f} | {:.2f} | {:.1f}s'.format(loss.item(), acc, time.time() - start))
+            print('Train loss, accuracy | {:.5f} | {:.2f} | {:.1f}s'.format(loss.item(), acc, time.time() - start))
 
-        history['train_losses'].append(loss.item())
-        history['train_ce'].append(ce_loss.item())
-        history['train_volatility'].append(volatility.item())
-        history['train_ceiling'].append(ceiling.item())
+            history['train_losses'].append(loss.item())
+            history['train_ce'].append(ce_loss.item())
+            history['train_volatility'].append(volatility.item())
+            history['train_ceiling'].append(ceiling.item())
 
-        # Test
-        if iteration % test_freq == 0:
-            with torch.no_grad():
+            # Test
+            if iteration % test_freq == 0:
+                with torch.no_grad():
 
-                test_loss, test_ce, test_volatility, test_ceiling, test_acc = run_mnist_batch(
-                    X_val.to(device), y_val.to(device))
+                    test_loss, test_ce, test_volatility, test_ceiling, test_acc = run_mnist_batch(
+                        X_val.to(device), y_val.to(device))
 
-                print('TEST loss, accuracy | {:.5f} | {:.2f}'.format(test_loss.item(), test_acc))
+                    print('TEST loss, accuracy | {:.5f} | {:.2f}'.format(test_loss.item(), test_acc))
 
-                history['test_losses'].append(test_loss.item())
-                history['test_ce'].append(test_ce.item())
-                history['test_volatility'].append(test_volatility.item())
-                history['test_ceiling'].append(test_ceiling.item())
-                history['test_accuracy'].append(test_acc.item())
+                    history['test_losses'].append(test_loss.item())
+                    history['test_ce'].append(test_ce.item())
+                    history['test_volatility'].append(test_volatility.item())
+                    history['test_ceiling'].append(test_ceiling.item())
+                    history['test_accuracy'].append(test_acc.item())
 
-        # Store training history and trained network
-        torch.save(history, models_path('mnist', f'mnist_history_{seed}.pt'))
-        network.save(models_path('mnist', f'mnist_{seed}.pt'))
+            # Store training history and trained network
+            torch.save(history, models_path('mnist', f'mnist_history_{seed}.pt'))
+            network.save(models_path('mnist', f'mnist_{seed}.pt'))
 
 
 
 if __name__ == '__main__':
 
     seed = 1
-    device = torch.device('mps')
+    device = torch.device('cuda')
 
     train_mnist(seed, device)
 
