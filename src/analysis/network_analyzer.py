@@ -99,7 +99,10 @@ class NetworkAnalyzer:
                 weights (`conn.W`) instead of raw weights (`conn.weights`). Defaults
                 to False.
         """
-        conn_dict = self.get_weights(conn_name, get_constrained_weights)
+        conn_dict = self.get_weights(get_constrained_weights=get_constrained_weights)
+
+        if conn_name is not None:
+            conn_dict = {conn_name: conn_dict[conn_name]}
 
         for name, weights in conn_dict.items():
             fig, ax = plt.subplots()
