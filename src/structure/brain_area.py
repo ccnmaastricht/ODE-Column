@@ -98,11 +98,23 @@ class BrainArea(torch.nn.Module):
     def _compute_recurrent_synapse_counts(self):
         """
         Compute recurrent synapse count matrix using connection probabilities and population sizes.
+        Populations with size zero are excluded from the synapse counts.
         """
-        log_numerator = np.log(1 - np.array(self.connection_probabilities))
-        log_denominator = np.log(1 - 1 / np.array(np.outer(self.population_sizes, self.population_sizes)))
+        pop_sizes = np.array(self.population_sizes)
+        conn_probs = np.array(self.connection_probabilities)
+        nonzero_mask = np.outer(pop_sizes > 0, pop_sizes > 0)
 
-        recurrent_synapse_counts = log_numerator / log_denominator / self.population_sizes[:, None]
+        outer = np.outer(pop_sizes, pop_sizes)
+        log_numerator = np.log(1 - conn_probs)
+        log_denominator = np.where(
+            nonzero_mask,
+            np.log(1 - np.where(nonzero_mask, 1.0 / np.where(outer > 0, outer, 1), 0)),
+            1.0 )
+        safe_pop_sizes = np.where(pop_sizes > 0, pop_sizes, 1)
+        recurrent_synapse_counts = np.where(nonzero_mask,
+            log_numerator / log_denominator / safe_pop_sizes[:, None],
+            0.0)
+
         self.recurrent_synapse_counts = torch.tensor(recurrent_synapse_counts, dtype=torch.float32)
 
     def _build_recurrent_synaptic_strength_matrix(self):
@@ -111,7 +123,7 @@ class BrainArea(torch.nn.Module):
         population scaling factors.
         """
         inhibitory_scaling_factor = torch.tensor([
-            -num_excitatory / num_inhibitory
+            -num_excitatory / num_inhibitory if num_inhibitory > 0 else 0.0
             for num_excitatory, num_inhibitory in zip(
                 self.population_sizes[::2], self.population_sizes[1::2])
         ])

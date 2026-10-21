@@ -112,10 +112,17 @@ def initialize_self_excitation_connection(network_params):
     area_name = network_params['source'].area_name
     population_sizes = np.array(network_params['general_params']['population_size'][area_name])
 
-    # Compute area-specific synapse counts
+    # Compute area-specific synapse counts, guarding against zero-population layers
+    nonzero_mask = np.outer(population_sizes > 0, population_sizes > 0)
+    outer = np.outer(population_sizes, population_sizes)
     log_numerator = np.log(1 - init_raw)
-    log_denominator = np.log(1 - 1 / np.outer(population_sizes, population_sizes))
-    init = log_numerator / log_denominator / population_sizes[:, None]
+    log_denominator = np.where(nonzero_mask,
+        np.log(1 - np.where(nonzero_mask, 1.0 / np.where(outer > 0, outer, 1), 0)),
+        1.0)
+    safe_pop_sizes = np.where(population_sizes > 0, population_sizes, 1)
+    init = np.where(nonzero_mask,
+        log_numerator / log_denominator / safe_pop_sizes[:, None],
+        0.0)
 
     # Multiply with synaptic strength
     baseline_synaptic_strength = network_params['general_params']['synaptic_strength']['baseline']
