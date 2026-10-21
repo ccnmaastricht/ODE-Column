@@ -620,7 +620,7 @@ class BrainNetwork(torch.nn.Module):
             return_as_np_array=return_as_np_array,
             return_as_dict=return_as_dict)
 
-    def read_out(self, raw_output, mode, sum_per_col=True):
+    def read_out(self, raw_output, mode, sum_per_col=True, classification_window=None):
         """
         Compute task output readouts from raw simulation state trajectories using continuous or classification
         time averaging.
@@ -628,7 +628,10 @@ class BrainNetwork(torch.nn.Module):
         Args:
             raw_output (torch.Tensor): Simulation output state trajectory tensor.
             mode (str): Evaluation mode (`'trajectory'` or `'classification'`).
-            sum_per_col (bool, optional): Whether to sum rates across all 8 column populations. Defaults to True.
+            sum_per_col (bool, optional): Whether to sum rates across all column populations. Defaults to True.
+            classification_window (tuple[float, float] | None, optional): Start and end time in seconds of the
+                averaging window, e.g. `(0.5, 1.0)`. Only used when `mode='classification'`. If None, falls back
+                to `classification_window` under `[time_params]` in the TOML configuration file. Defaults to None.
 
         Returns:
             torch.Tensor | dict[str, torch.Tensor]: Processed readout tensor or dictionary of readout tensors.
@@ -636,7 +639,8 @@ class BrainNetwork(torch.nn.Module):
         return self.readout.read_out(
             raw_output=raw_output,
             mode=mode,
-            sum_per_col=sum_per_col)
+            sum_per_col=sum_per_col,
+            classification_window=classification_window)
 
     def save(self, path):
         """
