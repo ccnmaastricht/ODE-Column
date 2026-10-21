@@ -34,8 +34,15 @@ class NetworkSimulator:
         self.sim_time       = time_params['sim_time']
         self.input_window   = time_params['input_window']
 
-        self.previous_network_state = None
+        solver_params       = network.params['model'].get('solver', {})
+        self.ode_method     = solver_params.get('ode_method', 'dopri5')
+        self.rtol           = float(solver_params.get('rtol', 1e-7))
+        self.atol           = float(solver_params.get('atol', 1e-9))
+        self.sde_method     = solver_params.get('sde_method', 'srk')
+        self.sde_dt         = float(solver_params.get('sde_dt', 1e-3))
+        self.noise_sigma    = float(solver_params.get('noise_sigma', 3.0))
 
+        self.previous_network_state = None
         self.network_is_ready = False
 
     def _infer_batch_size(self, ext_input):
@@ -228,7 +235,7 @@ class NetworkSimulator:
         with torch.no_grad():
             self.network.constrain_weights()
 
-            sim_wrapper = NetworkOdeWrapper(self.network, None, None)
+            sim_wrapper = NetworkOdeWrapper(self.network, None, None, 0.0)
             resting_state = odeint(sim_wrapper, self.initial_state, self.time_vec, method='euler')
 
             membrane_potential_resting_state = resting_state[-1, :, :self.network.num_populations]
@@ -285,22 +292,46 @@ class NetworkSimulator:
             initial_state = self.previous_network_state
 
         # Initialize the wrapper and set the external input
-        sim_wrapper = NetworkOdeWrapper(self.network, ext_input, input_window)
+        noise_amplitude = self.noise_sigma if stochastic else 0.0
+        sim_wrapper = NetworkOdeWrapper(self.network, ext_input, input_window, noise_amplitude)
 
         # Run the network simulation with the specified ODE variant
         if not adjoint and not stochastic:
-            network_output = odeint(sim_wrapper, initial_state, self.time_vec)
-
+            network_output = odeint(
+                sim_wrapper,
+                initial_state,
+                self.time_vec,
+                method=self.ode_method,
+                rtol=self.rtol,
+                atol=self.atol,
+            )
         elif adjoint and not stochastic:
-            network_output = odeint_adjoint(sim_wrapper, initial_state, self.time_vec)
-
+            network_output = odeint_adjoint(
+                sim_wrapper,
+                initial_state,
+                self.time_vec,
+                method=self.ode_method,
+                rtol=self.rtol,
+                atol=self.atol,
+            )
         elif not adjoint and stochastic:
-            network_output = sdeint(sim_wrapper, initial_state, self.time_vec,
-                            names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
-
+            network_output = sdeint(
+                sim_wrapper,
+                initial_state,
+                self.time_vec,
+                dt=self.sde_dt,
+                method=self.sde_method,
+                names={'drift': 'forward', 'diffusion': 'diffusion'},
+            )
         elif adjoint and stochastic:
-            network_output = sdeint_adjoint(sim_wrapper, initial_state, self.time_vec,
-                                    names={'drift': 'forward', 'diffusion': 'diffusion'}, method='srk')
+            network_output = sdeint_adjoint(
+                sim_wrapper,
+                initial_state,
+                self.time_vec,
+                dt=self.sde_dt,
+                method=self.sde_method,
+                names={'drift': 'forward', 'diffusion': 'diffusion'},
+            )
 
         self._store_last_state(network_output)
 

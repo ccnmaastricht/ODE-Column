@@ -163,7 +163,7 @@ class NetworkDynamics:
         delta_state = torch.concat((delta_membrane_potential, delta_adaptation), dim=1)
         return delta_state
 
-    def diffusion(self, t, state):
+    def diffusion(self, t, state, noise_amplitude):
         """
         Compute state-dependent diffusion matrix for stochastic differential equations
         (SDEs), applying stochastic Gaussian noise exclusively to membrane potential
@@ -173,6 +173,8 @@ class NetworkDynamics:
             t (torch.Tensor): Current time step scalar.
             state (torch.Tensor): System state tensor of shape
                 `(batch_size, 2 * total_populations)`.
+            noise_amplitude (float): Noise amplitude (standard deviation 𝜎)
+                applied to the membrane potential dynamics.
 
         Returns:
             torch.Tensor: Noise amplitude tensor of shape
@@ -181,5 +183,5 @@ class NetworkDynamics:
         """
         g = torch.zeros_like(state)
         n = self.network.num_populations
-        g[:, :n] = 3.0
+        g[:, :n] = noise_amplitude
         return g
