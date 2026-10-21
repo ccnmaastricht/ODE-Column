@@ -59,7 +59,7 @@ def run_bistable_perception(network_path):
 
 
 def compute_wsi_and_divt(firing_rates, dt, winner_idx, divt_threshold=0.1, divt_window=0.02):
-    divt_window = int(divt_window / dt)  # convert from seconds to timesteps
+    divt_window = int(round(divt_window / dt))  # convert from seconds to timesteps
 
     wsi_results = torch.zeros((firing_rates.shape[0], firing_rates.shape[2]))
     divt_results = torch.zeros((firing_rates.shape[0], firing_rates.shape[2]))

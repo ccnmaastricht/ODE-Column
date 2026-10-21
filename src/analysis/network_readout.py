@@ -162,7 +162,7 @@ class NetworkReadout:
                                                        f"exceeds total simulation time ({sim_time}s)")
 
         # Get time steps of classification window and slice the firing_rates
-        start, end = int(start / dt), int(end / dt)
+        start, end = int(round(start / dt)), int(round(end / dt))
         fr_window_slice = fr_full_sim_time[start:end, :, :]
 
         return torch.mean(fr_window_slice, dim=0)
