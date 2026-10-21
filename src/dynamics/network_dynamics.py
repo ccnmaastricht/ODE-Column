@@ -23,25 +23,35 @@ class NetworkDynamics:
     def compute_firing_rate(self, x):
         r"""
         Compute neural population firing rates from net effective drive by applying
-        a smooth sigmoidal activation function:
-        \( r = \frac{g \cdot x - \theta}{1 - \exp(-\beta (g \cdot x - \theta))} \).
-
+        a smooth sigmoidal / threshold-linear activation function:
+        \[r = \frac{g \cdot x - \theta}{1 - \exp(-d (g \cdot x - \theta))}\]
+        where \( x = V - a \) is the net effective drive (membrane potential minus
+        rate adaptation), \( g \) is the gain, \( \theta \) is the threshold, and
+        \( d \) is the noise factor (sometimes denoted \( \beta \)).
+        Numerical Stability:
+            The analytic limit as \( g \cdot x - \theta \to 0 \) is \( 1/d \approx 112.36\text{ Hz} \).
+            To avoid catastrophic cancellation and division-by-zero, the denominator
+            is evaluated using `torch.expm1(-z)`. For small arguments (\( |z| < 10^{-3} \)
+            where \( z = d(g \cdot x - \theta) \)), a first-order Taylor expansion
+            \( r \approx \frac{1 + 0.5 z}{d} \) is used to guarantee continuity and stable gradients.
         Args:
             x (torch.Tensor): Net effective input (membrane potential minus adaptation),
                 shape `(batch_size, total_populations)`.
-
         Returns:
             torch.Tensor: Population firing rates in Hz,
                 shape `(batch_size, total_populations)`.
         """
         x_nom = self.network.gain * x - self.network.threshold
-        exp_input = -self.network.noise_factor * x_nom
-        exp_input = torch.clamp(exp_input, -80.0, 80.0)
-        exp_term = torch.exp(exp_input)
+        d = self.network.noise_factor
+        z = torch.clamp(d * x_nom, -80.0, 80.0)
 
-        denom = 1 - exp_term + 1e-6
-        x_activ = x_nom / denom
-        return x_activ
+        small = z.abs() < 1e-3
+        z_safe = torch.where(small, torch.ones_like(z), z)
+
+        rate = x_nom / (-torch.expm1(-z_safe))  # Exact formula: x / (1 - exp(-d*x))
+        rate_taylor = (1.0 + 0.5 * z) / d  # Taylor limit at z -> 0: (1/d) * (1 + z/2)
+
+        return torch.where(small, rate_taylor, rate)
 
     def _set_activities(self, t, fr_per_area, ext_input, input_windows):
         """
