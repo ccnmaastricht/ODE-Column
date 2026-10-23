@@ -10,6 +10,8 @@ from src.utils.paths import config_path, data_path, models_path
 from src.utils.loss_functions import huber_loss_wta, compute_fr_ceiling_penalty
 from src.utils.set_seed import set_seed
 
+from test_pmd_wta import plot_firing_rates_per_layer
+
 
 
 def make_input_pairs():
@@ -52,7 +54,6 @@ def make_ds_ww(ds_file, time_steps):
 
         for i, (muA, muB) in enumerate(input_pairs):
             R = dm.run_sim(muA, muB)
-            R = R[:, ::10]
             R = R[:, :time_steps]
 
             ds['states'][i] = torch.tensor(R).transpose(0, 1)
@@ -182,6 +183,8 @@ def train_wta(
 
     # Build network
     network = build_wta_network()
+
+    plot_firing_rates_per_layer(network)
 
     # Prepare train and test data, and optimizer
     train_loader, test_states, test_stims = get_data(batch_size, network.params['model']['time_params'], fn_target_data, seed)

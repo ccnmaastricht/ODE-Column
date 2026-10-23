@@ -1,9 +1,10 @@
-adaptation_strength = [1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+adaptation_strength = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 background_drive = 8.0
 capacitance = 250e-6
 
 [time_constants]
-synapse = 0.0005
+synapse = [[0.002, 0.01, 0.002, 0.01, 0.002, 0.01, 0.002, 0.01,
+			0.002, 0.01, 0.002, 0.01, 0.002, 0.01, 0.002, 0.01]]
 membrane = 0.02
 adaptation = 10.0
 

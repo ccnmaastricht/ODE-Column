@@ -1,7 +1,7 @@
 [time_params]
-dt           			= 1e-4
-sim_time        		= 0.15
-input_window    		= [0.05, 0.1]
+dt           			= 1e-3
+sim_time        		= 4.0
+input_window    		= [0.5, 3.5]
 
 [connection_masks]
 input =			 	[0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0]

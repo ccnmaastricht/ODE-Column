@@ -223,7 +223,7 @@ class NetworkSimulator:
         self.network.finalize()
 
         self.time_vec = torch.arange(0, self.sim_time, self.dt, device=device)
-        self.initial_state = torch.zeros(1, self.network.num_populations * 2, device=device)
+        self.initial_state = torch.zeros(1, self.network.num_populations * 3, device=device)
 
         self.network_is_ready = True
 
@@ -238,8 +238,10 @@ class NetworkSimulator:
             sim_wrapper = NetworkOdeWrapper(self.network, None, None, 0.0)
             resting_state = odeint(sim_wrapper, self.initial_state, self.time_vec, method='euler')
 
-            membrane_potential_resting_state = resting_state[-1, :, :self.network.num_populations]
-            self.initial_state[:, :self.network.num_populations] = membrane_potential_resting_state
+            blep = resting_state[:, 0, :]
+
+            resting_state = resting_state[-1, :, :self.network.num_populations * 2]
+            self.initial_state[:, :self.network.num_populations * 2] = resting_state
 
     def _store_last_state(self, network_output):
         """

@@ -111,15 +111,15 @@ class DM:
     def run_sim(self, muA, muB):
         # Pre stimulus
         self.set_mu(0., 0, )
-        R = self.simulate(5.)
+        R = self.simulate(0.5)
 
         # Stimulus phase
         self.set_mu(muA, muB)
-        R = np.append(R, self.simulate(5.), axis=1)
+        R = np.append(R, self.simulate(3.0), axis=1)
 
         # Post stimulus
         self.set_mu(0., 0, )
-        R = np.append(R, self.simulate(5.), axis=1)
+        R = np.append(R, self.simulate(0.5), axis=1)
 
         self.reset()
         return R

@@ -89,78 +89,112 @@ class NetworkDynamics:
 
     def _compute_currents(self, t, firing_rates, ext_input, input_windows):
         """
-        Compute total incoming synaptic currents for all network areas at time t by
-        multiplying source activities by constrained connection weight matrices and
-        scaling by synaptic time constants.
+        Compute incoming synaptic drive for all network populations.
 
         Args:
-            t (torch.Tensor): Current simulation time scalar, shape `()` or `(1,)`.
-            firing_rates (torch.Tensor): Firing rate tensor across all network
-                populations, shape `(batch_size, total_populations)`.
-            ext_input (dict[str, torch.Tensor] | None): External drive input tensors
-                mapped by name.
-            input_windows (dict[str, tuple[float, float]]): Time intervals specifying
-                active windows for external inputs.
+            t: Current simulation time.
+            firing_rates: Tensor of shape (batch_size, total_populations).
+            ext_input: External drive inputs mapped by name.
+            input_windows: Active time windows for external inputs.
 
         Returns:
-            torch.Tensor: Concatenated synaptic currents for all populations ordered
-                by area, shape `(batch_size, total_populations)`.
+            Tensor of shape (batch_size, total_populations).
         """
-        fr_per_area = {area_id: firing_rates[:, area_slice]
-                       for area_id, area_slice in self.network.area_slices.items()}
+        fr_per_area = {
+            area_id: firing_rates[:, area_slice]
+            for area_id, area_slice in self.network.area_slices.items()
+        }
 
-        activities = self._set_activities(t, fr_per_area, ext_input, input_windows)
+        activities = self._set_activities(
+            t, fr_per_area, ext_input, input_windows
+        )
 
-        currents = {area_id: torch.zeros(firing_rates.shape[0], area.num_populations, device=firing_rates.device)
-                    for area_id, area in self.network.areas.items()}
+        drives = {
+            area_id: torch.zeros(
+                firing_rates.shape[0],
+                area.num_populations,
+                device=firing_rates.device,
+                dtype=firing_rates.dtype,
+            )
+            for area_id, area in self.network.areas.items()
+        }
 
         for connection in self.network.connections.values():
-            if connection.source_id not in activities.keys() or connection.conn_type == 'output':
+            if (
+                    connection.source_id not in activities
+                    or connection.conn_type == "output"
+            ):
                 continue
-            source_fr = activities[connection.source_id]
-            current = source_fr @ connection.W.T
-            currents[connection.target_id] += current * self.network.synapse_time_constant
 
-        total_current = torch.cat([currents[area_id] for area_id in self.network.area_order], dim=1)
-        return total_current
+            source_fr = activities[connection.source_id]
+            drive = source_fr @ connection.W.T
+
+            drives[connection.target_id] += drive
+
+        total_drive = torch.cat(
+            [drives[area_id] for area_id in self.network.area_order],
+            dim=1,
+        )
+
+        return total_drive
 
     def forward(self, t, state, ext_input, input_windows):
-        r"""
-        Compute system state derivatives (d/dt) for ODE/SDE numerical integration by
-        evaluating the differential equations for membrane potential \( V \)
-        (\(\tau_m \frac{dV}{dt} = -V + I_{syn} \cdot R\)) and spike-frequency
-        adaptation \( a \) (\(\tau_a \frac{da}{dt} = -a + w_a \cdot r\)).
-
-        Args:
-            t (torch.Tensor): Current time step scalar, shape `()` or `(1,)`.
-            state (torch.Tensor): Combined system state containing membrane potentials
-                and adaptation, shape `(batch_size, 2 * total_populations)` where
-                `state[:, :N]` is membrane potential and `state[:, N:]` is adaptation.
-            ext_input (dict[str, torch.Tensor] | None): External drive inputs mapped
-                by name.
-            input_windows (dict[str, tuple[float, float]]): Time window boundaries
-                for external inputs.
-
-        Returns:
-            torch.Tensor: Concatenated state derivatives `d(state)/dt`,
-                shape `(batch_size, 2 * total_populations)`.
         """
-        # Unpack the state (membrane, adaptation) and compute firing rate
-        mem_adap_split = self.network.num_populations
-        membrane_potential, adaptation = state[:, :mem_adap_split], state[:, mem_adap_split:]
+        Compute derivatives of synaptic current, membrane potential, adaptation.
 
-        firing_rate = self.compute_firing_rate(membrane_potential - adaptation)
+        State shape:
+            (batch_size, 3 * total_populations)
 
-        # Compute current
-        total_current = self._compute_currents(t, firing_rate, ext_input, input_windows)
+        State layout:
+            state[:, :N]       -> synaptic current
+            state[:, N:2*N]    -> membrane potential
+            state[:, 2*N:3*N]  -> adaptation
+        """
+        N = self.network.num_populations
 
-        # Compute derivative membrane potential and adaptation
-        delta_membrane_potential = (-membrane_potential +
-                                    total_current * self.network.resistance) / self.network.membrane_time_constant
-        delta_adaptation = (-adaptation + self.network.adaptation_strength_full *
-                            firing_rate) / self.network.adapt_time_constant
+        # Unpack the state
+        synaptic_current = state[:, :N]
+        membrane_potential = state[:, N:2 * N]
+        adaptation = state[:, 2 * N:3 * N]
 
-        delta_state = torch.concat((delta_membrane_potential, delta_adaptation), dim=1)
+        # Compute firing rates from membrane potential and adaptation
+        firing_rate = self.compute_firing_rate(
+            membrane_potential - adaptation
+        )
+
+        # Compute incoming synaptic drive
+        total_drive = self._compute_currents(
+            t, firing_rate, ext_input, input_windows
+        )
+
+        # Synaptic current dynamics
+        delta_synaptic_current = (
+                -synaptic_current / self.network.synapse_time_constant
+                + total_drive
+        )
+
+        # Membrane potential dynamics
+        delta_membrane_potential = (
+                                           -membrane_potential
+                                           + synaptic_current * self.network.resistance
+                                   ) / self.network.membrane_time_constant
+
+        # Adaptation dynamics
+        delta_adaptation = (
+                                   -adaptation
+                                   + self.network.adaptation_strength_full * firing_rate
+                           ) / self.network.adapt_time_constant
+
+
+        # Concatenate derivatives in the same order as the state
+        delta_state = torch.cat(
+            (
+                delta_synaptic_current,
+                delta_membrane_potential,
+                delta_adaptation,
+            ),
+            dim=1,
+        )
         return delta_state
 
     def diffusion(self, t, state, noise_amplitude):
