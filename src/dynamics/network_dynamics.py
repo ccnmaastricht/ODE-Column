@@ -217,5 +217,5 @@ class NetworkDynamics:
         """
         g = torch.zeros_like(state)
         n = self.network.num_populations
-        g[:, :n] = noise_amplitude
+        g[:, n:n*2] = noise_amplitude  # membrane potential is the second state variable
         return g

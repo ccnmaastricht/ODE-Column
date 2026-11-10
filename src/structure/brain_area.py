@@ -137,10 +137,19 @@ class BrainArea(torch.nn.Module):
     def _build_all_weights(self):
         """
         Compute recurrent and background weight matrices and register them as PyTorch module buffers.
+        Applies a scaling factor of (0.5 ms / 100 ms) to all connections targeting L2/3E populations
+        to compensate for their slower synaptic time constant (tau = 100 ms).
         """
         recurrent_weights = self.recurrent_synapse_counts * self.recurrent_synaptic_strength
-        self.register_buffer("recurrent_weights", recurrent_weights)
         background_weights = self.background_synapse_counts * self.baseline_synaptic_strength
+
+        # Scale down connections targeting L2/3E (index 0 for each 8-population column)
+        # to match realistic PSP under tau = 100 ms (tau_0 = 0.5 ms)
+        l23e_scale = 0.5 / 100.0
+        recurrent_weights[0::8, :] *= l23e_scale
+        background_weights[0::8] *= l23e_scale
+
+        self.register_buffer("recurrent_weights", recurrent_weights)
         self.register_buffer("background_weights", background_weights)
 
     def _make_in_ex_masks(self, num_columns):

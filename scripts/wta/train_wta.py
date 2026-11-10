@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import os
+import matplotlib.pyplot as plt
 
 from torch.utils.data import TensorDataset, DataLoader
 
@@ -128,6 +129,7 @@ def initialize_self_excitation_connection(network_params):
     # Multiply with synaptic strength
     baseline_synaptic_strength = network_params['general_params']['synaptic_strength']['baseline']
     init = torch.tensor(init * baseline_synaptic_strength, dtype=torch.float32)
+    init *= 0.5 / 100.0 # L2/3 scale down
 
     # Weight initialization
     size_area = network_params['source'].num_columns
@@ -184,7 +186,7 @@ def train_wta(
     # Build network
     network = build_wta_network()
 
-    plot_firing_rates_per_layer(network)
+    # plot_firing_rates_per_layer(network)
 
     # Prepare train and test data, and optimizer
     train_loader, test_states, test_stims = get_data(batch_size, network.params['model']['time_params'], fn_target_data, seed)
@@ -207,10 +209,20 @@ def train_wta(
 
             output = network.run(stim_batch, adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
 
-            pred_states = network.read_out(output, mode='trajectory')
+            # pred_states = network.read_out(output, mode='trajectory')
+            membrane_potential = output[:, :, 16:32]
+            adaptation = output[:, :, 32:]
+            firing_rates = network.dynamics.compute_firing_rate(membrane_potential - adaptation)
+            pred_states = firing_rates[:, :, [0, 8]]
+
+            # for i in range(10):
+            #     plt.plot(pred_states[:, i, 0].detach().numpy())
+            #     plt.plot(pred_states[:, i, 1].detach().numpy())
+            #     plt.show()
+
             huber_loss = huber_loss_wta(pred_states, true_states)
 
-            firing_rates = network.get_firing_rates(output, return_as_np_array=False)
+            # firing_rates = network.get_firing_rates(output, return_as_np_array=False)
             fr_reg = compute_fr_ceiling_penalty(firing_rates) * lambda_fr_reg
             loss = huber_loss + fr_reg
 
@@ -226,10 +238,15 @@ def train_wta(
 
                     output = network.run(test_stims, adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
 
-                    pred_states = network.read_out(output, mode='trajectory')
+                    # pred_states = network.read_out(output, mode='trajectory')
+                    membrane_potential = output[:, :, 16:32]
+                    adaptation = output[:, :, 32:]
+                    firing_rates = network.dynamics.compute_firing_rate(membrane_potential - adaptation)
+                    pred_states = firing_rates[:, :, [0, 8]]
+
                     test_huber_loss = huber_loss_wta(pred_states, test_states)
 
-                    firing_rates = network.get_firing_rates(output, return_as_np_array=False)
+                    # firing_rates = network.get_firing_rates(output, return_as_np_array=False)
                     fr_reg_test = compute_fr_ceiling_penalty(firing_rates) * lambda_fr_reg
                     test_loss = test_huber_loss + fr_reg_test
 
