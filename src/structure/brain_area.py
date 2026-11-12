@@ -145,7 +145,7 @@ class BrainArea(torch.nn.Module):
 
         # Scale down connections targeting L2/3E (index 0 for each 8-population column)
         # to match realistic PSP under tau = 100 ms (tau_0 = 0.5 ms)
-        l23e_scale = 0.5 / 100.0
+        l23e_scale = 0.5 / 1000.0
         recurrent_weights[0::8, :] *= l23e_scale
         background_weights[0::8] *= l23e_scale
 

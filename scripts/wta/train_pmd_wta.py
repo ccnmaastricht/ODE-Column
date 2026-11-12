@@ -23,7 +23,7 @@ def get_data(batch_size, network_time_params, fn, seed):
     states, stims = make_ds_ww(fn, time_steps)
 
     # Scale down Wang-Wong firing rates
-    states = states / 4.
+    states = states / 20.
 
     train_states, train_stims, test_states, test_stims = split_dataset(states, stims, seed)
 
@@ -36,7 +36,8 @@ def train_wta_in_pmd(
         seed,
         fn_target_data,
         batch_size=32,
-        lr=1e+0,
+        lr_lateral=1e+2,
+        lr_self=1e-3,
         lambda_fr_reg=1e-6,
         num_epochs=3,
         test_freq=20,
@@ -64,13 +65,12 @@ def train_wta_in_pmd(
                                   initializer=initialize_self_excitation_connection)
 
 
-    plot_firing_rates_per_layer(network)
-
     # Prepare train and test data, and optimizer
     train_loader, test_states, test_stims = get_data(batch_size, network.params['model']['time_params'],
                                                      fn_target_data, seed)
     test_states = test_states.to(device)
-    optimizer = torch.optim.RMSprop(network.parameters(), lr=lr)
+    optimizer = torch.optim.RMSprop([{'params': network.connections[f'lateral_pmd_pmd'].weights, 'lr': lr_lateral},
+                                     {'params': network.connections[f'self_excitation_pmd_pmd'].weights, 'lr': lr_self}])
 
 
     # Store losses
@@ -83,14 +83,16 @@ def train_wta_in_pmd(
     def run_wta_pmd_batch(stim_batch, true_states, plot=False):
         output = network.run(stim_batch, adjoint=train_with_adjoint, stochastic=train_with_noise, device=device)
 
-        # network.analysis.plot_firing_rates(output)
+        # firing_rates = network.get_firing_rates(output)
+        # pred_states = network.read_out(output, mode='trajectory')
 
-        firing_rates = network.get_firing_rates(output)
+        membrane_potential = output[:, :, 16:32]
+        adaptation = output[:, :, 32:]
+        firing_rates = network.dynamics.compute_firing_rate(membrane_potential - adaptation)
+        pred_states = firing_rates[:, :, [0, 8]]
 
-        pred_states = network.read_out(output, mode='trajectory')
         huber_loss = huber_loss_wta(pred_states, true_states)
 
-        firing_rates = network.get_firing_rates(output, return_as_np_array=False)
         fr_reg = compute_fr_ceiling_penalty(firing_rates) * lambda_fr_reg
         loss = huber_loss + fr_reg
 
@@ -122,15 +124,13 @@ def train_wta_in_pmd(
 
                     test_loss, fr_reg_test, firing_rates = run_wta_pmd_batch(test_stims, test_states, plot=True)
 
-                    # for i in range(10):
+                    # for i in range(5):
                     #     print(test_stims[i])
                     #
                     #     plt.plot(firing_rates[:, i, 0], color='blue')
-                    #     plt.plot(firing_rates[:, i, 6], color='orange')
+                    #     plt.plot(firing_rates[:, i, 8], color='orange')
                     #     plt.plot(test_states[i, :, 0], linestyle='--', color='blue')
                     #     plt.plot(test_states[i, :, 1], linestyle='--', color='orange')
-                    #     plt.plot(firing_rates[:, i, 2], color='royalblue')
-                    #     plt.plot(firing_rates[:, i, 8], color='red')
                     #     plt.show()
                     #
                     # network.analysis.visualize_weights(conn_name='lateral_pmd_pmd')
@@ -151,16 +151,13 @@ def train_wta_in_pmd(
     torch.save(history, models_path('wta_pmd', f'wta_pmd_history_{seed}.pt'))
     network.save(models_path('wta_pmd', f'wta_pmd_{seed}.pt'))
 
-    network.analysis.visualize_weights(conn_name='lateral_pmd_pmd')
-    network.analysis.visualize_weights(conn_name='self_excitation_pmd_pmd')
-    plot_firing_rates_per_layer(network)
-
 
 
 
 if __name__ == '__main__':
 
-    seed = 1
     fn_target_data = data_path('ds_wta.pt')
 
-    train_wta_in_pmd(seed, fn_target_data, train_with_adjoint=False, train_with_noise=True)
+    for seed in range(1, 11):
+        print('Seed:', seed)
+        train_wta_in_pmd(seed, fn_target_data, train_with_adjoint=False, train_with_noise=False)

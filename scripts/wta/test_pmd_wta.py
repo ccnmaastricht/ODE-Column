@@ -22,12 +22,15 @@ def plot_firing_rates_per_layer(network):
         [[40., 25.], [40., 26.], [40., 27.], [40., 28.], [40., 29.],
          [40., 30.], [40., 31.], [40., 32.], [40., 33.], [40., 34.],
          [40., 35.]])
+    inputs = inputs - 10.
 
     resting_state = network.run(torch.zeros_like(inputs))
     output = network.run(inputs, reset_state=False)
-    firing_rates = network.get_firing_rates(output)
 
-    # network.analysis.plot_firing_rates(output)
+    membrane_potential = output[:, :, 16:32]
+    adaptation = output[:, :, 32:]
+    firing_rates = network.dynamics.compute_firing_rate(membrane_potential - adaptation)
+    firing_rates = firing_rates.detach().numpy()
 
     # Plot
     colors = plt.get_cmap('rainbow', len(inputs))

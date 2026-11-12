@@ -20,7 +20,7 @@ def make_input_pairs():
     Creates a grid of input pairs (A, B) such that each input rate is always between
     15.0 and 45.0 and the two have a difference of at least 5.0 and at most 10.0.
     """
-    mu_values = np.linspace(15, 45, 100)
+    mu_values = np.linspace(25, 40, 100)
 
     input_pairs = []
 
@@ -95,7 +95,7 @@ def get_data(batch_size, network_time_params, fn, seed):
     states, stims = make_ds_ww(fn, time_steps)
 
     # Scale down Wang-Wong firing rates
-    states = states / 30.
+    states = states / 45.
 
     train_states, train_stims, test_states, test_stims = split_dataset(states, stims, seed)
 
@@ -129,7 +129,7 @@ def initialize_self_excitation_connection(network_params):
     # Multiply with synaptic strength
     baseline_synaptic_strength = network_params['general_params']['synaptic_strength']['baseline']
     init = torch.tensor(init * baseline_synaptic_strength, dtype=torch.float32)
-    init *= 0.5 / 100.0 # L2/3 scale down
+    init *= 0.5 / 1000.0 # L2/3 scale down
 
     # Weight initialization
     size_area = network_params['source'].num_columns
@@ -171,7 +171,8 @@ def train_wta(
         fn_target_data,
         seed,
         batch_size=32,
-        lr=1e+1,
+        lr_lateral=1e+2,
+        lr_self=1e-2,
         lambda_fr_reg=1e-6,
         num_epochs=3,
         test_freq=10,
@@ -186,12 +187,11 @@ def train_wta(
     # Build network
     network = build_wta_network()
 
-    # plot_firing_rates_per_layer(network)
-
     # Prepare train and test data, and optimizer
     train_loader, test_states, test_stims = get_data(batch_size, network.params['model']['time_params'], fn_target_data, seed)
     test_states = test_states.to(device)
-    optimizer = torch.optim.RMSprop(network.parameters(), lr=lr)
+    optimizer = torch.optim.RMSprop([{'params': network.connections[f'lateral_mt_mt'].weights, 'lr': lr_lateral},
+                                     {'params': network.connections[f'self_excitation_mt_mt'].weights, 'lr': lr_self}])
 
     # Store losses
     train_losses = []
@@ -218,6 +218,8 @@ def train_wta(
             # for i in range(10):
             #     plt.plot(pred_states[:, i, 0].detach().numpy())
             #     plt.plot(pred_states[:, i, 1].detach().numpy())
+            #     plt.plot(true_states[i, :, 0].detach().numpy(), linestyle='--')
+            #     plt.plot(true_states[i, :, 1].detach().numpy(), linestyle='--')
             #     plt.show()
 
             huber_loss = huber_loss_wta(pred_states, true_states)
@@ -250,6 +252,16 @@ def train_wta(
                     fr_reg_test = compute_fr_ceiling_penalty(firing_rates) * lambda_fr_reg
                     test_loss = test_huber_loss + fr_reg_test
 
+                    # for i in range(5):
+                    #     plt.plot(pred_states[:, i, 0].detach().numpy())
+                    #     plt.plot(pred_states[:, i, 1].detach().numpy())
+                    #     plt.plot(test_states[i, :, 0].detach().numpy(), linestyle='--')
+                    #     plt.plot(test_states[i, :, 1].detach().numpy(), linestyle='--')
+                    #     plt.show()
+                    #
+                    # network.analysis.visualize_weights(conn_name='lateral_mt_mt')
+                    # network.analysis.visualize_weights(conn_name='self_excitation_mt_mt')
+
                     print('Epoch {:02d} | Iter {:02d} | Train Loss {:.4f} | Test Loss {:.4f}'.format(
                         epoch, itr // test_freq, loss.item(), test_loss.item()))
 
@@ -270,10 +282,10 @@ def train_wta(
 if __name__ == '__main__':
 
     fn_target_data      = data_path('ds_wta.pt')
-    num_epochs          = 3
+    num_epochs          = 1
     test_freq           = 10
     train_with_adjoint  = True
-    train_with_noise    = True
+    train_with_noise    = False
     device              = torch.device('cpu')
 
     for seed in range(1, 11):
